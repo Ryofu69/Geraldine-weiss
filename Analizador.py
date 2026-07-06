@@ -1,3 +1,4 @@
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -73,9 +74,9 @@ def screener_weiss_definitivo(ticker_symbol):
     conteo_cerrado = conteo_por_año[conteo_por_año.index < año_actual]
     
     if not conteo_cerrado.empty:
-        pagos_por_año = int(conteo_cerrado.mode().iloc[0])
+        pagos_por_año = int(conteo_cerrado.max())
     else:
-        pagos_por_año = 4 
+        pagos_por_año = int(conteo_por_año.max()) if not conteo_por_año.empty else 4 
         
     if pagos_por_año not in [1, 2, 4, 12]:
         if pagos_por_año == 3: pagos_por_año = 4
@@ -191,24 +192,23 @@ def screener_weiss_definitivo(ticker_symbol):
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
 
-    # --- GRÁFICO INTERACTIVO (Motor de escaleras a prueba de balas) ---
+    # --- GRÁFICO INTERACTIVO ARREGLADO (Soluciona el problema de Europa/WKL) ---
     st.markdown("### 📈 Evolución Histórica de Valoración (5 Años)")
     
     df_grafico = historial_5y[['Close']].copy()
     
     if not df_grafico.empty:
-        # MOTOR DE DIBUJO: Suma estricta de pagos (Ignora ventanas de 252 días para evitar picos)
+        # SOLUCIÓN EUROPEA: Sumamos los últimos pagos rodantes para absorber los dividendos "interim" y "finales" desiguales
         divs_rodantes = dividendos.rolling(window=pagos_por_año).sum()
+        df_grafico['Div_Grafico'] = divs_rodantes
         
-        # Mapeo inteligente: Alineamos las fechas de pago con los días de bolsa del gráfico
-        # Ffill asegura que la línea se mantenga totalmente plana hasta el siguiente pago real
-        df_grafico['Div_Grafico'] = divs_rodantes.reindex(df_grafico.index, method='ffill').bfill()
+        # Rellenamos para crear las líneas planas de la escalera
+        df_grafico['Div_Grafico'] = df_grafico['Div_Grafico'].ffill().bfill()
         
-        # Conexión final: El último tramo se ajusta al forward para cuadrar el gráfico con tu texto
+        # Obligamos a que el último escalón conecte a la perfección con tu texto superior
         if not dividendos.empty:
             df_grafico.loc[df_grafico.index >= dividendos.index[-1], 'Div_Grafico'] = forward_dividend
             
-        # Cálculos del gráfico usando la escalera plana perfecta
         df_grafico['Precio_Compra'] = (df_grafico['Div_Grafico'] / yield_infravalorado) * 100
         df_grafico['Precio_Justo'] = (df_grafico['Div_Grafico'] / yield_medio) * 100
         df_grafico['Precio_Venta'] = (df_grafico['Div_Grafico'] / yield_sobrevalorado) * 100
