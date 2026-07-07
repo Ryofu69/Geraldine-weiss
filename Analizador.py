@@ -1,4 +1,3 @@
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -171,7 +170,6 @@ def screener_weiss_definitivo(ticker_symbol):
     # --- NUEVO: CÁLCULO DE VARIACIÓN DE ACCIONES EN CIRCULACIÓN (RECOMPRAS) ---
     variacion_acciones = None
     try:
-        # Intento 1: Historial completo de YFinance (Más preciso)
         shares_hist = ticker.get_shares_full(start=fecha_corte_5y.strftime('%Y-%m-%d'), end=None)
         if shares_hist is not None and len(shares_hist) > 1:
             acc_ini = shares_hist.iloc[0]
@@ -183,15 +181,14 @@ def screener_weiss_definitivo(ticker_symbol):
         
     if variacion_acciones is None:
         try:
-            # Intento 2: Sacarlo de las cuentas de resultados anuales
             inc_stmt = ticker.income_stmt
             if not inc_stmt.empty:
                 for key in ['Basic Average Shares', 'Diluted Average Shares']:
                     if key in inc_stmt.index:
                         sh_data = inc_stmt.loc[key].dropna()
                         if len(sh_data) >= 2:
-                            acc_fin = sh_data.iloc[0]    # Año más reciente
-                            acc_ini = sh_data.iloc[-1]   # Año más antiguo disponible (suele ser 4 años)
+                            acc_fin = sh_data.iloc[0]
+                            acc_ini = sh_data.iloc[-1]
                             if acc_ini > 0:
                                 variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
                             break
@@ -222,20 +219,17 @@ def screener_weiss_definitivo(ticker_symbol):
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
 
-    # --- GRÁFICO INTERACTIVO ARREGLADO (Soluciona el problema de Europa/WKL) ---
+    # --- GRÁFICO INTERACTIVO ---
     st.markdown("### 📈 Evolución Histórica de Valoración (5 Años)")
     
     df_grafico = historial_5y[['Close']].copy()
     
     if not df_grafico.empty:
-        # SOLUCIÓN EUROPEA: Sumamos los últimos pagos rodantes para absorber los dividendos "interim" y "finales" desiguales
         divs_rodantes = dividendos.rolling(window=pagos_por_año).sum()
         df_grafico['Div_Grafico'] = divs_rodantes
         
-        # Rellenamos para crear las líneas planas de la escalera
         df_grafico['Div_Grafico'] = df_grafico['Div_Grafico'].ffill().bfill()
         
-        # Obligamos a que el último escalón conecte a la perfección con tu texto superior
         if not dividendos.empty:
             df_grafico.loc[df_grafico.index >= dividendos.index[-1], 'Div_Grafico'] = forward_dividend
             
@@ -278,7 +272,6 @@ def screener_weiss_definitivo(ticker_symbol):
             plot_bgcolor='rgba(0,0,0,0)'
         )
         
-        # Eliminar huecos de fin de semana
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         
         st.plotly_chart(fig, use_container_width=True)
@@ -287,7 +280,7 @@ def screener_weiss_definitivo(ticker_symbol):
 
     st.divider()
 
-    # 2. BENEFICIOS Y PROYECCIONES (MODIFICADO PARA 5 COLUMNAS)
+    # 2. BENEFICIOS Y PROYECCIONES CON COLOR EN RECOMPRAS
     st.subheader("📊 Beneficios, Proyecciones y Acciones")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("BPA Actual", f"{bpa_trailing / divisor_uk:.2f}{sym}" if bpa_trailing != 0 else "N/D")
@@ -297,7 +290,19 @@ def screener_weiss_definitivo(ticker_symbol):
     
     if variacion_acciones is not None:
         signo = "+" if variacion_acciones > 0 else ""
-        c5.metric("Acciones (5Y)", f"{signo}{variacion_acciones:.2f}%")
+        
+        # Lógica de color nativa de Streamlit (delta_color="inverse" pone lo negativo en verde)
+        if variacion_acciones < 0:
+            estado_acc = "- Recomprando"
+            color_acc = "inverse"
+        elif variacion_acciones <= 5:
+            estado_acc = "Estable"
+            color_acc = "off"
+        else:
+            estado_acc = "+ Diluyendo"
+            color_acc = "inverse"
+            
+        c5.metric("Acciones (5Y)", f"{signo}{variacion_acciones:.2f}%", delta=estado_acc, delta_color=color_acc)
     else:
         c5.metric("Acciones (5Y)", "N/D")
 
@@ -330,7 +335,6 @@ def screener_weiss_definitivo(ticker_symbol):
         else: st.error(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
     else: st.warning("P/FCF (Efectivo Real): Sin datos")
 
-    # --- NUEVA REGLA: RECOMPRAS DE ACCIONES ---
     if variacion_acciones is not None:
         if variacion_acciones < 0:
             st.success(f"Acciones en circulación: {variacion_acciones:.2f}% (Excelente, la empresa recompra acciones)")
