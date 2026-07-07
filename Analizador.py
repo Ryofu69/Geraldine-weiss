@@ -167,28 +167,32 @@ def screener_weiss_definitivo(ticker_symbol):
             else:
                 break 
 
-    # --- CÁLCULO DE VARIACIÓN DE ACCIONES EN CIRCULACIÓN (RECOMPRAS) ---
+    # --- CÁLCULO DE VARIACIÓN DE ACCIONES EN CIRCULACIÓN POR AÑO ---
     variacion_acciones = None
+    shares_yearly = pd.Series(dtype=float)
+    
     try:
         shares_hist = ticker.get_shares_full(start=fecha_corte_5y.strftime('%Y-%m-%d'), end=None)
         if shares_hist is not None and len(shares_hist) > 1:
-            acc_ini = shares_hist.iloc[0]
-            acc_fin = shares_hist.iloc[-1]
+            shares_yearly = shares_hist.groupby(shares_hist.index.year).last()
+            acc_ini = shares_yearly.iloc[0]
+            acc_fin = shares_yearly.iloc[-1]
             if acc_ini > 0:
                 variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
     except Exception:
         pass
         
-    if variacion_acciones is None:
+    if variacion_acciones is None or shares_yearly.empty:
         try:
             inc_stmt = ticker.income_stmt
             if not inc_stmt.empty:
                 for key in ['Basic Average Shares', 'Diluted Average Shares']:
                     if key in inc_stmt.index:
-                        sh_data = inc_stmt.loc[key].dropna()
+                        sh_data = inc_stmt.loc[key].dropna().sort_index()
                         if len(sh_data) >= 2:
-                            acc_fin = sh_data.iloc[0]
-                            acc_ini = sh_data.iloc[-1]
+                            shares_yearly = sh_data.groupby(sh_data.index.year).last()
+                            acc_ini = shares_yearly.iloc[0]
+                            acc_fin = shares_yearly.iloc[-1]
                             if acc_ini > 0:
                                 variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
                             break
@@ -210,15 +214,10 @@ def screener_weiss_definitivo(ticker_symbol):
     # 1. VALORACIÓN ACTUAL (DISEÑO COLOREADO A MEDIDA)
     st.subheader("🎯 Precios Objetivo y Valoración Actual")
     
-    # Lógica para teñir la cotización actual según donde se encuentre
-    if precio_actual <= precio_compra:
-        color_actual = "#21c354" # Verde (Infravalorado)
-    elif precio_actual >= precio_venta:
-        color_actual = "#ff4b4b" # Rojo (Sobrevalorado)
-    else:
-        color_actual = "#faca2b" # Amarillo (Precio Justo)
+    if precio_actual <= precio_compra: color_actual = "#21c354" 
+    elif precio_actual >= precio_venta: color_actual = "#ff4b4b" 
+    else: color_actual = "#faca2b" 
 
-    # Función para dibujar las tarjetas de texto a color
     def metric_color(label, value, yield_txt, color):
         st.markdown(f"""
             <div style="display: flex; flex-direction: column; margin-bottom: 1rem;">
@@ -229,16 +228,11 @@ def screener_weiss_definitivo(ticker_symbol):
         """, unsafe_allow_html=True)
 
     col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        metric_color("Cotización Actual", f"{precio_actual / divisor_uk:.2f}{sym}", f"Yield: {yield_actual:.2f}%", color_actual)
-    with col2:
-        metric_color("Franja Infravalorada", f"{precio_compra / divisor_uk:.2f}{sym}", f"Yield {yield_infravalorado:.2f}%", "#21c354") # Verde
-    with col3:
-        metric_color("Precio Justo (Media)", f"{precio_justo / divisor_uk:.2f}{sym}", f"Yield {yield_medio:.2f}%", "#faca2b") # Amarillo
-    with col4:
-        metric_color("Franja Sobrevalorada", f"{precio_venta / divisor_uk:.2f}{sym}", f"Yield {yield_sobrevalorado:.2f}%", "#ff4b4b") # Rojo
+    with col1: metric_color("Cotización Actual", f"{precio_actual / divisor_uk:.2f}{sym}", f"Yield: {yield_actual:.2f}%", color_actual)
+    with col2: metric_color("Franja Infravalorada", f"{precio_compra / divisor_uk:.2f}{sym}", f"Yield {yield_infravalorado:.2f}%", "#21c354") 
+    with col3: metric_color("Precio Justo (Media)", f"{precio_justo / divisor_uk:.2f}{sym}", f"Yield {yield_medio:.2f}%", "#faca2b") 
+    with col4: metric_color("Franja Sobrevalorada", f"{precio_venta / divisor_uk:.2f}{sym}", f"Yield {yield_sobrevalorado:.2f}%", "#ff4b4b") 
 
-    # Mensaje de estado
     if precio_actual <= precio_compra: st.success("💡 ESTADO: En zona de COMPRA CLARA (Infravalorada).")
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
@@ -251,7 +245,6 @@ def screener_weiss_definitivo(ticker_symbol):
     if not df_grafico.empty:
         divs_rodantes = dividendos.rolling(window=pagos_por_año).sum()
         df_grafico['Div_Grafico'] = divs_rodantes
-        
         df_grafico['Div_Grafico'] = df_grafico['Div_Grafico'].ffill().bfill()
         
         if not dividendos.empty:
@@ -268,39 +261,19 @@ def screener_weiss_definitivo(ticker_symbol):
             df_grafico['Precio_Venta'] = df_grafico['Precio_Venta'] / divisor_uk
 
         fig = go.Figure()
-        
-        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Venta'], 
-                                 name='Franja Sobrevalorada (Venta)', 
-                                 line=dict(color='#ff4b4b', width=2)))
-        
-        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Justo'], 
-                                 name='Precio Justo', 
-                                 line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dash')))
-                                 
-        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Compra'], 
-                                 name='Franja Infravalorada (Compra)', 
-                                 line=dict(color='#21c354', width=2)))
-                                 
-        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Close'], 
-                                 name='Cotización Real', 
-                                 line=dict(color='#00d4ff', width=3)))
+        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Venta'], name='Franja Sobrevalorada (Venta)', line=dict(color='#ff4b4b', width=2)))
+        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dash')))
+        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Compra'], name='Franja Infravalorada (Compra)', line=dict(color='#21c354', width=2)))
+        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Close'], name='Cotización Real', line=dict(color='#00d4ff', width=3)))
 
         fig.update_layout(
-            template='plotly_dark',
-            margin=dict(l=0, r=0, t=20, b=0),
+            template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            yaxis_title=f"Precio ({sym})",
-            xaxis_title="",
-            hovermode="x unified",
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            yaxis_title=f"Precio ({sym})", xaxis_title="", hovermode="x unified",
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
         )
-        
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
-        
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("No hay suficientes datos de dividendos para generar el gráfico.")
 
     st.divider()
 
@@ -314,20 +287,47 @@ def screener_weiss_definitivo(ticker_symbol):
     
     if variacion_acciones is not None:
         signo = "+" if variacion_acciones > 0 else ""
-        
-        if variacion_acciones < 0:
-            estado_acc = "- Recomprando"
-            color_acc = "inverse"
-        elif variacion_acciones <= 5:
-            estado_acc = "Estable"
-            color_acc = "off"
+        if variacion_acciones < -0.5:
+            estado_acc, color_acc = "- Recomprando", "inverse"
+        elif variacion_acciones <= 1.0:
+            estado_acc, color_acc = "Estable", "off"
         else:
-            estado_acc = "+ Diluyendo"
-            color_acc = "inverse"
-            
+            estado_acc, color_acc = "+ Diluyendo", "inverse"
         c5.metric("Acciones (5Y)", f"{signo}{variacion_acciones:.2f}%", delta=estado_acc, delta_color=color_acc)
     else:
         c5.metric("Acciones (5Y)", "N/D")
+
+    # --- NUEVO GRÁFICO DE BARRAS: DESGLOSE DE RECOMPRAS POR AÑO ---
+    if not shares_yearly.empty and len(shares_yearly) > 1:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### 🔄 Historial Anual de Recompras / Dilución")
+        
+        # Calculamos la variación porcentual año a año
+        yoy_shares = shares_yearly.pct_change().dropna() * 100
+        text_labels = [f"+{val:.2f}%" if val > 0 else f"{val:.2f}%" for val in yoy_shares.values]
+        
+        # Color: Verde si recompra (número negativo), Rojo si diluye (positivo), Amarillo si no hace nada
+        colores_barras = ['#21c354' if val < -0.1 else '#ff4b4b' if val > 1.0 else '#faca2b' for val in yoy_shares.values]
+
+        fig_shares = go.Figure()
+        fig_shares.add_trace(go.Bar(
+            x=yoy_shares.index.astype(str), 
+            y=yoy_shares.values,
+            marker_color=colores_barras,
+            text=text_labels,
+            textposition='auto'
+        ))
+        
+        fig_shares.update_layout(
+            template='plotly_dark',
+            margin=dict(l=0, r=0, t=10, b=0),
+            height=250,
+            yaxis_title="Variación Anual (%)",
+            xaxis_title="",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_shares, use_container_width=True)
 
     st.divider()
 
@@ -360,11 +360,11 @@ def screener_weiss_definitivo(ticker_symbol):
 
     if variacion_acciones is not None:
         if variacion_acciones < 0:
-            st.success(f"Acciones en circulación: {variacion_acciones:.2f}% (Excelente, la empresa recompra acciones)")
+            st.success(f"Acciones en circulación: {variacion_acciones:.2f}% en 5 años (Excelente, la empresa recompra fuertemente)")
         elif variacion_acciones <= 5:
-            st.warning(f"Acciones en circulación: +{variacion_acciones:.2f}% (Estable / Ligera dilución)")
+            st.warning(f"Acciones en circulación: +{variacion_acciones:.2f}% en 5 años (Estable / Ligera dilución)")
         else:
-            st.error(f"Acciones en circulación: +{variacion_acciones:.2f}% (Peligro, la empresa diluye al accionista para financiarse)")
+            st.error(f"Acciones en circulación: +{variacion_acciones:.2f}% en 5 años (Peligro, la empresa diluye al accionista)")
     else:
         st.warning("Acciones en circulación: Sin datos históricos suficientes.")
 
@@ -391,7 +391,6 @@ def screener_weiss_definitivo(ticker_symbol):
         else: st.error(f"Liquidez (Current Ratio): {current_ratio:.2f} (Peligro)")
     else: st.warning("Liquidez: Datos no disponibles")
 
-
 # --- FRONTEND DE LA APLICACIÓN ---
 st.title("Screener Fundamental - Método Geraldine Weiss")
 st.markdown("Introduce el ticker de una empresa para extraer sus datos financieros, rentabilidad real (FCF) y calcular sus bandas de valoración históricas.")
@@ -409,4 +408,3 @@ if analizar and ticker_input:
             screener_weiss_definitivo(ticker_input)
         except Exception as e:
             st.error(f"Se ha producido un error al descargar los datos: {e}")
-            
