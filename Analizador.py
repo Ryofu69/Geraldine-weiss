@@ -168,6 +168,36 @@ def screener_weiss_definitivo(ticker_symbol):
             else:
                 break 
 
+    # --- NUEVO: CÁLCULO DE VARIACIÓN DE ACCIONES EN CIRCULACIÓN (RECOMPRAS) ---
+    variacion_acciones = None
+    try:
+        # Intento 1: Historial completo de YFinance (Más preciso)
+        shares_hist = ticker.get_shares_full(start=fecha_corte_5y.strftime('%Y-%m-%d'), end=None)
+        if shares_hist is not None and len(shares_hist) > 1:
+            acc_ini = shares_hist.iloc[0]
+            acc_fin = shares_hist.iloc[-1]
+            if acc_ini > 0:
+                variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+    except Exception:
+        pass
+        
+    if variacion_acciones is None:
+        try:
+            # Intento 2: Sacarlo de las cuentas de resultados anuales
+            inc_stmt = ticker.income_stmt
+            if not inc_stmt.empty:
+                for key in ['Basic Average Shares', 'Diluted Average Shares']:
+                    if key in inc_stmt.index:
+                        sh_data = inc_stmt.loc[key].dropna()
+                        if len(sh_data) >= 2:
+                            acc_fin = sh_data.iloc[0]    # Año más reciente
+                            acc_ini = sh_data.iloc[-1]   # Año más antiguo disponible (suele ser 4 años)
+                            if acc_ini > 0:
+                                variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                            break
+        except Exception:
+            pass
+
     if yield_infravalorado > 0: precio_compra = (forward_dividend / yield_infravalorado) * 100
     else: precio_compra = 0
     if yield_medio > 0: precio_justo = (forward_dividend / yield_medio) * 100
@@ -257,13 +287,19 @@ def screener_weiss_definitivo(ticker_symbol):
 
     st.divider()
 
-    # 2. BENEFICIOS Y PROYECCIONES
-    st.subheader("📊 Beneficios y Proyecciones (BPA / EPS)")
-    c1, c2, c3, c4 = st.columns(4)
+    # 2. BENEFICIOS Y PROYECCIONES (MODIFICADO PARA 5 COLUMNAS)
+    st.subheader("📊 Beneficios, Proyecciones y Acciones")
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("BPA Actual", f"{bpa_trailing / divisor_uk:.2f}{sym}" if bpa_trailing != 0 else "N/D")
     c2.metric("BPA Esperado", f"{bpa_forward / divisor_uk:.2f}{sym}" if bpa_forward != 0 else "N/D")
     c3.metric("PER Futuro", f"{per_forward:.2f}" if per_forward != 0 else "N/D")
     c4.metric("Crecimiento BPA (3Y)", f"{crecimiento_bpa_3y:.2f}%" if crecimiento_bpa_3y is not None else "N/D")
+    
+    if variacion_acciones is not None:
+        signo = "+" if variacion_acciones > 0 else ""
+        c5.metric("Acciones (5Y)", f"{signo}{variacion_acciones:.2f}%")
+    else:
+        c5.metric("Acciones (5Y)", "N/D")
 
     st.divider()
 
@@ -293,6 +329,17 @@ def screener_weiss_definitivo(ticker_symbol):
         elif 0 < p_fcf <= 20: st.success(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
         else: st.error(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
     else: st.warning("P/FCF (Efectivo Real): Sin datos")
+
+    # --- NUEVA REGLA: RECOMPRAS DE ACCIONES ---
+    if variacion_acciones is not None:
+        if variacion_acciones < 0:
+            st.success(f"Acciones en circulación: {variacion_acciones:.2f}% (Excelente, la empresa recompra acciones)")
+        elif variacion_acciones <= 5:
+            st.warning(f"Acciones en circulación: +{variacion_acciones:.2f}% (Estable / Ligera dilución)")
+        else:
+            st.error(f"Acciones en circulación: +{variacion_acciones:.2f}% (Peligro, la empresa diluye al accionista para financiarse)")
+    else:
+        st.warning("Acciones en circulación: Sin datos históricos suficientes.")
 
     if años_pagando >= 25 and racha_sin_recortes >= 12: st.success(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata)")
     elif años_pagando >= 25: st.warning(f"Historial: {años_pagando} años pagando | Racha: {racha_sin_recortes} años sin recortes")
