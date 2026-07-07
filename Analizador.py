@@ -327,12 +327,14 @@ def screener_weiss_definitivo(ticker_symbol):
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY")
         
+        # Filtramos los dividendos para los últimos 5 años coincidiendo con el contexto global
         divs_5y = dividendos_anuales[dividendos_anuales.index >= fecha_corte_5y.year]
         if len(divs_5y) > 0:
             crecimiento_yoy = divs_5y.pct_change() * 100
             
             fig_divs = go.Figure()
             
+            # 1. Añadimos las Barras para el dividendo bruto cobrado (Eje Y principal)
             fig_divs.add_trace(go.Bar(
                 x=divs_5y.index.astype(str),
                 y=divs_5y.values,
@@ -343,6 +345,7 @@ def screener_weiss_definitivo(ticker_symbol):
                 textposition='auto'
             ))
             
+            # 2. Añadimos la Línea con puntos para el crecimiento porcentual (Eje Y secundario)
             text_crecimiento = ["" if pd.isna(val) else (f"+{val:.1f}%" if val > 0 else f"{val:.1f}%") for val in crecimiento_yoy.values]
             fig_divs.add_trace(go.Scatter(
                 x=crecimiento_yoy.index.astype(str),
@@ -356,6 +359,7 @@ def screener_weiss_definitivo(ticker_symbol):
                 textposition='top center'
             ))
             
+            # Layout con doble configuración de eje Y unificado
             fig_divs.update_layout(
                 template='plotly_dark',
                 margin=dict(l=0, r=0, t=30, b=0),
@@ -423,40 +427,4 @@ def screener_weiss_definitivo(ticker_symbol):
     elif años_pagando >= 25: st.warning(f"Historial: {años_pagando} años pagando | Racha: {racha_sin_recortes} años sin recortes")
     else: st.warning(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Falta para > 25 años)")
 
-    if dgr_5y is not None:
-        if dgr_5y >= 10: st.success(f"Crecimiento DGR 5A: {dgr_5y:.2f}% (Excelente)")
-        elif dgr_5y > 0: st.warning(f"Crecimiento DGR 5A: {dgr_5y:.2f}% (Positivo)")
-        else: st.error(f"Crecimiento DGR 5A: {dgr_5y:.2f}% (Estancado/Recortado)")
-    else: st.warning("Crecimiento DGR 5A: Sin datos suficientes")
-
-    if deuda_equity == 0.0: st.warning("Deuda/Capital: 0.00% (Posible Patrimonio Negativo por recompras)")
-    elif 0 < deuda_equity <= 50: st.success(f"Deuda/Capital: {deuda_equity:.2f}% (Saneada)")
-    else: st.error(f"Deuda/Capital: {deuda_equity:.2f}% (Apalancamiento alto)")
-
-    if market_cap > 10_000_000_000: st.success(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización)")
-    else: st.error(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Pequeña)")
-
-    if current_ratio > 0:
-        if current_ratio >= 1.5: st.success(f"Liquidez (Current Ratio): {current_ratio:.2f} (Caja fuerte)")
-        elif current_ratio >= 1.0: st.warning(f"Liquidez (Current Ratio): {current_ratio:.2f} (Justa)")
-        else: st.error(f"Liquidez (Current Ratio): {current_ratio:.2f} (Peligro)")
-    else: st.warning("Liquidez: Datos no disponibles")
-
-
-# --- FRONTEND DE LA APLICACIÓN ---
-st.title("Screener Fundamental - Método Geraldine Weiss")
-st.markdown("Introduce el ticker de una empresa para extraer sus datos financieros, rentabilidad real (FCF) y calcular sus bandas de valoración históricas.")
-
-col_input, col_btn = st.columns([4, 1])
-with col_input:
-    ticker_input = st.text_input("Ticker de la empresa (Ej: ACN, WPC, REP.MC):", placeholder="Escribe aquí...").upper()
-with col_btn:
-    st.markdown("<br>", unsafe_allow_html=True)
-    analizar = st.button("Analizar Empresa", use_container_width=True)
-
-if analizar and ticker_input:
-    with st.spinner(f"Analizando {ticker_input}..."):
-        try:
-            screener_weiss_definitivo(ticker_input)
-        except Exception as e:
-            st.error(f"Se ha producido un error al descargar los datos: {e}")
+    if dgr_5y is no
