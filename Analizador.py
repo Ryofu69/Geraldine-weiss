@@ -167,7 +167,7 @@ def screener_weiss_definitivo(ticker_symbol):
             else:
                 break 
 
-    # --- NUEVO: CÁLCULO DE VARIACIÓN DE ACCIONES EN CIRCULACIÓN (RECOMPRAS) ---
+    # --- CÁLCULO DE VARIACIÓN DE ACCIONES EN CIRCULACIÓN (RECOMPRAS) ---
     variacion_acciones = None
     try:
         shares_hist = ticker.get_shares_full(start=fecha_corte_5y.strftime('%Y-%m-%d'), end=None)
@@ -207,14 +207,38 @@ def screener_weiss_definitivo(ticker_symbol):
     # ==========================================
     st.header(f"Análisis de {ticker_symbol} ({currency})")
     
-    # 1. VALORACIÓN ACTUAL
+    # 1. VALORACIÓN ACTUAL (DISEÑO COLOREADO A MEDIDA)
     st.subheader("🎯 Precios Objetivo y Valoración Actual")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Cotización Actual", f"{precio_actual / divisor_uk:.2f}{sym}", f"Yield: {yield_actual:.2f}%")
-    col2.metric("Franja Infravalorada", f"{precio_compra / divisor_uk:.2f}{sym}", f"Yield {yield_infravalorado:.2f}%")
-    col3.metric("Precio Justo (Media)", f"{precio_justo / divisor_uk:.2f}{sym}", f"Yield {yield_medio:.2f}%")
-    col4.metric("Franja Sobrevalorada", f"{precio_venta / divisor_uk:.2f}{sym}", f"Yield {yield_sobrevalorado:.2f}%")
+    
+    # Lógica para teñir la cotización actual según donde se encuentre
+    if precio_actual <= precio_compra:
+        color_actual = "#21c354" # Verde (Infravalorado)
+    elif precio_actual >= precio_venta:
+        color_actual = "#ff4b4b" # Rojo (Sobrevalorado)
+    else:
+        color_actual = "#faca2b" # Amarillo (Precio Justo)
 
+    # Función para dibujar las tarjetas de texto a color
+    def metric_color(label, value, yield_txt, color):
+        st.markdown(f"""
+            <div style="display: flex; flex-direction: column; margin-bottom: 1rem;">
+                <span style="font-size: 1rem; color: #c4c4cc;">{label}</span>
+                <span style="font-size: 2.2rem; font-weight: 700; color: {color}; margin-top: 0.2rem; margin-bottom: 0.2rem;">{value}</span>
+                <span style="font-size: 0.95rem; font-weight: 600; color: {color};">↑ {yield_txt}</span>
+            </div>
+        """, unsafe_allow_html=True)
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        metric_color("Cotización Actual", f"{precio_actual / divisor_uk:.2f}{sym}", f"Yield: {yield_actual:.2f}%", color_actual)
+    with col2:
+        metric_color("Franja Infravalorada", f"{precio_compra / divisor_uk:.2f}{sym}", f"Yield {yield_infravalorado:.2f}%", "#21c354") # Verde
+    with col3:
+        metric_color("Precio Justo (Media)", f"{precio_justo / divisor_uk:.2f}{sym}", f"Yield {yield_medio:.2f}%", "#faca2b") # Amarillo
+    with col4:
+        metric_color("Franja Sobrevalorada", f"{precio_venta / divisor_uk:.2f}{sym}", f"Yield {yield_sobrevalorado:.2f}%", "#ff4b4b") # Rojo
+
+    # Mensaje de estado
     if precio_actual <= precio_compra: st.success("💡 ESTADO: En zona de COMPRA CLARA (Infravalorada).")
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
@@ -291,7 +315,6 @@ def screener_weiss_definitivo(ticker_symbol):
     if variacion_acciones is not None:
         signo = "+" if variacion_acciones > 0 else ""
         
-        # Lógica de color nativa de Streamlit (delta_color="inverse" pone lo negativo en verde)
         if variacion_acciones < 0:
             estado_acc = "- Recomprando"
             color_acc = "inverse"
@@ -386,3 +409,4 @@ if analizar and ticker_input:
             screener_weiss_definitivo(ticker_input)
         except Exception as e:
             st.error(f"Se ha producido un error al descargar los datos: {e}")
+            
