@@ -393,5 +393,39 @@ def screener_weiss_definitivo(ticker_symbol):
     elif yield_actual >= yield_medio: st.warning(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Aceptable, superior a media de {yield_medio:.2f}%)")
     else: st.error(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Pobre, inferior a media de {yield_medio:.2f}%)")
 
-    if 0 < payout_ratio
+    if 0 < payout_ratio <= 50: st.success(f"Payout (BPA): {payout_ratio:.2f}% (Seguro, exige < 50%)")
+    elif 50 < payout_ratio <= 65: st.warning(f"Payout (BPA): {payout_ratio:.2f}% (Alto, exige < 50%)")
+    else: st.error(f"Payout (BPA): {payout_ratio:.2f}% (Peligro, exige < 50%)")
+    
+    if payout_fcf is not None:
+        if payout_fcf == -1: st.error(f"Payout (FCF): NEGATIVO (Quema de caja)")
+        elif payout_fcf <= 60: st.success(f"Payout (FCF): {payout_fcf:.2f}% (Caja fuerte)")
+        elif payout_fcf <= 85: st.warning(f"Payout (FCF): {payout_fcf:.2f}% (Aceptable)")
+        else: st.error(f"Payout (FCF): {payout_fcf:.2f}% (Peligro, reparte más de lo que entra)")
+    else: st.warning("Payout (FCF): Sin datos disponibles")
+
+    if 0 < per <= 20: st.success(f"PER (Beneficio Contable): {per:.2f} (Barato)")
+    else: st.error(f"PER (Beneficio Contable): {per:.2f} (Caro)")
+
+    if p_fcf is not None:
+        if p_fcf == -1: st.error("P/FCF (Efectivo Real): NEGATIVO")
+        elif 0 < p_fcf <= 20: st.success(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
+        else: st.error(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
+    else: st.warning("P/FCF (Efectivo Real): Sin datos")
+
+    if variacion_acciones is not None:
+        if variacion_acciones < 0:
+            st.success(f"Acciones en circulación: {variacion_acciones:.2f}% en 5 años (Excelente, la empresa recompra fuertemente)")
+        elif variacion_acciones <= 5:
+            st.warning(f"Acciones en circulación: +{variacion_acciones:.2f}% en 5 años (Estable / Ligera dilución)")
+        else:
+            st.error(f"Acciones en circulación: +{variacion_acciones:.2f}% en 5 años (Peligro, la empresa diluye al accionista)")
+    else:
+        st.warning("Acciones en circulación: Sin datos históricos suficientes.")
+
+    if años_pagando >= 25 and racha_sin_recortes >= 12: st.success(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata)")
+    elif años_pagando >= 25: st.warning(f"Historial: {años_pagando} años pagando | Racha: {racha_sin_recortes} años sin recortes")
+    else: st.warning(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Falta para > 25 años)")
+
+    if dgr_5y is no
     
