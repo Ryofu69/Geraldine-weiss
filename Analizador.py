@@ -297,16 +297,13 @@ def screener_weiss_definitivo(ticker_symbol):
     else:
         c5.metric("Acciones (5Y)", "N/D")
 
-    # --- NUEVO GRÁFICO DE BARRAS: DESGLOSE DE RECOMPRAS POR AÑO ---
+    # --- HISTORIAL ANUAL DE RECOMPRAS ---
     if not shares_yearly.empty and len(shares_yearly) > 1:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 🔄 Historial Anual de Recompras / Dilución")
         
-        # Calculamos la variación porcentual año a año
         yoy_shares = shares_yearly.pct_change().dropna() * 100
         text_labels = [f"+{val:.2f}%" if val > 0 else f"{val:.2f}%" for val in yoy_shares.values]
-        
-        # Color: Verde si recompra (número negativo), Rojo si diluye (positivo), Amarillo si no hace nada
         colores_barras = ['#21c354' if val < -0.1 else '#ff4b4b' if val > 1.0 else '#faca2b' for val in yoy_shares.values]
 
         fig_shares = go.Figure()
@@ -319,15 +316,73 @@ def screener_weiss_definitivo(ticker_symbol):
         ))
         
         fig_shares.update_layout(
-            template='plotly_dark',
-            margin=dict(l=0, r=0, t=10, b=0),
-            height=250,
-            yaxis_title="Variación Anual (%)",
-            xaxis_title="",
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=230,
+            yaxis_title="Variación Anual (%)", xaxis_title="",
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
         )
         st.plotly_chart(fig_shares, use_container_width=True)
+
+    # --- NUEVO GRÁFICO COMBINADO: HISTORIAL DE DIVIDENDOS (BARRAS) + CRECIMIENTO YOY (LÍNEA) ---
+    if not dividendos_anuales.empty:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY")
+        
+        # Filtramos los dividendos para los últimos 5 años coincidiendo con el contexto global
+        divs_5y = dividendos_anuales[dividendos_anuales.index >= fecha_corte_5y.year]
+        if len(divs_5y) > 0:
+            crecimiento_yoy = divs_5y.pct_change() * 100
+            
+            fig_divs = go.Figure()
+            
+            # 1. Añadimos las Barras para el dividendo bruto cobrado (Eje Y principal)
+            fig_divs.add_trace(go.Bar(
+                x=divs_5y.index.astype(str),
+                y=divs_5y.values,
+                name=f"Dividendo ({sym})",
+                marker_color='#00d4ff',
+                yaxis='y1',
+                text=[f"{val:.2f}{sym}" for val in divs_5y.values],
+                textposition='auto'
+            ))
+            
+            # 2. Añadimos la Línea con puntos para el crecimiento porcentual (Eje Y secundario)
+            text_crecimiento = ["" if pd.isna(val) else (f"+{val:.1f}%" if val > 0 else f"{val:.1f}%") for val in crecimiento_yoy.values]
+            fig_divs.add_trace(go.Scatter(
+                x=crecimiento_yoy.index.astype(str),
+                y=crecimiento_yoy.values,
+                name="Crecimiento YoY",
+                mode='lines+markers',
+                line=dict(color='#21c354', width=3),
+                marker=dict(size=8),
+                yaxis='y2',
+                text=text_crecimiento,
+                textposition='top center'
+            ))
+            
+            # Layout con doble configuración de eje Y unificado
+            fig_divs.update_layout(
+                template='plotly_dark',
+                margin=dict(l=0, r=0, t=30, b=0),
+                height=280,
+                hovermode="x unified",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                yaxis=dict(
+                    title=f"Dividendo ({sym})",
+                    titlefont=dict(color="#00d4ff"),
+                    tickfont=dict(color="#00d4ff")
+                ),
+                yaxis2=dict(
+                    title="Crecimiento (%)",
+                    titlefont=dict(color="#21c354"),
+                    tickfont=dict(color="#21c354"),
+                    overlaying='y',
+                    side='right',
+                    showgrid=False
+                ),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig_divs, use_container_width=True)
 
     st.divider()
 
@@ -338,73 +393,5 @@ def screener_weiss_definitivo(ticker_symbol):
     elif yield_actual >= yield_medio: st.warning(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Aceptable, superior a media de {yield_medio:.2f}%)")
     else: st.error(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Pobre, inferior a media de {yield_medio:.2f}%)")
 
-    if 0 < payout_ratio <= 50: st.success(f"Payout (BPA): {payout_ratio:.2f}% (Seguro, exige < 50%)")
-    elif 50 < payout_ratio <= 65: st.warning(f"Payout (BPA): {payout_ratio:.2f}% (Alto, exige < 50%)")
-    else: st.error(f"Payout (BPA): {payout_ratio:.2f}% (Peligro, exige < 50%)")
+    if 0 < payout_ratio
     
-    if payout_fcf is not None:
-        if payout_fcf == -1: st.error(f"Payout (FCF): NEGATIVO (Quema de caja)")
-        elif payout_fcf <= 60: st.success(f"Payout (FCF): {payout_fcf:.2f}% (Caja fuerte)")
-        elif payout_fcf <= 85: st.warning(f"Payout (FCF): {payout_fcf:.2f}% (Aceptable)")
-        else: st.error(f"Payout (FCF): {payout_fcf:.2f}% (Peligro, reparte más de lo que entra)")
-    else: st.warning("Payout (FCF): Sin datos disponibles")
-
-    if 0 < per <= 20: st.success(f"PER (Beneficio Contable): {per:.2f} (Barato)")
-    else: st.error(f"PER (Beneficio Contable): {per:.2f} (Caro)")
-
-    if p_fcf is not None:
-        if p_fcf == -1: st.error("P/FCF (Efectivo Real): NEGATIVO")
-        elif 0 < p_fcf <= 20: st.success(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
-        else: st.error(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
-    else: st.warning("P/FCF (Efectivo Real): Sin datos")
-
-    if variacion_acciones is not None:
-        if variacion_acciones < 0:
-            st.success(f"Acciones en circulación: {variacion_acciones:.2f}% en 5 años (Excelente, la empresa recompra fuertemente)")
-        elif variacion_acciones <= 5:
-            st.warning(f"Acciones en circulación: +{variacion_acciones:.2f}% en 5 años (Estable / Ligera dilución)")
-        else:
-            st.error(f"Acciones en circulación: +{variacion_acciones:.2f}% en 5 años (Peligro, la empresa diluye al accionista)")
-    else:
-        st.warning("Acciones en circulación: Sin datos históricos suficientes.")
-
-    if años_pagando >= 25 and racha_sin_recortes >= 12: st.success(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata)")
-    elif años_pagando >= 25: st.warning(f"Historial: {años_pagando} años pagando | Racha: {racha_sin_recortes} años sin recortes")
-    else: st.warning(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Falta para > 25 años)")
-
-    if dgr_5y is not None:
-        if dgr_5y >= 10: st.success(f"Crecimiento DGR 5A: {dgr_5y:.2f}% (Excelente)")
-        elif dgr_5y > 0: st.warning(f"Crecimiento DGR 5A: {dgr_5y:.2f}% (Positivo)")
-        else: st.error(f"Crecimiento DGR 5A: {dgr_5y:.2f}% (Estancado/Recortado)")
-    else: st.warning("Crecimiento DGR 5A: Sin datos suficientes")
-
-    if deuda_equity == 0.0: st.warning("Deuda/Capital: 0.00% (Posible Patrimonio Negativo por recompras)")
-    elif 0 < deuda_equity <= 50: st.success(f"Deuda/Capital: {deuda_equity:.2f}% (Saneada)")
-    else: st.error(f"Deuda/Capital: {deuda_equity:.2f}% (Apalancamiento alto)")
-
-    if market_cap > 10_000_000_000: st.success(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización)")
-    else: st.error(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Pequeña)")
-
-    if current_ratio > 0:
-        if current_ratio >= 1.5: st.success(f"Liquidez (Current Ratio): {current_ratio:.2f} (Caja fuerte)")
-        elif current_ratio >= 1.0: st.warning(f"Liquidez (Current Ratio): {current_ratio:.2f} (Justa)")
-        else: st.error(f"Liquidez (Current Ratio): {current_ratio:.2f} (Peligro)")
-    else: st.warning("Liquidez: Datos no disponibles")
-
-# --- FRONTEND DE LA APLICACIÓN ---
-st.title("Screener Fundamental - Método Geraldine Weiss")
-st.markdown("Introduce el ticker de una empresa para extraer sus datos financieros, rentabilidad real (FCF) y calcular sus bandas de valoración históricas.")
-
-col_input, col_btn = st.columns([4, 1])
-with col_input:
-    ticker_input = st.text_input("Ticker de la empresa (Ej: ACN, WPC, REP.MC):", placeholder="Escribe aquí...").upper()
-with col_btn:
-    st.markdown("<br>", unsafe_allow_html=True)
-    analizar = st.button("Analizar Empresa", use_container_width=True)
-
-if analizar and ticker_input:
-    with st.spinner(f"Analizando {ticker_input}..."):
-        try:
-            screener_weiss_definitivo(ticker_input)
-        except Exception as e:
-            st.error(f"Se ha producido un error al descargar los datos: {e}")
