@@ -217,23 +217,29 @@ def screener_weiss_definitivo(ticker_symbol):
     if yield_sobrevalorado > 0: precio_venta = (forward_dividend / yield_sobrevalorado) * 100
     else: precio_venta = 0
 
-    # --- NUEVOS CÁLCULOS MATEMÁTICOS DE DESCUENTO SOLICITADOS ---
-    pct_descuento_infra = ((precio_compra - precio_actual) / precio_compra) * 100
-    pct_justo_dist = ((precio_actual - precio_justo) / precio_justo) * 100
-    pct_sobre_venta = ((precio_actual - precio_venta) / precio_venta) * 100
+    # --- NUEVOS CÁLCULOS MATEMÁTICOS DE DESCUENTO ---
+    pct_descuento_infra = ((precio_compra - precio_actual) / precio_compra) * 100 if precio_compra > 0 else 0
+    pct_justo_dist = ((precio_actual - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0
+    pct_sobre_venta = ((precio_actual - precio_venta) / precio_venta) * 100 if precio_venta > 0 else 0
 
     # Formateo de textos descriptivos dinámicos
     txt_extra_infra = f"Descuento: +{pct_descuento_infra:.1f}%" if pct_descuento_infra >= 0 else f"A un {abs(pct_descuento_infra):.1f}% de entrar"
     txt_extra_justo = f"+{pct_justo_dist:.1f}% vs Media" if pct_justo_dist >= 0 else f"{pct_justo_dist:.1f}% vs Media"
-    txt_extra_sobre = f"Sobrevaloración: +{pct_sobre_venta:.1f}%" if pct_sobre_venta >= 0 else f"A un {pct_sobre_venta:.1f}% de entrar"
+    txt_extra_sobre = f"Sobrevaloración: +{pct_sobre_venta:.1f}%" if pct_sobre_venta >= 0 else f"A un {abs(pct_sobre_venta):.1f}% de entrar"
 
     # ==========================================
     # INTERFAZ VISUAL STREAMLIT
     # ==========================================
+    # LA LÍNEA QUE FALTABA
+    tipo_empresa_txt = "🏢 Sector Inmobiliario/Regulado (Filtros Flexibles)" if es_regulada_o_reit else "🏭 Sector Industrial/General (Filtros Estrictos)"
+    
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
     st.subheader("🎯 Precios Objetivo y Valoración Actual")
     
-    # Función de tarjetas visuales enriquecida con la fila extra solicitada
+    if precio_actual <= precio_compra: color_actual = "#21c354" 
+    elif precio_actual >= precio_venta: color_actual = "#ff4b4b" 
+    else: color_actual = "#faca2b" 
+
     def metric_color(label, value, yield_txt, extra_txt, color):
         st.markdown(f"""
             <div style="display: flex; flex-direction: column; margin-bottom: 1rem;">
@@ -267,7 +273,6 @@ def screener_weiss_definitivo(ticker_symbol):
     if total_años_bpa_datos > 0 and (años_crecimiento_bpa / total_años_bpa_datos) >= 0.65: score += 1
     if market_cap > 10_000_000_000: score += 1
 
-    # Banner gigante con la nota final
     st.markdown("<br>", unsafe_allow_html=True)
     if score >= 8:
         st.success(f"🏆 **BLUE CHIP SCORE WEISS: {score}/10** — Empresa Sobresaliente. Altísima seguridad y apta para compra si el precio acompaña.")
@@ -359,7 +364,7 @@ def screener_weiss_definitivo(ticker_symbol):
         )
         st.plotly_chart(fig_shares, use_container_width=True)
 
-    # --- GRÁFICO COMBINADO DE DIVIDENDOS CON EJE X ENRIQUECIDO ---
+    # --- GRÁFICO COMBINADO DE DIVIDENDOS ---
     if not dividendos_barras.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (10 Años)")
@@ -406,7 +411,6 @@ def screener_weiss_definitivo(ticker_symbol):
     if 0 < payout_ratio <= payout_limite_bpa: st.success(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
     else: st.error(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado, el límite de su sector exige < {payout_limite_bpa:.0f}%)")
     
-    # NUEVO FILTRO: FORWARD PAYOUT RATIO (PROSPECTIVO)
     if payout_forward != -1:
         if 0 < payout_forward <= payout_limite_bpa: st.success(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Sano, beneficio futuro cubre el dividendo)")
         else: st.warning(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Atención: la cobertura empeorará el año que viene)")
@@ -445,7 +449,6 @@ def screener_weiss_definitivo(ticker_symbol):
         else:
             st.error(f"Consistencia BPA (Filtro Weiss): Solo {años_crecimiento_bpa} años de crecimiento de {total_años_bpa_datos} evaluados (Excesiva ciclicidad)")
 
-    # NUEVO FILTRO: RESPALDO INSTITUCIONAL (MANOS FUERTES)
     if respaldo_institucional > 0:
         if respaldo_institucional >= 50.0: st.success(f"Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
         else: st.warning(f"Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
