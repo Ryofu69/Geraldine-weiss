@@ -107,7 +107,6 @@ def screener_weiss_definitivo(ticker_symbol):
     bpa_forward = get_safe('forwardEps')
     per_forward = get_safe('forwardPE')
     
-    # --- NUEVAS MÉTRICAS FUNDAMENTALES EXTRAÍDAS ---
     respaldo_institucional = get_safe('heldPercentInstitutions') * 100
     payout_forward = (forward_dividend / bpa_forward) * 100 if bpa_forward > 0 else -1
 
@@ -217,20 +216,27 @@ def screener_weiss_definitivo(ticker_symbol):
     if yield_sobrevalorado > 0: precio_venta = (forward_dividend / yield_sobrevalorado) * 100
     else: precio_venta = 0
 
-    # --- NUEVOS CÁLCULOS MATEMÁTICOS DE DESCUENTO ---
-    pct_descuento_infra = ((precio_compra - precio_actual) / precio_compra) * 100 if precio_compra > 0 else 0
-    pct_justo_dist = ((precio_actual - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0
-    pct_sobre_venta = ((precio_actual - precio_venta) / precio_venta) * 100 if precio_venta > 0 else 0
+    # --- NUEVOS CÁLCULOS MATEMÁTICOS (ANCLADOS A LA MEDIA / PRECIO JUSTO) ---
+    if precio_justo > 0:
+        pct_actual_vs_media = ((precio_actual - precio_justo) / precio_justo) * 100
+        pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100
+        pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100
+    else:
+        pct_actual_vs_media = pct_infra_vs_media = pct_sobre_vs_media = 0
 
-    # Formateo de textos descriptivos dinámicos
-    txt_extra_infra = f"Descuento: +{pct_descuento_infra:.1f}%" if pct_descuento_infra >= 0 else f"A un {abs(pct_descuento_infra):.1f}% de entrar"
-    txt_extra_justo = f"+{pct_justo_dist:.1f}% vs Media" if pct_justo_dist >= 0 else f"{pct_justo_dist:.1f}% vs Media"
-    txt_extra_sobre = f"Sobrevaloración: +{pct_sobre_venta:.1f}%" if pct_sobre_venta >= 0 else f"A un {abs(pct_sobre_venta):.1f}% de entrar"
+    # Textos Descriptivos Dinámicos
+    if pct_actual_vs_media <= 0:
+        txt_extra_actual = f"Descuento: {abs(pct_actual_vs_media):.1f}% vs Media"
+    else:
+        txt_extra_actual = f"Sobreprecio: +{pct_actual_vs_media:.1f}% vs Media"
+        
+    txt_extra_infra = f"Suelo: {pct_infra_vs_media:.1f}% vs Media"
+    txt_extra_justo = "Ancla de valoración"
+    txt_extra_sobre = f"Techo: +{pct_sobre_vs_media:.1f}% vs Media"
 
     # ==========================================
     # INTERFAZ VISUAL STREAMLIT
     # ==========================================
-    # LA LÍNEA QUE FALTABA
     tipo_empresa_txt = "🏢 Sector Inmobiliario/Regulado (Filtros Flexibles)" if es_regulada_o_reit else "🏭 Sector Industrial/General (Filtros Estrictos)"
     
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
@@ -251,7 +257,7 @@ def screener_weiss_definitivo(ticker_symbol):
         """, unsafe_allow_html=True)
 
     col1, col2, col3, col4 = st.columns(4)
-    with col1: metric_color("Cotización Actual", f"{precio_actual / divisor_uk:.2f}{sym}", f"Yield: {yield_actual:.2f}%", "Precio de mercado", color_actual)
+    with col1: metric_color("Cotización Actual", f"{precio_actual / divisor_uk:.2f}{sym}", f"Yield: {yield_actual:.2f}%", txt_extra_actual, color_actual)
     with col2: metric_color("Franja Infravalorada", f"{precio_compra / divisor_uk:.2f}{sym}", f"Yield {yield_infravalorado:.2f}%", txt_extra_infra, "#21c354") 
     with col3: metric_color("Precio Justo (Media)", f"{precio_justo / divisor_uk:.2f}{sym}", f"Yield {yield_medio:.2f}%", txt_extra_justo, "#faca2b") 
     with col4: metric_color("Franja Sobrevalorada", f"{precio_venta / divisor_uk:.2f}{sym}", f"Yield {yield_sobrevalorado:.2f}%", txt_extra_sobre, "#ff4b4b") 
