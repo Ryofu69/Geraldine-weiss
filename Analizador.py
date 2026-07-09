@@ -21,7 +21,7 @@ def screener_weiss_definitivo(ticker_symbol):
         try: return float(val)
         except (ValueError, TypeError): return default
 
-    # --- DETECCIÓN DE SECTOR PARA FLEXIBILIZAR FILTROS (MÉTODO WEISS REAL) ---
+    # --- DETECCIÓN DE SECTOR (MÉTODO WEISS REAL) ---
     sector = info.get('sector', '')
     industry = info.get('industry', '')
     es_regulada_o_reit = 'utility' in sector.lower() or 'utilities' in sector.lower() or 'reit' in industry.lower() or 'real estate' in sector.lower()
@@ -39,29 +39,48 @@ def screener_weiss_definitivo(ticker_symbol):
         divisor_uk = 100.0 
     else: sym = '$' 
 
-    # --- HISTORIAL Y BANDAS YIELD (10 AÑOS COMPLETOS) ---
+    # --- HISTORIAL Y BANDAS YIELD (EXTRACCIÓN PERFECTA 10 AÑOS) ---
     historial_completo = ticker.history(period="10y")
-    dividendos = ticker.dividends
     
-    if dividendos.empty or len(historial_completo) < 252:
+    if historial_completo.empty or 'Dividends' not in historial_completo.columns:
         st.error("❌ Error: No hay suficientes datos históricos o de dividendos en Yahoo Finance.")
         return
 
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
-    dividendos.index = dividendos.index.tz_localize(None).normalize()
-    dividendos = dividendos.sort_index()
+    
+    # Extraemos los dividendos de la MISMA tabla del histórico para evitar el bug de alineación
+    dividendos_limpios = historial_completo['Dividends'][historial_completo['Dividends'] > 0]
+    
+    if dividendos_limpios.empty or len(historial_completo) < 252:
+        st.error("❌ Error: No se detectan pagos de dividendos en la tabla histórica.")
+        return
 
-    # --- FILTRADO DE DIVIDENDOS ESPECIALES ---
-    dividendos_anuales_raw = dividendos.groupby(dividendos.index.year).sum()
-    median_div = dividendos_anuales_raw.median()
+    # Determinar pagos por año
+    año_actual = datetime.now().year
+    años = dividendos_limpios.index.year
+    conteo_por_año = años.value_counts()
+    conteo_cerrado = conteo_por_año[conteo_por_año.index < año_actual]
     
-    historial_completo['Div'] = dividendos
-    historial_completo.fillna({'Div': 0}, inplace=True)
+    if not conteo_cerrado.empty:
+        pagos_por_año = int(conteo_cerrado.mode().iloc[0])
+    else:
+        pagos_por_año = int(conteo_por_año.mode().iloc[0]) if not conteo_por_año.empty else 4 
+        
+    if pagos_por_año not in [1, 2, 4, 12]:
+        if pagos_por_año == 3: pagos_por_año = 4
+        elif pagos_por_año > 10: pagos_por_año = 12
+        else: pagos_por_año = 4
+
+    # --- CÁLCULO DEL TTM ESCALONADO PERFECTO ---
+    # Suma estrictamente los últimos N pagos, evitando el fallo de 252 días
+    divs_rodantes = dividendos_limpios.rolling(window=pagos_por_año).sum()
+    historial_completo['Div_TTM'] = divs_rodantes
+    historial_completo['Div_TTM'] = historial_completo['Div_TTM'].ffill().bfill()
     
-    historial_completo['Div_TTM'] = historial_completo['Div'].rolling(window=252).sum()
-    
+    # Filtro de dividendos especiales (evita que un div extraordinario rompa las franjas)
+    median_div = (dividendos_limpios.groupby(dividendos_limpios.index.year).mean() * pagos_por_año).median()
     if median_div > 0:
-        historial_completo['Div_TTM'] = historial_completo['Div_TTM'].apply(lambda x: min(x, median_div * 2.5) if x > 0 else x)
+        historial_completo['Div_TTM'] = historial_completo['Div_TTM'].apply(lambda x: min(x, median_div * 2.5))
 
     historial_completo['Yield_Diario'] = (historial_completo['Div_TTM'] / historial_completo['Close']) * 100
 
@@ -78,23 +97,8 @@ def screener_weiss_definitivo(ticker_symbol):
 
     # --- DATOS ACTUALES ---
     precio_actual = historial_completo['Close'].dropna().iloc[-1]
-    ultimo_pago = dividendos.iloc[-1]
+    ultimo_pago = dividendos_limpios.iloc[-1]
     
-    año_actual = datetime.now().year
-    años = dividendos.index.year
-    conteo_por_año = años.value_counts()
-    conteo_cerrado = conteo_por_año[conteo_por_año.index < año_actual]
-    
-    if not conteo_cerrado.empty:
-        pagos_por_año = int(conteo_cerrado.max())
-    else:
-        pagos_por_año = int(conteo_por_año.max()) if not conteo_por_año.empty else 4 
-        
-    if pagos_por_año not in [1, 2, 4, 12]:
-        if pagos_por_año == 3: pagos_por_año = 4
-        elif pagos_por_año > 10: pagos_por_año = 12
-        else: pagos_por_año = 4
-
     forward_dividend = get_safe('dividendRate')
     if forward_dividend == 0: 
         forward_dividend = get_safe('trailingAnnualDividendRate')
@@ -168,55 +172,40 @@ def screener_weiss_definitivo(ticker_symbol):
             payout_fcf = -1 
             p_fcf = -1 
 
-    fecha_corte_5y = historial_completo.index[-1] - pd.DateOffset(years=5)
-    fecha_corte_10y = historial_completo.index[-1] - pd.DateOffset(years=10)
-
-    dgr_5y = None
-    if len(dividendos) >= (pagos_por_año * 5): 
-        bloque_actual = dividendos.tail(pagos_por_año).sum()
-        fecha_hace_5_años_div = dividendos.index[-1] - pd.DateOffset(years=5)
-        dividendos_antiguos_5 = dividendos[dividendos.index <= fecha_hace_5_años_div]
-        if len(dividendos_antiguos_5) >= pagos_por_año:
-            bloque_hace_5_años = dividendos_antiguos_5.tail(pagos_por_año).sum()
-            if bloque_hace_5_años > 0:
-                dgr_5y = (((bloque_actual / bloque_hace_5_años) ** (1 / 5)) - 1) * 100
-
-    dgr_10y = None
-    if len(dividendos) >= (pagos_por_año * 10): 
-        bloque_actual_10 = dividendos.tail(pagos_por_año).sum()
-        fecha_hace_10_años_div = dividendos.index[-1] - pd.DateOffset(years=10)
-        dividendos_antiguos_10 = dividendos[dividendos.index <= fecha_hace_10_años_div]
-        if len(dividendos_antiguos_10) >= pagos_por_año:
-            bloque_hace_10_años_10 = dividendos_antiguos_10.tail(pagos_por_año).sum()
-            if bloque_hace_10_años_10 > 0:
-                dgr_10y = (((bloque_actual_10 / bloque_hace_10_años_10) ** (1 / 10)) - 1) * 100
-
-    # --- LA MAGIA QUE ARREGLA EL BUG DE YAHOO FINANCE ---
-    # Al hacer la media de pagos y multiplicarla por su frecuencia real,
-    # ignoramos si el calendario metió 3 o 5 pagos ese año, y proyectamos el año actual.
-    dividendos_anuales = dividendos.groupby(dividendos.index.year).mean() * pagos_por_año
-    
+    # --- MAGIA DEL CALENDARIO: DIVIDENDOS ANUALES LIMPIOS ---
+    dividendos_anuales = dividendos_limpios.groupby(dividendos_limpios.index.year).mean() * pagos_por_año
     años_pagando = año_actual - dividendos_anuales.index[0]
     
     divs_recientes = dividendos_anuales.tail(11)
     incrementos_dividendo = int((divs_recientes.diff().dropna() > 0).sum())
 
+    # --- CÁLCULO DGR 5Y Y 10Y BASADO EN LA SERIE LIMPIA ---
+    dgr_5y = None
+    dgr_10y = None
+    try:
+        if len(dividendos_anuales) >= 6:
+            div_actual = dividendos_anuales.iloc[-1]
+            div_5y = dividendos_anuales.iloc[-6]
+            if div_5y > 0:
+                dgr_5y = ((div_actual / div_5y) ** (1/5) - 1) * 100
+        if len(dividendos_anuales) >= 11:
+            div_10y = dividendos_anuales.iloc[-11]
+            if div_10y > 0:
+                dgr_10y = ((div_actual / div_10y) ** (1/10) - 1) * 100
+    except Exception:
+        pass
+
+    # Racha sin recortes sobre la serie limpia
     racha_sin_recortes = 0
-    historial_ttm = historial_completo['Div_TTM'].dropna()
-    
-    if len(historial_ttm) > 252:
-        ttm_evaluado = historial_ttm.iloc[-1]
-        for i in range(1, 10):
-            dias_atras = i * 252
-            if dias_atras >= len(historial_ttm): break
-            ttm_previo = historial_ttm.iloc[-(dias_atras + 1)]
-            if ttm_evaluado >= ttm_previo * 0.99:
+    if len(dividendos_anuales) > 1:
+        for i in range(1, len(dividendos_anuales)):
+            if dividendos_anuales.iloc[-(i)] >= dividendos_anuales.iloc[-(i+1)] * 0.99:
                 racha_sin_recortes += 1
-                ttm_evaluado = ttm_previo 
             else:
-                break 
+                break
 
     # --- VARIACIÓN DE ACCIONES ---
+    fecha_corte_10y = historial_completo.index[-1] - pd.DateOffset(years=10)
     variacion_acciones = None
     shares_yearly = pd.Series(dtype=float)
     
@@ -290,14 +279,14 @@ def screener_weiss_definitivo(ticker_symbol):
     st.markdown("### 📈 Evolución Histórica de Valoración (10 Años)")
     df_grafico = historial_completo[['Close']].copy()
     if not df_grafico.empty:
-        divs_rodantes = dividendos.rolling(window=pagos_por_año).sum()
-        df_grafico['Div_Grafico'] = divs_rodantes
-        df_grafico['Div_Grafico'] = df_grafico['Div_Grafico'].ffill().bfill()
-        if not dividendos.empty:
-            df_grafico.loc[df_grafico.index >= dividendos.index[-1], 'Div_Grafico'] = forward_dividend
+        df_grafico['Div_Grafico'] = historial_completo['Div_TTM']
+        if not dividendos_limpios.empty:
+            df_grafico.loc[df_grafico.index >= dividendos_limpios.index[-1], 'Div_Grafico'] = forward_dividend
+            
         df_grafico['Precio_Compra'] = (df_grafico['Div_Grafico'] / yield_infravalorado) * 100
         df_grafico['Precio_Justo'] = (df_grafico['Div_Grafico'] / yield_medio) * 100
         df_grafico['Precio_Venta'] = (df_grafico['Div_Grafico'] / yield_sobrevalorado) * 100
+        
         if currency == 'GBp':
             df_grafico['Close'] = df_grafico['Close'] / divisor_uk
             df_grafico['Precio_Compra'] = df_grafico['Precio_Compra'] / divisor_uk
@@ -358,11 +347,12 @@ def screener_weiss_definitivo(ticker_symbol):
         )
         st.plotly_chart(fig_shares, use_container_width=True)
 
-    # --- GRÁFICO COMBINADO DE DIVIDENDOS (AHORA LIMPIO Y PROYECTADO) ---
+    # --- GRÁFICO COMBINADO DE DIVIDENDOS ---
     if not dividendos_anuales.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (10 Años)")
-        divs_10y = dividendos_anuales[dividendos_anuales.index >= fecha_corte_10y.year]
+        fecha_corte_10y_divs = datetime.now() - pd.DateOffset(years=10)
+        divs_10y = dividendos_anuales[dividendos_anuales.index >= fecha_corte_10y_divs.year]
         if len(divs_10y) > 0:
             crecimiento_yoy = divs_10y.pct_change() * 100
             fig_divs = go.Figure()
