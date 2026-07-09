@@ -72,12 +72,11 @@ def screener_weiss_definitivo(ticker_symbol):
         else: pagos_por_año = 4
 
     # --- CÁLCULO DEL TTM ESCALONADO PERFECTO ---
-    # Suma estrictamente los últimos N pagos, evitando el fallo de 252 días
     divs_rodantes = dividendos_limpios.rolling(window=pagos_por_año).sum()
     historial_completo['Div_TTM'] = divs_rodantes
     historial_completo['Div_TTM'] = historial_completo['Div_TTM'].ffill().bfill()
     
-    # Filtro de dividendos especiales (evita que un div extraordinario rompa las franjas)
+    # Filtro de dividendos especiales
     median_div = (dividendos_limpios.groupby(dividendos_limpios.index.year).mean() * pagos_por_año).median()
     if median_div > 0:
         historial_completo['Div_TTM'] = historial_completo['Div_TTM'].apply(lambda x: min(x, median_div * 2.5))
@@ -195,7 +194,6 @@ def screener_weiss_definitivo(ticker_symbol):
     except Exception:
         pass
 
-    # Racha sin recortes sobre la serie limpia
     racha_sin_recortes = 0
     if len(dividendos_anuales) > 1:
         for i in range(1, len(dividendos_anuales)):
@@ -347,37 +345,49 @@ def screener_weiss_definitivo(ticker_symbol):
         )
         st.plotly_chart(fig_shares, use_container_width=True)
 
-    # --- GRÁFICO COMBINADO DE DIVIDENDOS (AHORA CON PORCENTAJES VISIBLES) ---
+    # --- GRÁFICO COMBINADO DE DIVIDENDOS (AHORA CON EJE X ENRIQUECIDO) ---
     if not dividendos_anuales.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (10 Años)")
         fecha_corte_10y_divs = datetime.now() - pd.DateOffset(years=10)
         divs_10y = dividendos_anuales[dividendos_anuales.index >= fecha_corte_10y_divs.year]
+        
         if len(divs_10y) > 0:
             crecimiento_yoy = divs_10y.pct_change() * 100
+            
+            # --- TRUCO MÁGICO: Fusionamos el año y el porcentaje en el eje X ---
+            x_labels_enriquecidos = []
+            for year, val in zip(divs_10y.index, crecimiento_yoy.values):
+                if pd.isna(val):
+                    x_labels_enriquecidos.append(str(year))
+                else:
+                    color_pct = '#21c354' if val > 0 else '#ff4b4b'
+                    signo_pct = '+' if val > 0 else ''
+                    # Añadimos un salto de línea (<br>) y el porcentaje a color debajo del año
+                    x_labels_enriquecidos.append(f"{year}<br><span style='color:{color_pct}; font-size:12px'>{signo_pct}{val:.1f}%</span>")
+            
             fig_divs = go.Figure()
+            
+            # Trazado de las barras (Azul)
             fig_divs.add_trace(go.Bar(
-                x=divs_10y.index.astype(str), y=divs_10y.values, name=f"Dividendo ({sym})", marker_color='#00d4ff', yaxis='y1',
+                x=x_labels_enriquecidos, y=divs_10y.values, name=f"Dividendo ({sym})", marker_color='#00d4ff', yaxis='y1',
                 text=[f"{val:.2f}{sym}" for val in divs_10y.values], textposition='auto'
             ))
             
-            # Formateamos el texto del porcentaje para que se vea claro encima de la línea
-            text_crecimiento = ["" if pd.isna(val) else (f"+{val:.1f}%" if val > 0 else f"{val:.1f}%") for val in crecimiento_yoy.values]
-            
-            # Añadimos '+text' a 'mode' para forzar a Plotly a imprimir los números
+            # Trazado de la línea (Verde) LIMPIA, sin el texto estorbando
             fig_divs.add_trace(go.Scatter(
-                x=crecimiento_yoy.index.astype(str), y=crecimiento_yoy.values, name="Crecimiento YoY", 
-                mode='lines+markers+text', 
-                line=dict(color='#21c354', width=3), 
-                marker=dict(size=8), 
-                yaxis='y2', 
-                text=text_crecimiento, 
-                textposition='top center',
-                textfont=dict(color='#21c354', size=13)
+                x=x_labels_enriquecidos, y=crecimiento_yoy.values, name="Crecimiento YoY", 
+                mode='lines+markers', # Hemos quitado '+text' para limpiar el gráfico
+                line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'
             ))
             
             fig_divs.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=280, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                template='plotly_dark', 
+                margin=dict(l=0, r=0, t=30, b=40), # Aumentado el margen inferior (b=40) para acomodar la nueva línea de texto
+                height=300, 
+                hovermode="x unified", 
+                paper_bgcolor='rgba(0,0,0,0)', 
+                plot_bgcolor='rgba(0,0,0,0)',
                 yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")),
                 yaxis2=dict(title=dict(text="Crecimiento (%)", font=dict(color="#21c354")), tickfont=dict(color="#21c354"), overlaying='y', side='right', showgrid=False),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
