@@ -39,7 +39,6 @@ def screener_weiss_definitivo(ticker_symbol):
     else: sym = '$' 
 
     # --- HISTORIAL COMPLETO (AMPLIADO AL CICLO WEISS DE 12 AÑOS) ---
-    # Descargamos el máximo para asegurar cálculos precisos y luego filtramos
     historial_completo = ticker.history(period="max")
     dividendos = ticker.dividends
     
@@ -50,7 +49,7 @@ def screener_weiss_definitivo(ticker_symbol):
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
 
-    # Recorte exacto a 12 años vista (BUG CORREGIDO AQUÍ)
+    # Recorte exacto a 12 años vista
     fecha_corte_12y = pd.Timestamp.now().normalize() - pd.DateOffset(years=12)
     historial_completo = historial_completo[historial_completo.index >= fecha_corte_12y]
 
@@ -119,7 +118,6 @@ def screener_weiss_definitivo(ticker_symbol):
     respaldo_institucional = get_safe('heldPercentInstitutions') * 100
     payout_forward = (forward_dividend / bpa_forward) * 100 if bpa_forward > 0 else -1
 
-    # BPA (Sigue limitado a los datos que da Yahoo, proxy de 3-4 años)
     años_crecimiento_bpa = 0
     total_años_bpa_datos = 0
     try:
@@ -164,14 +162,13 @@ def screener_weiss_definitivo(ticker_symbol):
             p_fcf = precio_actual / fcf_per_share
             fcf_yield = (fcf_per_share / precio_actual) * 100
 
-    # --- BARRAS DE DIVIDENDOS Y DGR (AHORA A 12 AÑOS) ---
+    # --- BARRAS DE DIVIDENDOS Y DGR (12 AÑOS) ---
     dividendos_barras = dividendos.groupby(dividendos.index.year).sum()
     if año_actual in dividendos_barras.index:
         dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
 
     años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
     
-    # Extraemos 13 barras para poder medir 12 años de crecimiento (saltos)
     divs_recientes = dividendos_barras.tail(13)
     incrementos_dividendo = int((divs_recientes.diff().dropna() > 0).sum())
 
@@ -227,7 +224,7 @@ def screener_weiss_definitivo(ticker_symbol):
     if yield_sobrevalorado > 0: precio_venta = (forward_dividend / yield_sobrevalorado) * 100
     else: precio_venta = 0
 
-    # --- CÁLCULOS MATEMÁTICOS DE DESCUENTO (ANCLADOS A LA MEDIA) ---
+    # --- CÁLCULOS MATEMÁTICOS DE DESCUENTO ---
     if precio_justo > 0:
         pct_actual_vs_media = ((precio_actual - precio_justo) / precio_justo) * 100
         pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100
@@ -351,19 +348,32 @@ def screener_weiss_definitivo(ticker_symbol):
     cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
     cd2.metric("DGR 12 Años (Ciclo Completo)", f"{dgr_12y:.2f}%" if dgr_12y is not None else "N/D")
 
-    # --- NUEVO PANEL: SIMULADOR DE YIELD ON COST (YoC) FUTURO ---
+    # --- NUEVO PANEL: SIMULADOR DE YIELD ON COST (YoC) PURO BLUE CHIP ---
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost)")
-    dgr_proyeccion = max(0.0, dgr_5y) if dgr_5y is not None else 0.0
+    
+    # Estrategia DGI Purista: Prioriza siempre la velocidad de crucero a 12 años.
+    if dgr_12y is not None and dgr_12y > 0:
+        dgr_proyeccion = dgr_12y
+        txt_ritmo = "Ritmo Histórico (12A)"
+    elif dgr_5y is not None and dgr_5y > 0:
+        dgr_proyeccion = dgr_5y
+        txt_ritmo = "Ritmo Medio (5A)"
+    else:
+        dgr_proyeccion = 0.0
+        txt_ritmo = "Crecimiento Estancado"
+    
+    # Mantenemos un tope del 15% como salvaguarda matemática para horizontes largos
+    dgr_proyeccion = min(dgr_proyeccion, 15.0)
     
     yoc_5 = yield_actual * ((1 + dgr_proyeccion/100) ** 5)
     yoc_10 = yield_actual * ((1 + dgr_proyeccion/100) ** 10)
     yoc_15 = yield_actual * ((1 + dgr_proyeccion/100) ** 15)
     
     cp1, cp2, cp3 = st.columns(3)
-    cp1.metric("YoC Esperado a 5 Años", f"{yoc_5:.2f}%", f"Ritmo: +{dgr_proyeccion:.1f}% anual")
-    cp2.metric("YoC Esperado a 10 Años", f"{yoc_10:.2f}%", f"Ritmo: +{dgr_proyeccion:.1f}% anual")
-    cp3.metric("YoC Esperado a 15 Años", f"{yoc_15:.2f}%", f"Ritmo: +{dgr_proyeccion:.1f}% anual")
+    cp1.metric("YoC Esperado a 5 Años", f"{yoc_5:.2f}%", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
+    cp2.metric("YoC Esperado a 10 Años", f"{yoc_10:.2f}%", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
+    cp3.metric("YoC Esperado a 15 Años", f"{yoc_15:.2f}%", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
 
     # --- HISTORIAL ANUAL DE RECOMPRAS ---
     if not shares_yearly.empty and len(shares_yearly) > 1:
