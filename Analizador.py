@@ -171,8 +171,14 @@ def screener_weiss_definitivo(ticker_symbol):
             payout_fcf = -1 
             p_fcf = -1 
 
-    # --- MAGIA DEL CALENDARIO: DIVIDENDOS ANUALES LIMPIOS ---
+    # --- MAGIA DEL CALENDARIO Y CORRECCIÓN DE ASIMETRÍA ---
     dividendos_anuales = dividendos_limpios.groupby(dividendos_limpios.index.year).mean() * pagos_por_año
+    
+    # CORRECCIÓN: Si el año actual está a medias y tiene pagos asimétricos, 
+    # sobrescribimos la proyección irreal con el TTM actual (los últimos 12 meses exactos).
+    if año_actual in dividendos_anuales.index:
+        dividendos_anuales[año_actual] = historial_completo['Div_TTM'].iloc[-1]
+
     años_pagando = año_actual - dividendos_anuales.index[0]
     
     divs_recientes = dividendos_anuales.tail(11)
@@ -355,7 +361,6 @@ def screener_weiss_definitivo(ticker_symbol):
         if len(divs_10y) > 0:
             crecimiento_yoy = divs_10y.pct_change() * 100
             
-            # --- TRUCO MÁGICO: Fusionamos el año y el porcentaje en el eje X ---
             x_labels_enriquecidos = []
             for year, val in zip(divs_10y.index, crecimiento_yoy.values):
                 if pd.isna(val):
@@ -363,27 +368,24 @@ def screener_weiss_definitivo(ticker_symbol):
                 else:
                     color_pct = '#21c354' if val > 0 else '#ff4b4b'
                     signo_pct = '+' if val > 0 else ''
-                    # Añadimos un salto de línea (<br>) y el porcentaje a color debajo del año
                     x_labels_enriquecidos.append(f"{year}<br><span style='color:{color_pct}; font-size:12px'>{signo_pct}{val:.1f}%</span>")
             
             fig_divs = go.Figure()
             
-            # Trazado de las barras (Azul)
             fig_divs.add_trace(go.Bar(
                 x=x_labels_enriquecidos, y=divs_10y.values, name=f"Dividendo ({sym})", marker_color='#00d4ff', yaxis='y1',
                 text=[f"{val:.2f}{sym}" for val in divs_10y.values], textposition='auto'
             ))
             
-            # Trazado de la línea (Verde) LIMPIA, sin el texto estorbando
             fig_divs.add_trace(go.Scatter(
                 x=x_labels_enriquecidos, y=crecimiento_yoy.values, name="Crecimiento YoY", 
-                mode='lines+markers', # Hemos quitado '+text' para limpiar el gráfico
+                mode='lines+markers', 
                 line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'
             ))
             
             fig_divs.update_layout(
                 template='plotly_dark', 
-                margin=dict(l=0, r=0, t=30, b=40), # Aumentado el margen inferior (b=40) para acomodar la nueva línea de texto
+                margin=dict(l=0, r=0, t=30, b=40), 
                 height=300, 
                 hovermode="x unified", 
                 paper_bgcolor='rgba(0,0,0,0)', 
