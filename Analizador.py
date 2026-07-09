@@ -535,5 +535,3 @@ if analizar and ticker_input:
     with st.spinner(f"Analizando {ticker_input}..."):
         try: screener_weiss_definitivo(ticker_input)
         except Exception as e: st.error(f"Se ha producido un error al descargar los datos: {e}")
-
-```
