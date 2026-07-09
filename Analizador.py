@@ -347,7 +347,7 @@ def screener_weiss_definitivo(ticker_symbol):
         )
         st.plotly_chart(fig_shares, use_container_width=True)
 
-    # --- GRÁFICO COMBINADO DE DIVIDENDOS ---
+    # --- GRÁFICO COMBINADO DE DIVIDENDOS (AHORA CON PORCENTAJES VISIBLES) ---
     if not dividendos_anuales.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (10 Años)")
@@ -360,11 +360,22 @@ def screener_weiss_definitivo(ticker_symbol):
                 x=divs_10y.index.astype(str), y=divs_10y.values, name=f"Dividendo ({sym})", marker_color='#00d4ff', yaxis='y1',
                 text=[f"{val:.2f}{sym}" for val in divs_10y.values], textposition='auto'
             ))
+            
+            # Formateamos el texto del porcentaje para que se vea claro encima de la línea
             text_crecimiento = ["" if pd.isna(val) else (f"+{val:.1f}%" if val > 0 else f"{val:.1f}%") for val in crecimiento_yoy.values]
+            
+            # Añadimos '+text' a 'mode' para forzar a Plotly a imprimir los números
             fig_divs.add_trace(go.Scatter(
-                x=crecimiento_yoy.index.astype(str), y=crecimiento_yoy.values, name="Crecimiento YoY", mode='lines+markers',
-                line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2', text=text_crecimiento, textposition='top center'
+                x=crecimiento_yoy.index.astype(str), y=crecimiento_yoy.values, name="Crecimiento YoY", 
+                mode='lines+markers+text', 
+                line=dict(color='#21c354', width=3), 
+                marker=dict(size=8), 
+                yaxis='y2', 
+                text=text_crecimiento, 
+                textposition='top center',
+                textfont=dict(color='#21c354', size=13)
             ))
+            
             fig_divs.update_layout(
                 template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=280, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                 yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")),
