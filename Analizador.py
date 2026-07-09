@@ -50,8 +50,8 @@ def screener_weiss_definitivo(ticker_symbol):
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
 
-    # Recorte exacto a 12 años vista
-    fecha_corte_12y = datetime.now().normalize() - pd.DateOffset(years=12)
+    # Recorte exacto a 12 años vista (BUG CORREGIDO AQUÍ)
+    fecha_corte_12y = pd.Timestamp.now().normalize() - pd.DateOffset(years=12)
     historial_completo = historial_completo[historial_completo.index >= fecha_corte_12y]
 
     if historial_completo.empty:
@@ -285,7 +285,7 @@ def screener_weiss_definitivo(ticker_symbol):
     if 0 < p_fcf <= 20: score += 1
     if variacion_acciones is not None and variacion_acciones < 0: score += 1
     if años_pagando >= 25 and racha_sin_recortes >= 12: score += 1
-    if incrementos_dividendo >= 5: score += 1  # Ahora evalúa las últimas 12 barras
+    if incrementos_dividendo >= 5: score += 1
     if total_años_bpa_datos > 0 and (años_crecimiento_bpa / total_años_bpa_datos) >= 0.65: score += 1
     if market_cap > 10_000_000_000: score += 1
 
