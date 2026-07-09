@@ -11,9 +11,12 @@ warnings.filterwarnings('ignore')
 # Configuración principal de la página
 st.set_page_config(page_title="Screener Geraldine Weiss", page_icon="📊", layout="wide")
 
-def screener_weiss_definitivo(ticker_symbol, años_analisis):
+def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info
+    
+    # Multiplicador para calcular el Neto
+    net_mult = 1 - (impuesto_pct / 100)
     
     def get_safe(key, default=0.0):
         val = info.get(key)
@@ -169,6 +172,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
 
     años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
     
+    # Evaluar incrementos en base al periodo seleccionado
     divs_recientes = dividendos_barras.tail(años_analisis + 1)
     incrementos_dividendo = int((divs_recientes.diff().dropna() > 0).sum())
 
@@ -191,6 +195,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
             else: break
 
     # --- VARIACIÓN DE ACCIONES DINÁMICA ---
+    # Se descargan 3 años extra del periodo seleccionado para asegurar el cálculo YoY
     fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
     variacion_acciones = None
     shares_yearly = pd.Series(dtype=float)
@@ -268,10 +273,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
         """, unsafe_allow_html=True)
 
     col1, col2, col3, col4 = st.columns(4)
-    with col1: metric_color("Cotización Actual", f"{precio_actual / divisor_uk:.2f}{sym}", f"Yield: {yield_actual:.2f}%", txt_extra_actual, color_actual)
-    with col2: metric_color("Franja Infravalorada", f"{precio_compra / divisor_uk:.2f}{sym}", f"Yield {yield_infravalorado:.2f}%", txt_extra_infra, "#21c354") 
-    with col3: metric_color("Precio Justo (Media)", f"{precio_justo / divisor_uk:.2f}{sym}", f"Yield {yield_medio:.2f}%", txt_extra_justo, "#faca2b") 
-    with col4: metric_color("Franja Sobrevalorada", f"{precio_venta / divisor_uk:.2f}{sym}", f"Yield {yield_sobrevalorado:.2f}%", txt_extra_sobre, "#ff4b4b") 
+    # INYECCIÓN DEL NETO EN LAS TARJETAS PRINCIPALES
+    with col1: metric_color("Cotización Actual", f"{precio_actual / divisor_uk:.2f}{sym}", f"Yield: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% neto)", txt_extra_actual, color_actual)
+    with col2: metric_color("Franja Infravalorada", f"{precio_compra / divisor_uk:.2f}{sym}", f"Yield {yield_infravalorado:.2f}% ({yield_infravalorado * net_mult:.2f}% neto)", txt_extra_infra, "#21c354") 
+    with col3: metric_color("Precio Justo (Media)", f"{precio_justo / divisor_uk:.2f}{sym}", f"Yield {yield_medio:.2f}% ({yield_medio * net_mult:.2f}% neto)", txt_extra_justo, "#faca2b") 
+    with col4: metric_color("Franja Sobrevalorada", f"{precio_venta / divisor_uk:.2f}{sym}", f"Yield {yield_sobrevalorado:.2f}% ({yield_sobrevalorado * net_mult:.2f}% neto)", txt_extra_sobre, "#ff4b4b") 
 
     if precio_actual <= precio_compra: st.success("💡 ESTADO: En zona de COMPRA CLARA (Infravalorada).")
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
@@ -383,10 +389,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
     yoc_10 = yield_actual * ((1 + dgr_proyeccion/100) ** 10)
     yoc_15 = yield_actual * ((1 + dgr_proyeccion/100) ** 15)
     
+    # INYECCIÓN DEL NETO EN EL YOC
     cp1, cp2, cp3 = st.columns(3)
-    cp1.metric("YoC Esperado a 5 Años", f"{yoc_5:.2f}%", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
-    cp2.metric("YoC Esperado a 10 Años", f"{yoc_10:.2f}%", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
-    cp3.metric("YoC Esperado a 15 Años", f"{yoc_15:.2f}%", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
+    cp1.metric("YoC Esperado a 5 Años", f"{yoc_5:.2f}% ({yoc_5 * net_mult:.2f}% neto)", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
+    cp2.metric("YoC Esperado a 10 Años", f"{yoc_10:.2f}% ({yoc_10 * net_mult:.2f}% neto)", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
+    cp3.metric("YoC Esperado a 15 Años", f"{yoc_15:.2f}% ({yoc_15 * net_mult:.2f}% neto)", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
 
     # --- HISTORIAL ANUAL DE RECOMPRAS ---
     if not shares_yearly.empty and len(shares_yearly) > 1:
@@ -445,9 +452,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
     # 3. DECÁLOGO DE CALIDAD
     st.subheader(f"📋 Decálogo de Calidad del Blue Chip ({años_analisis} Años)")
     
-    if yield_actual >= yield_infravalorado: st.success(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Excelente, supera el {yield_infravalorado:.2f}%)")
-    elif yield_actual >= yield_medio: st.warning(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Aceptable, superior a media de {yield_medio:.2f}%)")
-    else: st.error(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Pobre, inferior a media de {yield_medio:.2f}%)")
+    # INYECCIÓN DEL NETO EN EL DECÁLOGO
+    if yield_actual >= yield_infravalorado: st.success(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Excelente, supera el {yield_infravalorado:.2f}%)")
+    elif yield_actual >= yield_medio: st.warning(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Aceptable, superior a media de {yield_medio:.2f}%)")
+    else: st.error(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Pobre, inferior a media de {yield_medio:.2f}%)")
 
     if 0 < payout_ratio <= payout_limite_bpa: st.success(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
     else: st.error(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado, el límite de su sector exige < {payout_limite_bpa:.0f}%)")
@@ -521,17 +529,20 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
 st.title("Screener Fundamental - Método Geraldine Weiss")
 st.markdown("Introduce el ticker de una empresa para extraer sus datos financieros, rentabilidad real (FCF) y calcular sus bandas de valoración históricas.")
 
-# Novedad: Menú desplegable para elegir el número de años
-col_input, col_period, col_btn = st.columns([3, 1.5, 1])
+# Nueva estructura con 4 columnas para incluir la retención fiscal
+col_input, col_period, col_tax, col_btn = st.columns([2.5, 1.5, 1, 1])
 
 with col_input:
     ticker_input = st.text_input("Ticker de la empresa (Ej: ACN, WKL, MCD):", placeholder="Escribe aquí...").upper()
 
 with col_period:
-    # Opciones de tiempo. El índice 2 equivale a "12 Años" (Predeterminado)
     opciones_periodo = {"5 Años": 5, "10 Años": 10, "12 Años (Ciclo Weiss)": 12, "15 Años": 15, "20 Años (Largo Plazo)": 20}
     seleccion = st.selectbox("Periodo de Análisis:", list(opciones_periodo.keys()), index=2)
     años_analisis = opciones_periodo[seleccion]
+
+with col_tax:
+    # Retención por defecto en España (19%) pero ajustable
+    impuesto = st.number_input("Retención (%)", min_value=0.0, max_value=50.0, value=19.0, step=1.0)
 
 with col_btn:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -540,6 +551,6 @@ with col_btn:
 if analizar and ticker_input:
     with st.spinner(f"Analizando {ticker_input} a {años_analisis} años..."):
         try: 
-            screener_weiss_definitivo(ticker_input, años_analisis)
+            screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
         except Exception as e: 
             st.error(f"Se ha producido un error al descargar los datos: {e}")
