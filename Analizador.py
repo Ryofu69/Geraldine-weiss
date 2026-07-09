@@ -57,7 +57,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
         st.error(f"❌ Error: No se encontraron datos de cotización en los últimos {años_analisis} años.")
         return
 
-    # --- DETERMINAR FRECUENCIA Y FORWARD DIVIDEND ---
+    # --- CÁLCULO ESTRICTO DE DIVIDENDOS ANUALES (MÉTODO PURO) ---
+    divs_por_año = dividendos.groupby(dividendos.index.year).sum()
+
+    # --- DETERMINAR FORWARD DIVIDEND ---
     precio_actual = historial_analisis['Close'].dropna().iloc[-1]
     año_actual = datetime.now().year
     
@@ -71,14 +74,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
 
     forward_dividend = get_safe('dividendRate')
     if forward_dividend == 0: forward_dividend = get_safe('trailingAnnualDividendRate')
-
-    # --- CÁLCULO INTELIGENTE DE DIVIDENDOS ANUALES (EL ALGORITMO DEFINITIVO) ---
-    dividendos_anuales_stats = dividendos.groupby(dividendos.index.year).agg(['sum', 'count', 'mean'])
-    divs_por_año = pd.Series(index=dividendos_anuales_stats.index, dtype=float)
-    
     if forward_dividend == 0: 
         if not dividendos.empty:
-            ultimo_año_completo = dividendos_anuales_stats['sum'].iloc[-2] if len(dividendos_anuales_stats) > 1 else 0
+            ultimo_año_completo = divs_por_año.iloc[-2] if len(divs_por_año) > 1 else 0
             forward_dividend = max(dividendos.iloc[-1] * pagos_por_año, ultimo_año_completo)
         else:
             forward_dividend = 0
@@ -86,19 +84,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
     if currency == 'GBp' and forward_dividend > 0:
         if forward_dividend < (precio_actual / 10): forward_dividend = forward_dividend * 100
 
-    for año, row in dividendos_anuales_stats.iterrows():
-        if año == año_actual:
-            divs_por_año[año] = max(forward_dividend, dividendos[dividendos.index.year == año_actual].sum())
-        else:
-            if row['count'] == pagos_por_año:
-                divs_por_año[año] = row['sum']
-            else:
-                divs_por_año[año] = row['mean'] * pagos_por_año
-
-    # --- EL MODELO ESCALÓN ANUAL (AL PERIODO SELECCIONADO PARA LAS BANDAS) ---
+    # --- EL MODELO ESCALÓN ANUAL (AL PERIODO SELECCIONADO) ---
     historial_analisis['Year'] = historial_analisis.index.year
     historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_por_año)
-    
     historial_analisis.loc[historial_analisis['Year'] == año_actual, 'Div_Anual'] = forward_dividend
     historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
 
@@ -181,7 +169,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
 
     años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
     
-    # Evaluar incrementos en base al periodo seleccionado
     divs_recientes = dividendos_barras.tail(años_analisis + 1)
     incrementos_dividendo = int((divs_recientes.diff().dropna() > 0).sum())
 
@@ -204,7 +191,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis):
             else: break
 
     # --- VARIACIÓN DE ACCIONES DINÁMICA ---
-    # Se descargan 3 años extra del periodo seleccionado para asegurar el cálculo YoY
     fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
     variacion_acciones = None
     shares_yearly = pd.Series(dtype=float)
