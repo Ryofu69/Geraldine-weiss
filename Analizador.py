@@ -49,15 +49,9 @@ def screener_weiss_definitivo(ticker_symbol):
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
 
-    # --- CÁLCULO ESTRICTO DE DIVIDENDOS ANUALES (EVITA EL BUG ASIMÉTRICO DE WKL) ---
+    # --- CÁLCULO ESTRICTO DE DIVIDENDOS ANUALES ---
+    # Suma estrictamente el dinero real pagado por año. Eliminado el filtro que rompía empresas viejas como MCD.
     divs_por_año = dividendos.groupby(dividendos.index.year).sum()
-    
-    # Filtro anticrisis: Evitar que un dividendo especial masivo rompa las bandas
-    median_div = divs_por_año.median()
-    if median_div > 0:
-        divs_por_año_suavizados = divs_por_año.apply(lambda x: min(x, median_div * 2.5))
-    else:
-        divs_por_año_suavizados = divs_por_año
 
     # --- DETERMINAR FORWARD DIVIDEND ---
     precio_actual = historial_completo['Close'].dropna().iloc[-1]
@@ -83,15 +77,17 @@ def screener_weiss_definitivo(ticker_symbol):
     if currency == 'GBp' and forward_dividend > 0:
         if forward_dividend < (precio_actual / 10): forward_dividend = forward_dividend * 100
 
-    # --- EL MODELO ESCALÓN: MAPEAMOS EL DIVIDENDO ANUAL A CADA DÍA DE COTIZACIÓN ---
+    # --- EL MODELO ESCALÓN PARA LAS FRANJAS DE VALORACIÓN ---
     historial_completo['Year'] = historial_completo.index.year
-    historial_completo['Div_Anual'] = historial_completo['Year'].map(divs_por_año_suavizados)
     
-    # Para el año actual (a medias), forzamos el forward o rellenamos para evitar franjas rotas
+    # Aplicamos el dividendo anual exacto a cada día de cotización de ese año
+    historial_completo['Div_Anual'] = historial_completo['Year'].map(divs_por_año)
+    
+    # Para el año actual, forzamos el forward o rellenamos para evitar franjas rotas por la asimetría europea
     historial_completo.loc[historial_completo['Year'] == año_actual, 'Div_Anual'] = forward_dividend
     historial_completo['Div_Anual'] = historial_completo['Div_Anual'].bfill().ffill()
 
-    # Cálculo del Yield (Ahora es 100% estable)
+    # Cálculo del Yield (Ahora es 100% estable y escalonado)
     historial_completo['Yield_Diario'] = (historial_completo['Div_Anual'] / historial_completo['Close']) * 100
 
     yields_validos = historial_completo['Yield_Diario'].dropna()
@@ -164,7 +160,7 @@ def screener_weiss_definitivo(ticker_symbol):
     # --- BARRAS DE DIVIDENDOS Y DGR ---
     dividendos_barras = dividendos.groupby(dividendos.index.year).sum()
     
-    # Sobrescribir el año actual con la proyección si es superior al cobrado hasta ahora
+    # Sobrescribir el año actual con la proyección estricta si es superior al cobrado hasta ahora
     if año_actual in dividendos_barras.index:
         dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
 
@@ -329,7 +325,7 @@ def screener_weiss_definitivo(ticker_symbol):
         )
         st.plotly_chart(fig_shares, use_container_width=True)
 
-    # --- GRÁFICO COMBINADO DE DIVIDENDOS CON EJE X ENRIQUECIDO ---
+    # --- GRÁFICO COMBINADO DE DIVIDENDOS ---
     if not dividendos_barras.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (10 Años)")
