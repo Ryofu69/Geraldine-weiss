@@ -1,4 +1,3 @@
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -50,7 +49,7 @@ def screener_weiss_definitivo(ticker_symbol):
     historial_completo['Div_TTM'] = historial_completo['Div'].rolling(window=252).sum()
     historial_completo['Yield_Diario'] = (historial_completo['Div_TTM'] / historial_completo['Close']) * 100
 
-    # Extraemos los yields válidos de los 10 años completos para máxima precisión de ciclo largo
+    # Extraemos los yields válidos de los 10 años completos
     yields_validos = historial_completo['Yield_Diario'].dropna()
     yields_validos = yields_validos[yields_validos > 0]
     
@@ -152,7 +151,7 @@ def screener_weiss_definitivo(ticker_symbol):
             if bloque_hace_5_años > 0:
                 dgr_5y = (((bloque_actual / bloque_hace_5_años) ** (1 / 5)) - 1) * 100
 
-    # NUEVO: Crecimiento de dividendo compuesto a 10 años (DGR 10Y)
+    # Crecimiento de dividendo compuesto a 10 años (DGR 10Y)
     dgr_10y = None
     if len(dividendos) >= (pagos_por_año * 10): 
         bloque_actual_10 = dividendos.tail(pagos_por_año).sum()
@@ -291,7 +290,7 @@ def screener_weiss_definitivo(ticker_symbol):
 
     st.divider()
 
-    # 2. BENEFICIOS Y PROYECCIONES CON COLOR EN RECOMPRAS (AMPLIADO A 10Y EN LA MÉTRICA)
+    # 2. BENEFICIOS Y PROYECCIONES CON COLOR EN RECOMPRAS
     st.subheader("📊 Beneficios, Proyecciones y Acciones")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("BPA Actual", f"{bpa_trailing / divisor_uk:.2f}{sym}" if bpa_trailing != 0 else "N/D")
@@ -311,7 +310,14 @@ def screener_weiss_definitivo(ticker_symbol):
     else:
         c5.metric("Acciones (10Y)", "N/D")
 
-    # --- HISTORIAL ANUAL DE RECOMPRAS (AHORA RECOGE LOS 10 AÑOS) ---
+    # --- ROW EXCLUSIVO PARA HISTORIAL DE DGR ---
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("#### 📈 Crecimiento Anual Compuesto del Dividendo (CAGR / DGR)")
+    cd1, cd2 = st.columns(2)
+    cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
+    cd2.metric("DGR 10 Años (Largo Plazo)", f"{dgr_10y:.2f}%" if dgr_10y is not None else "N/D")
+
+    # --- HISTORIAL ANUAL DE RECOMPRAS ---
     if not shares_yearly.empty and len(shares_yearly) > 1:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 🔄 Historial Anual de Recompras / Dilución")
@@ -336,7 +342,7 @@ def screener_weiss_definitivo(ticker_symbol):
         )
         st.plotly_chart(fig_shares, use_container_width=True)
 
-    # --- GRÁFICO COMBINADO AMPLIO (MODIFICADO A 10 AÑOS COMPLETOS) ---
+    # --- GRÁFICO COMBINADO AMPLIO (MODIFICADO A 10 AÑOS COMPLETOS SIN ERRORES) ---
     if not dividendos_anuales.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (10 Años)")
@@ -377,14 +383,13 @@ def screener_weiss_definitivo(ticker_symbol):
                 hovermode="x unified",
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
+                # AQUÍ ESTÁ LA CORRECCIÓN DE SINTAXIS PARA STREAMLIT CLOUD (title=dict)
                 yaxis=dict(
-                    title=f"Dividendo ({sym})",
-                    titlefont=dict(color="#00d4ff"),
+                    title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")),
                     tickfont=dict(color="#00d4ff")
                 ),
                 yaxis2=dict(
-                    title="Crecimiento (%)",
-                    titlefont=dict(color="#21c354"),
+                    title=dict(text="Crecimiento (%)", font=dict(color="#21c354")),
                     tickfont=dict(color="#21c354"),
                     overlaying='y',
                     side='right',
@@ -429,7 +434,7 @@ def screener_weiss_definitivo(ticker_symbol):
         elif variacion_acciones <= 5:
             st.warning(f"Acciones en circulación: +{variacion_acciones:.2f}% en 10 años (Estable / Ligera dilución)")
         else:
-            st.error(f"Acciones en circulación: +{variacion_acciones:.2f}% en 10 años (Peligro, la empresa diluye al accionista)")
+            st.error(f"Acciones en circulación: +{variacion_acciones:.2f}% en 10 años (Peligro, la empresa diluye fuertemente)")
     else:
         st.warning("Acciones en circulación: Sin datos históricos suficientes.")
 
@@ -437,7 +442,7 @@ def screener_weiss_definitivo(ticker_symbol):
     elif años_pagando >= 25: st.warning(f"Historial: {años_pagando} años pagando | Racha: {racha_sin_recortes} años sin recortes")
     else: st.warning(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Falta para > 25 años)")
 
-    # --- MODIFICADO: EVALUACIÓN SIMULTÁNEA DE DGR A 5 Y 10 AÑOS ---
+    # EVALUACIÓN SIMULTÁNEA DE DGR A 5 Y 10 AÑOS
     if dgr_5y is not None:
         if dgr_5y >= 10: st.success(f"Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Excelente)")
         elif dgr_5y > 0: st.warning(f"Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Positivo)")
