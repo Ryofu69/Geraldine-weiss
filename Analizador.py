@@ -21,7 +21,7 @@ def screener_weiss_definitivo(ticker_symbol):
         try: return float(val)
         except (ValueError, TypeError): return default
 
-    # --- DETECCIÓN DE SECTOR (MÉTODO WEISS REAL) ---
+    # --- DETECCIÓN DE SECTOR ---
     sector = info.get('sector', '')
     industry = info.get('industry', '')
     es_regulada_o_reit = 'utility' in sector.lower() or 'utilities' in sector.lower() or 'reit' in industry.lower() or 'real estate' in sector.lower()
@@ -31,7 +31,6 @@ def screener_weiss_definitivo(ticker_symbol):
 
     currency = info.get('currency', 'USD')
     divisor_uk = 1.0 
-    
     if currency == 'EUR': sym = '€'
     elif currency == 'GBP': sym = '£'
     elif currency == 'GBp':
@@ -39,49 +38,61 @@ def screener_weiss_definitivo(ticker_symbol):
         divisor_uk = 100.0 
     else: sym = '$' 
 
-    # --- HISTORIAL Y BANDAS YIELD (EXTRACCIÓN PERFECTA 10 AÑOS) ---
+    # --- HISTORIAL COMPLETO (10 AÑOS) ---
     historial_completo = ticker.history(period="10y")
+    dividendos = ticker.dividends
     
-    if historial_completo.empty or 'Dividends' not in historial_completo.columns:
+    if dividendos.empty or len(historial_completo) < 252:
         st.error("❌ Error: No hay suficientes datos históricos o de dividendos en Yahoo Finance.")
         return
 
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
-    
-    # Extraemos los dividendos de la MISMA tabla del histórico para evitar el bug de alineación
-    dividendos_limpios = historial_completo['Dividends'][historial_completo['Dividends'] > 0]
-    
-    if dividendos_limpios.empty or len(historial_completo) < 252:
-        st.error("❌ Error: No se detectan pagos de dividendos en la tabla histórica.")
-        return
+    dividendos.index = dividendos.index.tz_localize(None).normalize()
 
-    # Determinar pagos por año
+    # --- CÁLCULO ESTRICTO DE DIVIDENDOS ANUALES (EVITA EL BUG ASIMÉTRICO DE WKL) ---
+    divs_por_año = dividendos.groupby(dividendos.index.year).sum()
+    
+    # Filtro anticrisis: Evitar que un dividendo especial masivo rompa las bandas
+    median_div = divs_por_año.median()
+    if median_div > 0:
+        divs_por_año_suavizados = divs_por_año.apply(lambda x: min(x, median_div * 2.5))
+    else:
+        divs_por_año_suavizados = divs_por_año
+
+    # --- DETERMINAR FORWARD DIVIDEND ---
+    precio_actual = historial_completo['Close'].dropna().iloc[-1]
     año_actual = datetime.now().year
-    años = dividendos_limpios.index.year
+    
+    años = dividendos.index.year
     conteo_por_año = años.value_counts()
     conteo_cerrado = conteo_por_año[conteo_por_año.index < año_actual]
     
-    if not conteo_cerrado.empty:
-        pagos_por_año = int(conteo_cerrado.mode().iloc[0])
-    else:
-        pagos_por_año = int(conteo_por_año.mode().iloc[0]) if not conteo_por_año.empty else 4 
-        
+    pagos_por_año = int(conteo_cerrado.mode().iloc[0]) if not conteo_cerrado.empty else 4
     if pagos_por_año not in [1, 2, 4, 12]:
-        if pagos_por_año == 3: pagos_por_año = 4
-        elif pagos_por_año > 10: pagos_por_año = 12
-        else: pagos_por_año = 4
+        pagos_por_año = 4 if pagos_por_año == 3 else (12 if pagos_por_año > 10 else 4)
 
-    # --- CÁLCULO DEL TTM ESCALONADO PERFECTO ---
-    divs_rodantes = dividendos_limpios.rolling(window=pagos_por_año).sum()
-    historial_completo['Div_TTM'] = divs_rodantes
-    historial_completo['Div_TTM'] = historial_completo['Div_TTM'].ffill().bfill()
+    forward_dividend = get_safe('dividendRate')
+    if forward_dividend == 0: forward_dividend = get_safe('trailingAnnualDividendRate')
+    if forward_dividend == 0: 
+        if not dividendos.empty:
+            ultimo_año_completo = divs_por_año.iloc[-2] if len(divs_por_año) > 1 else 0
+            forward_dividend = max(dividendos.iloc[-1] * pagos_por_año, ultimo_año_completo)
+        else:
+            forward_dividend = 0
+            
+    if currency == 'GBp' and forward_dividend > 0:
+        if forward_dividend < (precio_actual / 10): forward_dividend = forward_dividend * 100
+
+    # --- EL MODELO ESCALÓN: MAPEAMOS EL DIVIDENDO ANUAL A CADA DÍA DE COTIZACIÓN ---
+    historial_completo['Year'] = historial_completo.index.year
+    historial_completo['Div_Anual'] = historial_completo['Year'].map(divs_por_año_suavizados)
     
-    # Filtro de dividendos especiales
-    median_div = (dividendos_limpios.groupby(dividendos_limpios.index.year).mean() * pagos_por_año).median()
-    if median_div > 0:
-        historial_completo['Div_TTM'] = historial_completo['Div_TTM'].apply(lambda x: min(x, median_div * 2.5))
+    # Para el año actual (a medias), forzamos el forward o rellenamos para evitar franjas rotas
+    historial_completo.loc[historial_completo['Year'] == año_actual, 'Div_Anual'] = forward_dividend
+    historial_completo['Div_Anual'] = historial_completo['Div_Anual'].bfill().ffill()
 
-    historial_completo['Yield_Diario'] = (historial_completo['Div_TTM'] / historial_completo['Close']) * 100
+    # Cálculo del Yield (Ahora es 100% estable)
+    historial_completo['Yield_Diario'] = (historial_completo['Div_Anual'] / historial_completo['Close']) * 100
 
     yields_validos = historial_completo['Yield_Diario'].dropna()
     yields_validos = yields_validos[yields_validos > 0]
@@ -94,33 +105,18 @@ def screener_weiss_definitivo(ticker_symbol):
     yield_sobrevalorado = yields_validos.quantile(0.05) 
     yield_medio = yields_validos.mean()
 
-    # --- DATOS ACTUALES ---
-    precio_actual = historial_completo['Close'].dropna().iloc[-1]
-    ultimo_pago = dividendos_limpios.iloc[-1]
-    
-    forward_dividend = get_safe('dividendRate')
-    if forward_dividend == 0: 
-        forward_dividend = get_safe('trailingAnnualDividendRate')
-    if forward_dividend == 0: 
-        forward_dividend = ultimo_pago * pagos_por_año 
-        
-    if currency == 'GBp' and forward_dividend > 0:
-        if forward_dividend < (precio_actual / 10): 
-            forward_dividend = forward_dividend * 100
-            
     yield_actual = (forward_dividend / precio_actual) * 100
-    
+
+    # --- FUNDAMENTALES ---
     payout_ratio = get_safe('payoutRatio') * 100
     per = get_safe('trailingPE', get_safe('forwardPE'))
     deuda_equity = get_safe('debtToEquity') 
     market_cap = get_safe('marketCap')
     current_ratio = get_safe('currentRatio') 
-
     bpa_trailing = get_safe('trailingEps')
     bpa_forward = get_safe('forwardEps')
     per_forward = get_safe('forwardPE')
     
-    # --- CONSISTENCIA DE BENEFICIOS AÑO A AÑO ---
     años_crecimiento_bpa = 0
     total_años_bpa_datos = 0
     try:
@@ -134,8 +130,7 @@ def screener_weiss_definitivo(ticker_symbol):
                         años_crecimiento_bpa = int((diffs > 0).sum())
                         total_años_bpa_datos = len(diffs)
                         break
-    except Exception:
-        pass
+    except Exception: pass
         
     crecimiento_bpa_3y = None
     try:
@@ -150,60 +145,49 @@ def screener_weiss_definitivo(ticker_symbol):
                 eps_pasado = eps_data.iloc[3] 
                 if eps_pasado > 0 and eps_actual > 0:
                     crecimiento_bpa_3y = (((eps_actual / eps_pasado) ** (1 / 3)) - 1) * 100
-    except Exception:
-        pass
+    except Exception: pass
     
     fcf = get_safe('freeCashflow')
     shares = get_safe('sharesOutstanding')
-    payout_fcf = None
-    p_fcf = None
-    fcf_yield = None
+    payout_fcf = -1
+    p_fcf = -1
+    fcf_yield = 0
     
     if fcf != 0 and shares > 0:
         fcf_per_share = fcf / shares
         if currency == 'GBp': fcf_per_share *= 100 
-        
         if fcf_per_share > 0:
             payout_fcf = (forward_dividend / fcf_per_share) * 100
             p_fcf = precio_actual / fcf_per_share
             fcf_yield = (fcf_per_share / precio_actual) * 100
-        else:
-            payout_fcf = -1 
-            p_fcf = -1 
 
-    # --- MAGIA DEL CALENDARIO Y CORRECCIÓN DE ASIMETRÍA ---
-    dividendos_anuales = dividendos_limpios.groupby(dividendos_limpios.index.year).mean() * pagos_por_año
+    # --- BARRAS DE DIVIDENDOS Y DGR ---
+    dividendos_barras = dividendos.groupby(dividendos.index.year).sum()
     
-    # CORRECCIÓN: Si el año actual está a medias y tiene pagos asimétricos, 
-    # sobrescribimos la proyección irreal con el TTM actual (los últimos 12 meses exactos).
-    if año_actual in dividendos_anuales.index:
-        dividendos_anuales[año_actual] = historial_completo['Div_TTM'].iloc[-1]
+    # Sobrescribir el año actual con la proyección si es superior al cobrado hasta ahora
+    if año_actual in dividendos_barras.index:
+        dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
 
-    años_pagando = año_actual - dividendos_anuales.index[0]
+    años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
     
-    divs_recientes = dividendos_anuales.tail(11)
+    divs_recientes = dividendos_barras.tail(11)
     incrementos_dividendo = int((divs_recientes.diff().dropna() > 0).sum())
 
-    # --- CÁLCULO DGR 5Y Y 10Y BASADO EN LA SERIE LIMPIA ---
     dgr_5y = None
     dgr_10y = None
-    try:
-        if len(dividendos_anuales) >= 6:
-            div_actual = dividendos_anuales.iloc[-1]
-            div_5y = dividendos_anuales.iloc[-6]
-            if div_5y > 0:
-                dgr_5y = ((div_actual / div_5y) ** (1/5) - 1) * 100
-        if len(dividendos_anuales) >= 11:
-            div_10y = dividendos_anuales.iloc[-11]
-            if div_10y > 0:
-                dgr_10y = ((div_actual / div_10y) ** (1/10) - 1) * 100
-    except Exception:
-        pass
+    if len(dividendos_barras) >= 6:
+        div_actual = dividendos_barras.iloc[-1]
+        div_5y = dividendos_barras.iloc[-6]
+        if div_5y > 0: dgr_5y = ((div_actual / div_5y) ** (1/5) - 1) * 100
+            
+    if len(dividendos_barras) >= 11:
+        div_10y = dividendos_barras.iloc[-11]
+        if div_10y > 0: dgr_10y = ((div_actual / div_10y) ** (1/10) - 1) * 100
 
     racha_sin_recortes = 0
-    if len(dividendos_anuales) > 1:
-        for i in range(1, len(dividendos_anuales)):
-            if dividendos_anuales.iloc[-(i)] >= dividendos_anuales.iloc[-(i+1)] * 0.99:
+    if len(dividendos_barras) > 1:
+        for i in range(1, len(dividendos_barras)):
+            if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.99:
                 racha_sin_recortes += 1
             else:
                 break
@@ -219,10 +203,8 @@ def screener_weiss_definitivo(ticker_symbol):
             shares_yearly = shares_hist.groupby(shares_hist.index.year).last()
             acc_ini = shares_yearly.iloc[0]
             acc_fin = shares_yearly.iloc[-1]
-            if acc_ini > 0:
-                variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-    except Exception:
-        pass
+            if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+    except Exception: pass
         
     if variacion_acciones is None or shares_yearly.empty:
         try:
@@ -235,11 +217,9 @@ def screener_weiss_definitivo(ticker_symbol):
                             shares_yearly = sh_data.groupby(sh_data.index.year).last()
                             acc_ini = shares_yearly.iloc[0]
                             acc_fin = shares_yearly.iloc[-1]
-                            if acc_ini > 0:
-                                variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                            if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
                             break
-        except Exception:
-            pass
+        except Exception: pass
 
     if yield_infravalorado > 0: precio_compra = (forward_dividend / yield_infravalorado) * 100
     else: precio_compra = 0
@@ -279,13 +259,11 @@ def screener_weiss_definitivo(ticker_symbol):
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
 
-    # --- GRÁFICO INTERACTIVO (10 AÑOS) ---
+    # --- GRÁFICO INTERACTIVO (10 AÑOS - ESCALONADO PERFECTO) ---
     st.markdown("### 📈 Evolución Histórica de Valoración (10 Años)")
     df_grafico = historial_completo[['Close']].copy()
     if not df_grafico.empty:
-        df_grafico['Div_Grafico'] = historial_completo['Div_TTM']
-        if not dividendos_limpios.empty:
-            df_grafico.loc[df_grafico.index >= dividendos_limpios.index[-1], 'Div_Grafico'] = forward_dividend
+        df_grafico['Div_Grafico'] = historial_completo['Div_Anual']
             
         df_grafico['Precio_Compra'] = (df_grafico['Div_Grafico'] / yield_infravalorado) * 100
         df_grafico['Precio_Justo'] = (df_grafico['Div_Grafico'] / yield_medio) * 100
@@ -351,12 +329,12 @@ def screener_weiss_definitivo(ticker_symbol):
         )
         st.plotly_chart(fig_shares, use_container_width=True)
 
-    # --- GRÁFICO COMBINADO DE DIVIDENDOS (AHORA CON EJE X ENRIQUECIDO) ---
-    if not dividendos_anuales.empty:
+    # --- GRÁFICO COMBINADO DE DIVIDENDOS CON EJE X ENRIQUECIDO ---
+    if not dividendos_barras.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (10 Años)")
         fecha_corte_10y_divs = datetime.now() - pd.DateOffset(years=10)
-        divs_10y = dividendos_anuales[dividendos_anuales.index >= fecha_corte_10y_divs.year]
+        divs_10y = dividendos_barras[dividendos_barras.index >= fecha_corte_10y_divs.year]
         
         if len(divs_10y) > 0:
             crecimiento_yoy = divs_10y.pct_change() * 100
@@ -408,18 +386,18 @@ def screener_weiss_definitivo(ticker_symbol):
     if 0 < payout_ratio <= payout_limite_bpa: st.success(f"Payout (BPA): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
     else: st.error(f"Payout (BPA): {payout_ratio:.2f}% (Elevado, el límite de su sector exige < {payout_limite_bpa:.0f}%)")
     
-    if payout_fcf is not None:
-        if payout_fcf == -1: st.error(f"Payout (FCF): NEGATIVO (Quema de caja)")
-        elif payout_fcf <= payout_limite_fcf: st.success(f"Payout (FCF): {payout_fcf:.2f}% (Caja fuerte para su sector, exige < {payout_limite_fcf:.0f}%)")
+    if payout_fcf != -1:
+        if payout_fcf <= payout_limite_fcf: st.success(f"Payout (FCF): {payout_fcf:.2f}% (Caja fuerte para su sector, exige < {payout_limite_fcf:.0f}%)")
         else: st.error(f"Payout (FCF): {payout_fcf:.2f}% (Peligro, supera el límite sectorial de {payout_limite_fcf:.0f}%)")
+    else: st.error(f"Payout (FCF): NEGATIVO (Quema de caja)")
 
     if 0 < per <= 20: st.success(f"PER (Beneficio Contable): {per:.2f} (Valoración atractiva)")
     else: st.error(f"PER (Beneficio Contable): {per:.2f} (Múltiplo caro)")
 
-    if p_fcf is not None:
-        if p_fcf == -1: st.error("P/FCF (Efectivo Real): NEGATIVO")
-        elif 0 < p_fcf <= 20: st.success(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
+    if p_fcf != -1:
+        if 0 < p_fcf <= 20: st.success(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
         else: st.error(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
+    else: st.error("P/FCF (Efectivo Real): NEGATIVO")
 
     if variacion_acciones is not None:
         if variacion_acciones < 0: st.success(f"Acciones en circulación: {variacion_acciones:.2f}% en 10 años (Excelente, la empresa destruye acciones)")
