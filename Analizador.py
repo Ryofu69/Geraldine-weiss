@@ -38,7 +38,7 @@ def screener_weiss_definitivo(ticker_symbol):
         divisor_uk = 100.0 
     else: sym = '$' 
 
-    # --- HISTORIAL COMPLETO (AMPLIADO AL CICLO WEISS DE 12 AÑOS) ---
+    # --- HISTORIAL COMPLETO ---
     historial_completo = ticker.history(period="max")
     dividendos = ticker.dividends
     
@@ -49,11 +49,11 @@ def screener_weiss_definitivo(ticker_symbol):
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
 
-    # Recorte exacto a 12 años vista
+    # Recorte para las bandas a 12 años vista
     fecha_corte_12y = pd.Timestamp.now().normalize() - pd.DateOffset(years=12)
-    historial_completo = historial_completo[historial_completo.index >= fecha_corte_12y]
+    historial_12y = historial_completo[historial_completo.index >= fecha_corte_12y].copy()
 
-    if historial_completo.empty:
+    if historial_12y.empty:
         st.error("❌ Error: No se encontraron datos de cotización en los últimos 12 años.")
         return
 
@@ -61,7 +61,7 @@ def screener_weiss_definitivo(ticker_symbol):
     divs_por_año = dividendos.groupby(dividendos.index.year).sum()
 
     # --- DETERMINAR FORWARD DIVIDEND ---
-    precio_actual = historial_completo['Close'].dropna().iloc[-1]
+    precio_actual = historial_12y['Close'].dropna().iloc[-1]
     año_actual = datetime.now().year
     
     años = dividendos.index.year
@@ -84,15 +84,15 @@ def screener_weiss_definitivo(ticker_symbol):
     if currency == 'GBp' and forward_dividend > 0:
         if forward_dividend < (precio_actual / 10): forward_dividend = forward_dividend * 100
 
-    # --- EL MODELO ESCALÓN ANUAL (A 12 AÑOS) ---
-    historial_completo['Year'] = historial_completo.index.year
-    historial_completo['Div_Anual'] = historial_completo['Year'].map(divs_por_año)
-    historial_completo.loc[historial_completo['Year'] == año_actual, 'Div_Anual'] = forward_dividend
-    historial_completo['Div_Anual'] = historial_completo['Div_Anual'].bfill().ffill()
+    # --- EL MODELO ESCALÓN ANUAL (A 12 AÑOS PARA LAS BANDAS) ---
+    historial_12y['Year'] = historial_12y.index.year
+    historial_12y['Div_Anual'] = historial_12y['Year'].map(divs_por_año)
+    historial_12y.loc[historial_12y['Year'] == año_actual, 'Div_Anual'] = forward_dividend
+    historial_12y['Div_Anual'] = historial_12y['Div_Anual'].bfill().ffill()
 
-    historial_completo['Yield_Diario'] = (historial_completo['Div_Anual'] / historial_completo['Close']) * 100
+    historial_12y['Yield_Diario'] = (historial_12y['Div_Anual'] / historial_12y['Close']) * 100
 
-    yields_validos = historial_completo['Yield_Diario'].dropna()
+    yields_validos = historial_12y['Yield_Diario'].dropna()
     yields_validos = yields_validos[yields_validos > 0]
     
     if yields_validos.empty:
@@ -162,7 +162,7 @@ def screener_weiss_definitivo(ticker_symbol):
             p_fcf = precio_actual / fcf_per_share
             fcf_yield = (fcf_per_share / precio_actual) * 100
 
-    # --- BARRAS DE DIVIDENDOS Y DGR (12 AÑOS) ---
+    # --- BARRAS DE DIVIDENDOS Y DGR ---
     dividendos_barras = dividendos.groupby(dividendos.index.year).sum()
     if año_actual in dividendos_barras.index:
         dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
@@ -190,14 +190,18 @@ def screener_weiss_definitivo(ticker_symbol):
                 racha_sin_recortes += 1
             else: break
 
-    # --- VARIACIÓN DE ACCIONES (12 AÑOS) ---
+    # --- VARIACIÓN DE ACCIONES (Descargamos 15 años para garantizar el cálculo YoY de 12 años) ---
+    fecha_corte_15y = pd.Timestamp.now().normalize() - pd.DateOffset(years=15)
     variacion_acciones = None
     shares_yearly = pd.Series(dtype=float)
     try:
-        shares_hist = ticker.get_shares_full(start=fecha_corte_12y.strftime('%Y-%m-%d'), end=None)
+        shares_hist = ticker.get_shares_full(start=fecha_corte_15y.strftime('%Y-%m-%d'), end=None)
         if shares_hist is not None and len(shares_hist) > 1:
             shares_yearly = shares_hist.groupby(shares_hist.index.year).last()
-            acc_ini = shares_yearly.iloc[0]
+            if len(shares_yearly) >= 13:
+                acc_ini = shares_yearly.iloc[-13]
+            else:
+                acc_ini = shares_yearly.iloc[0]
             acc_fin = shares_yearly.iloc[-1]
             if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
     except Exception: pass
@@ -296,9 +300,9 @@ def screener_weiss_definitivo(ticker_symbol):
 
     # --- GRÁFICO INTERACTIVO (12 AÑOS) ---
     st.markdown("### 📈 Evolución Histórica de Valoración (Ciclo Weiss 12 Años)")
-    df_grafico = historial_completo[['Close']].copy()
+    df_grafico = historial_12y[['Close']].copy()
     if not df_grafico.empty:
-        df_grafico['Div_Grafico'] = historial_completo['Div_Anual']
+        df_grafico['Div_Grafico'] = historial_12y['Div_Anual']
         df_grafico['Precio_Compra'] = (df_grafico['Div_Grafico'] / yield_infravalorado) * 100
         df_grafico['Precio_Justo'] = (df_grafico['Div_Grafico'] / yield_medio) * 100
         df_grafico['Precio_Venta'] = (df_grafico['Div_Grafico'] / yield_sobrevalorado) * 100
@@ -352,7 +356,6 @@ def screener_weiss_definitivo(ticker_symbol):
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost)")
     
-    # Estrategia DGI Purista: Prioriza siempre la velocidad de crucero a 12 años.
     if dgr_12y is not None and dgr_12y > 0:
         dgr_proyeccion = dgr_12y
         txt_ritmo = "Ritmo Histórico (12A)"
@@ -363,7 +366,6 @@ def screener_weiss_definitivo(ticker_symbol):
         dgr_proyeccion = 0.0
         txt_ritmo = "Crecimiento Estancado"
     
-    # Mantenemos un tope del 15% como salvaguarda matemática para horizontes largos
     dgr_proyeccion = min(dgr_proyeccion, 15.0)
     
     yoc_5 = yield_actual * ((1 + dgr_proyeccion/100) ** 5)
@@ -379,28 +381,36 @@ def screener_weiss_definitivo(ticker_symbol):
     if not shares_yearly.empty and len(shares_yearly) > 1:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 🔄 Historial Anual de Recompras / Dilución (12 Años)")
-        yoy_shares = shares_yearly.pct_change().dropna() * 100
-        text_labels = [f"+{val:.2f}%" if val > 0 else f"{val:.2f}%" for val in yoy_shares.values]
-        colores_barras = ['#21c354' if val < -0.1 else '#ff4b4b' if val > 1.0 else '#faca2b' for val in yoy_shares.values]
+        
+        # Calculamos sobre todo el dataset, borramos nulos, y extraemos exactamente las últimas 12
+        yoy_shares_total = shares_yearly.pct_change().dropna() * 100
+        yoy_shares_12y = yoy_shares_total.tail(12)
+        
+        text_labels = [f"+{val:.2f}%" if val > 0 else f"{val:.2f}%" for val in yoy_shares_12y.values]
+        colores_barras = ['#21c354' if val < -0.1 else '#ff4b4b' if val > 1.0 else '#faca2b' for val in yoy_shares_12y.values]
         fig_shares = go.Figure()
-        fig_shares.add_trace(go.Bar(x=yoy_shares.index.astype(str), y=yoy_shares.values, marker_color=colores_barras, text=text_labels, textposition='auto'))
+        fig_shares.add_trace(go.Bar(x=yoy_shares_12y.index.astype(str), y=yoy_shares_12y.values, marker_color=colores_barras, text=text_labels, textposition='auto'))
         fig_shares.update_layout(
             template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=230,
             yaxis_title="Variación Anual (%)", xaxis_title="", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
         )
         st.plotly_chart(fig_shares, use_container_width=True)
 
-    # --- GRÁFICO COMBINADO DE DIVIDENDOS (12 AÑOS) ---
+    # --- GRÁFICO COMBINADO DE DIVIDENDOS (12 AÑOS EXACTOS) ---
     if not dividendos_barras.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (12 Años)")
-        divs_12y = dividendos_barras[dividendos_barras.index >= fecha_corte_12y.year]
+        
+        # Calculamos crecimiento sobre TODOS los datos antes de recortar, así la barra 1 no se pierde
+        crecimiento_yoy_total = dividendos_barras.pct_change() * 100
+        
+        # Recorte quirúrgico: Exactamente las últimas 12 barras
+        divs_12y = dividendos_barras.tail(12)
+        crecimiento_yoy_12y = crecimiento_yoy_total.tail(12)
         
         if len(divs_12y) > 0:
-            crecimiento_yoy = divs_12y.pct_change() * 100
-            
             x_labels_enriquecidos = []
-            for year, val in zip(divs_12y.index, crecimiento_yoy.values):
+            for year, val in zip(divs_12y.index, crecimiento_yoy_12y.values):
                 if pd.isna(val): x_labels_enriquecidos.append(str(year))
                 else:
                     color_pct = '#21c354' if val > 0 else '#ff4b4b'
@@ -413,7 +423,7 @@ def screener_weiss_definitivo(ticker_symbol):
                 text=[f"{val:.2f}{sym}" for val in divs_12y.values], textposition='auto'
             ))
             fig_divs.add_trace(go.Scatter(
-                x=x_labels_enriquecidos, y=crecimiento_yoy.values, name="Crecimiento YoY", 
+                x=x_labels_enriquecidos, y=crecimiento_yoy_12y.values, name="Crecimiento YoY", 
                 mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'
             ))
             fig_divs.update_layout(
