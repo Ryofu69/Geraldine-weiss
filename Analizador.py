@@ -381,4 +381,154 @@ def screener_weiss_definitivo(ticker_symbol):
     
     yoc_5 = yield_actual * ((1 + dgr_proyeccion/100) ** 5)
     yoc_10 = yield_actual * ((1 + dgr_proyeccion/100) ** 10)
-    yoc_
+    yoc_15 = yield_actual * ((1 + dgr_proyeccion/100) ** 15)
+    
+    cp1, cp2, cp3 = st.columns(3)
+    cp1.metric("YoC Esperado a 5 Años", f"{yoc_5:.2f}%", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
+    cp2.metric("YoC Esperado a 10 Años", f"{yoc_10:.2f}%", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
+    cp3.metric("YoC Esperado a 15 Años", f"{yoc_15:.2f}%", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
+
+    # --- HISTORIAL ANUAL DE RECOMPRAS ---
+    if not shares_yearly.empty and len(shares_yearly) > 1:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### 🔄 Historial Anual de Recompras / Dilución (12 Años)")
+        yoy_shares_total = shares_yearly.pct_change().dropna() * 100
+        yoy_shares_12y = yoy_shares_total.tail(12)
+        
+        text_labels = [f"+{val:.2f}%" if val > 0 else f"{val:.2f}%" for val in yoy_shares_12y.values]
+        colores_barras = ['#21c354' if val < -0.1 else '#ff4b4b' if val > 1.0 else '#faca2b' for val in yoy_shares_12y.values]
+        fig_shares = go.Figure()
+        fig_shares.add_trace(go.Bar(x=yoy_shares_12y.index.astype(str), y=yoy_shares_12y.values, marker_color=colores_barras, text=text_labels, textposition='auto'))
+        fig_shares.update_layout(
+            template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=230,
+            yaxis_title="Variación Anual (%)", xaxis_title="", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_shares, use_container_width=True)
+
+    # --- GRÁFICO COMBINADO DE DIVIDENDOS (12 AÑOS EXACTOS) ---
+    if not dividendos_barras.empty:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (12 Años)")
+        crecimiento_yoy_total = dividendos_barras.pct_change() * 100
+        
+        divs_12y = dividendos_barras.tail(12)
+        crecimiento_yoy_12y = crecimiento_yoy_total.tail(12)
+        
+        if len(divs_12y) > 0:
+            x_labels_enriquecidos = []
+            for year, val in zip(divs_12y.index, crecimiento_yoy_12y.values):
+                if pd.isna(val): x_labels_enriquecidos.append(str(year))
+                else:
+                    color_pct = '#21c354' if val > 0 else '#ff4b4b'
+                    signo_pct = '+' if val > 0 else ''
+                    x_labels_enriquecidos.append(f"{year}<br><span style='color:{color_pct}; font-size:12px'>{signo_pct}{val:.1f}%</span>")
+            
+            fig_divs = go.Figure()
+            fig_divs.add_trace(go.Bar(
+                x=x_labels_enriquecidos, y=divs_12y.values, name=f"Dividendo ({sym})", marker_color='#00d4ff', yaxis='y1',
+                text=[f"{val:.2f}{sym}" for val in divs_12y.values], textposition='auto'
+            ))
+            fig_divs.add_trace(go.Scatter(
+                x=x_labels_enriquecidos, y=crecimiento_yoy_12y.values, name="Crecimiento YoY", 
+                mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'
+            ))
+            fig_divs.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=300, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")),
+                yaxis2=dict(title=dict(text="Crecimiento (%)", font=dict(color="#21c354")), tickfont=dict(color="#21c354"), overlaying='y', side='right', showgrid=False),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig_divs, use_container_width=True)
+
+    st.divider()
+
+    # 3. DECÁLOGO DE CALIDAD
+    st.subheader("📋 Decálogo de Calidad del Blue Chip (Ciclo Weiss 12 Años)")
+    
+    if yield_actual >= yield_infravalorado: st.success(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Excelente, supera el {yield_infravalorado:.2f}%)")
+    elif yield_actual >= yield_medio: st.warning(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Aceptable, superior a media de {yield_medio:.2f}%)")
+    else: st.error(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Pobre, inferior a media de {yield_medio:.2f}%)")
+
+    if 0 < payout_ratio <= payout_limite_bpa: st.success(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
+    else: st.error(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado, el límite de su sector exige < {payout_limite_bpa:.0f}%)")
+    
+    if payout_forward != -1:
+        if 0 < payout_forward <= payout_limite_bpa: st.success(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Sano, beneficio futuro cubre el dividendo)")
+        else: st.warning(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Atención: la cobertura empeorará el año que viene)")
+    else: st.error("Forward Payout: No disponible por BPA futuro negativo")
+
+    if payout_fcf != -1:
+        if payout_fcf <= payout_limite_fcf: st.success(f"Payout (FCF / Caja Real): {payout_fcf:.2f}% (Caja fuerte para su sector, exige < {payout_limite_fcf:.0f}%)")
+        else: st.error(f"Payout (FCF / Caja Real): {payout_fcf:.2f}% (Peligro, supera el límite sectorial de {payout_limite_fcf:.0f}%)")
+    else: st.error(f"Payout (FCF): NEGATIVO (Quema de caja)")
+
+    if 0 < per <= 20: st.success(f"PER (Beneficio Contable): {per:.2f} (Valoración atractiva)")
+    else: st.error(f"PER (Beneficio Contable): {per:.2f} (Múltiplo caro)")
+
+    if p_fcf != -1:
+        if 0 < p_fcf <= 20: st.success(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
+        else: st.error(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
+    else: st.error("P/FCF (Efectivo Real): NEGATIVO")
+
+    if variacion_acciones is not None:
+        if variacion_acciones < 0: st.success(f"Acciones en circulación: {variacion_acciones:.2f}% en 12 años (Excelente, la empresa destruye acciones)")
+        elif variacion_acciones <= 5: st.warning(f"Acciones en circulación: +{variacion_acciones:.2f}% en 12 años (Estable / Ligera dilución)")
+        else: st.error(f"Acciones en circulación: +{variacion_acciones:.2f}% en 12 años (Peligro, la empresa diluye al accionista)")
+
+    if años_pagando >= 25 and racha_sin_recortes >= 12: st.success(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata consagrada)")
+    else: st.warning(f"Historial: {años_pagando} años pagando | Racha sin recortes: {racha_sin_recortes} años")
+
+    if incrementos_dividendo >= 5:
+        st.success(f"Frecuencia de Aumentos (Filtro Weiss): El dividendo ha subido {incrementos_dividendo} veces en los últimos 12 años (Cumple exigencia de > 5 aumentos)")
+    else:
+        st.error(f"Frecuencia de Aumentos (Filtro Weiss): Solo {incrementos_dividendo} aumentos detectados en 12 años (Falta de crecimiento activo)")
+
+    if total_años_bpa_datos > 0:
+        ratio_bpa = años_crecimiento_bpa / total_años_bpa_datos
+        if ratio_bpa >= 0.65:
+            st.success(f"Consistencia BPA (Proxy Yahoo): Crecimiento neto positivo en {años_crecimiento_bpa} de {total_años_bpa_datos} años analizados (Consistente a corto plazo)")
+        else:
+            st.error(f"Consistencia BPA (Proxy Yahoo): Solo {años_crecimiento_bpa} años de crecimiento de {total_años_bpa_datos} evaluados (Excesiva ciclicidad reciente)")
+
+    if respaldo_institucional > 0:
+        if respaldo_institucional >= 50.0: st.success(f"Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
+        else: st.warning(f"Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
+    else: st.warning("Respaldo Institucional: Datos no disponibles en Yahoo")
+
+    if dgr_5y is not None:
+        if dgr_5y >= 10: st.success(f"Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Excelente)")
+        elif dgr_5y > 0: st.warning(f"Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Positivo)")
+        else: st.error(f"Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Estancado)")
+
+    if dgr_12y is not None:
+        if dgr_12y >= 10: st.success(f"Crecimiento DGR 12A (Ciclo Completo): {dgr_12y:.2f}% (Excelente ritmo continuo)")
+        elif dgr_12y > 0: st.warning(f"Crecimiento DGR 12A (Ciclo Completo): {dgr_12y:.2f}% (Sostenido)")
+        else: st.error(f"Crecimiento DGR 12A (Ciclo Completo): {dgr_12y:.2f}% (Estancado)")
+
+    if deuda_equity == 0.0: st.warning("Deuda/Capital: 0.00% (Posible Patrimonio Negativo por recompras masivas)")
+    elif 0 < deuda_equity <= 50: st.success(f"Deuda/Capital: {deuda_equity:.2f}% (Balance sano)")
+    else: st.error(f"Deuda/Capital: {deuda_equity:.2f}% (Apalancamiento elevado)")
+
+    if market_cap > 10_000_000_000: st.success(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
+    else: st.error(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
+
+    if current_ratio > 0:
+        if current_ratio >= 1.5: st.success(f"Liquidez (Current Ratio): {current_ratio:.2f} (Caja solvente)")
+        elif current_ratio >= 1.0: st.warning(f"Liquidez (Current Ratio): {current_ratio:.2f} (Justa)")
+        else: st.error(f"Liquidez (Current Ratio): {current_ratio:.2f} (Falta de liquidez a corto plazo)")
+
+# --- FRONTEND DE LA APLICACIÓN ---
+st.title("Screener Fundamental - Método Geraldine Weiss (12 Años)")
+st.markdown("Introduce el ticker de una empresa para extraer sus datos financieros, rentabilidad real (FCF) y calcular sus bandas de valoración históricas.")
+
+col_input, col_btn = st.columns([4, 1])
+with col_input:
+    ticker_input = st.text_input("Ticker de la empresa (Ej: ACN, WKL, MCD):", placeholder="Escribe aquí...").upper()
+with col_btn:
+    st.markdown("<br>", unsafe_allow_html=True)
+    analizar = st.button("Analizar Empresa", use_container_width=True)
+
+if analizar and ticker_input:
+    with st.spinner(f"Analizando {ticker_input}..."):
+        try: screener_weiss_definitivo(ticker_input)
+        except Exception as e: st.error(f"Se ha producido un error al descargar los datos: {e}")
