@@ -24,10 +24,8 @@ def screener_weiss_definitivo(ticker_symbol):
     # --- DETECCIÓN DE SECTOR PARA FLEXIBILIZAR FILTROS (MÉTODO WEISS REAL) ---
     sector = info.get('sector', '')
     industry = info.get('industry', '')
-    # Determinamos si es una Utility o un REIT (Inmobiliario)
     es_regulada_o_reit = 'utility' in sector.lower() or 'utilities' in sector.lower() or 'reit' in industry.lower() or 'real estate' in sector.lower()
     
-    # El payout límite según Geraldine Weiss: 50% para industriales, 80% para estables/reguladas
     payout_limite_bpa = 80.0 if es_regulada_o_reit else 50.0
     payout_limite_fcf = 85.0 if es_regulada_o_reit else 60.0
 
@@ -53,17 +51,15 @@ def screener_weiss_definitivo(ticker_symbol):
     dividendos.index = dividendos.index.tz_localize(None).normalize()
     dividendos = dividendos.sort_index()
 
-    # --- FILTRADO DE DIVIDENDOS ESPECIALES (EVITA DISTORSIÓN DE BANDAS) ---
+    # --- FILTRADO DE DIVIDENDOS ESPECIALES ---
     dividendos_anuales_raw = dividendos.groupby(dividendos.index.year).sum()
     median_div = dividendos_anuales_raw.median()
     
     historial_completo['Div'] = dividendos
     historial_completo.fillna({'Div': 0}, inplace=True)
     
-    # Suavizado rodante para eliminar picos artificiales de dividendos extraordinarios únicos
     historial_completo['Div_TTM'] = historial_completo['Div'].rolling(window=252).sum()
     
-    # Si un pico TTM supera por más del doble la mediana, lo limitamos para no romper los percentiles
     if median_div > 0:
         historial_completo['Div_TTM'] = historial_completo['Div_TTM'].apply(lambda x: min(x, median_div * 2.5) if x > 0 else x)
 
@@ -121,7 +117,7 @@ def screener_weiss_definitivo(ticker_symbol):
     bpa_forward = get_safe('forwardEps')
     per_forward = get_safe('forwardPE')
     
-    # --- CONSISTENCIA DE BENEFICIOS AÑO A AÑO (FILTRO WEISS) ---
+    # --- CONSISTENCIA DE BENEFICIOS AÑO A AÑO ---
     años_crecimiento_bpa = 0
     total_años_bpa_datos = 0
     try:
@@ -131,7 +127,6 @@ def screener_weiss_definitivo(ticker_symbol):
                 if key in inc_stmt.index:
                     eps_series = inc_stmt.loc[key].dropna().sort_index()
                     if len(eps_series) >= 2:
-                        # Contamos cuántas veces creció respecto al año anterior
                         diffs = eps_series.diff().dropna()
                         años_crecimiento_bpa = int((diffs > 0).sum())
                         total_años_bpa_datos = len(diffs)
@@ -173,7 +168,6 @@ def screener_weiss_definitivo(ticker_symbol):
             payout_fcf = -1 
             p_fcf = -1 
 
-    # --- HISTORIAL DE CRECIMIENTO DE DIVIDENDOS (DGR Y CONTADOR DE INCREMENTOS) ---
     fecha_corte_5y = historial_completo.index[-1] - pd.DateOffset(years=5)
     fecha_corte_10y = historial_completo.index[-1] - pd.DateOffset(years=10)
 
@@ -197,10 +191,13 @@ def screener_weiss_definitivo(ticker_symbol):
             if bloque_hace_10_años_10 > 0:
                 dgr_10y = (((bloque_actual_10 / bloque_hace_10_años_10) ** (1 / 10)) - 1) * 100
 
-    dividendos_anuales = dividendos.groupby(dividendos.index.year).sum()
+    # --- LA MAGIA QUE ARREGLA EL BUG DE YAHOO FINANCE ---
+    # Al hacer la media de pagos y multiplicarla por su frecuencia real,
+    # ignoramos si el calendario metió 3 o 5 pagos ese año, y proyectamos el año actual.
+    dividendos_anuales = dividendos.groupby(dividendos.index.year).mean() * pagos_por_año
+    
     años_pagando = año_actual - dividendos_anuales.index[0]
     
-    # Contamos cuántas veces ha subido el dividendo en los últimos 10 años cerrados
     divs_recientes = dividendos_anuales.tail(11)
     incrementos_dividendo = int((divs_recientes.diff().dropna() > 0).sum())
 
@@ -264,7 +261,6 @@ def screener_weiss_definitivo(ticker_symbol):
     tipo_empresa_txt = "🏢 Sector Inmobiliario/Regulado (Filtros Flexibles)" if es_regulada_o_reit else "🏭 Sector Industrial/General (Filtros Estrictos)"
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
     
-    # 1. VALORACIÓN ACTUAL
     st.subheader("🎯 Precios Objetivo y Valoración Actual")
     
     if precio_actual <= precio_compra: color_actual = "#21c354" 
@@ -290,7 +286,7 @@ def screener_weiss_definitivo(ticker_symbol):
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
 
-    # --- GRÁFICO INTERACTIVO ---
+    # --- GRÁFICO INTERACTIVO (10 AÑOS) ---
     st.markdown("### 📈 Evolución Histórica de Valoración (10 Años)")
     df_grafico = historial_completo[['Close']].copy()
     if not df_grafico.empty:
@@ -362,7 +358,7 @@ def screener_weiss_definitivo(ticker_symbol):
         )
         st.plotly_chart(fig_shares, use_container_width=True)
 
-    # --- GRÁFICO COMBINADO DE DIVIDENDOS ---
+    # --- GRÁFICO COMBINADO DE DIVIDENDOS (AHORA LIMPIO Y PROYECTADO) ---
     if not dividendos_anuales.empty:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💰 Historial de Dividendos Anuales y Crecimiento YoY (10 Años)")
@@ -389,14 +385,13 @@ def screener_weiss_definitivo(ticker_symbol):
 
     st.divider()
 
-    # 3. DECÁLOGO DE CALIDAD (SITUADO CON LAS LÓGICAS PURAS DE GERALDINE WEISS)
+    # 3. DECÁLOGO DE CALIDAD
     st.subheader("📋 Decálogo de Calidad del Blue Chip")
     
     if yield_actual >= yield_infravalorado: st.success(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Excelente, supera el {yield_infravalorado:.2f}%)")
     elif yield_actual >= yield_medio: st.warning(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Aceptable, superior a media de {yield_medio:.2f}%)")
     else: st.error(f"Rentabilidad Bruta (Real): {yield_actual:.2f}% (Pobre, inferior a media de {yield_medio:.2f}%)")
 
-    # Aplicación de Payout Adaptativo según Sector
     if 0 < payout_ratio <= payout_limite_bpa: st.success(f"Payout (BPA): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
     else: st.error(f"Payout (BPA): {payout_ratio:.2f}% (Elevado, el límite de su sector exige < {payout_limite_bpa:.0f}%)")
     
@@ -421,13 +416,11 @@ def screener_weiss_definitivo(ticker_symbol):
     if años_pagando >= 25 and racha_sin_recortes >= 12: st.success(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata consagrada)")
     else: st.warning(f"Historial: {años_pagando} años pagando | Racha sin recortes: {racha_sin_recortes} años")
 
-    # NUEVA REGLA WEISS: Consistencia en la frecuencia de subidas anuales
     if incrementos_dividendo >= 5:
         st.success(f"Frecuencia de Aumentos (Filtro Weiss): El dividendo ha subido {incrementos_dividendo} veces en la última década (Cumple exigencia de > 5 aumentos)")
     else:
         st.error(f"Frecuencia de Aumentos (Filtro Weiss): Solo {incrementos_dividendo} aumentos detectados (Falta de crecimiento activo)")
 
-    # NUEVA REGLA WEISS: Consistencia en el crecimiento de beneficios anuales
     if total_años_bpa_datos > 0:
         ratio_bpa = años_crecimiento_bpa / total_años_bpa_datos
         if ratio_bpa >= 0.65:
