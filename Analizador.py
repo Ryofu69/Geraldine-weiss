@@ -293,26 +293,32 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
 
-    # --- ALGORITMO AUTOMÁTICO: BLUE CHIP SCORE (0/10) ---
-    score = 0
-    if yield_actual >= yield_medio: score += 1
-    if 0 < payout_ratio <= payout_amarillo_bpa: score += 1 
-    if 0 < payout_fcf <= payout_amarillo_fcf: score += 1   
-    if 0 < per <= 20: score += 1
-    if 0 < p_fcf <= 20: score += 1
-    if variacion_acciones is not None and variacion_acciones < 0: score += 1
-    if años_pagando >= 25 and racha_sin_recortes >= 12: score += 1
-    if incrementos_dividendo >= min(5, años_analisis): score += 1
-    if total_años_bpa_datos > 0 and (años_crecimiento_bpa / total_años_bpa_datos) >= 0.65: score += 1
-    if market_cap > 10_000_000_000: score += 1
+    # --- ALGORITMO AUTOMÁTICO: BLUE CHIP SCORE PONDERADO (0/10) ---
+    score = 0.0
+    
+    # 1. FLUJO DE CAJA Y SOLVENCIA REAL (Máxima prioridad: 4.5 pts)
+    if payout_fcf != -1 and payout_fcf <= payout_amarillo_fcf: score += 1.5
+    if p_fcf != -1 and 0 < p_fcf <= 20: score += 1.5
+    if deuda_fcf != -1 and 0 < deuda_fcf <= 5.0: score += 1.5
+
+    # 2. COMPROMISO CON EL ACCIONISTA E HISTORIAL (Media prioridad: 3.5 pts)
+    if años_pagando >= 25 and racha_sin_recortes >= 12: score += 1.5
+    if incrementos_dividendo >= min(5, años_analisis): score += 1.0
+    if variacion_acciones is not None and variacion_acciones < 0: score += 1.0
+
+    # 3. VALORACIÓN Y CONTABILIDAD TRADICIONAL (Baja prioridad / Confirmación: 2.0 pts)
+    if yield_actual >= yield_medio: score += 0.5
+    if 0 < payout_ratio <= payout_amarillo_bpa: score += 0.5
+    if 0 < per <= 20: score += 0.5
+    if total_años_bpa_datos > 0 and (años_crecimiento_bpa / total_años_bpa_datos) >= 0.65: score += 0.5
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if score >= 8:
-        st.success(f"🏆 **BLUE CHIP SCORE WEISS: {score}/10** — Empresa Sobresaliente. Altísima seguridad y apta para compra si el precio acompaña.")
-    elif score >= 5:
-        st.warning(f"⚖️ **BLUE CHIP SCORE WEISS: {score}/10** — Empresa Aceptable. Tiene solidez pero presenta algún punto débil que debes vigilar.")
+    if score >= 8.0:
+        st.success(f"🏆 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Sobresaliente. Fuerte generación de caja y altísima seguridad.")
+    elif score >= 5.0:
+        st.warning(f"⚖️ **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Aceptable. Tiene solidez pero presenta debilidades en su flujo de efectivo o valoración.")
     else:
-        st.error(f"🚨 **BLUE CHIP SCORE WEISS: {score}/10** — Calidad Insuficiente. No cumple los exigentes filtros de seguridad.")
+        st.error(f"🚨 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Calidad Insuficiente. No supera los filtros de caja real y seguridad.")
 
     # --- GRÁFICO INTERACTIVO DINÁMICO ---
     st.markdown(f"### 📈 Evolución Histórica de Valoración ({años_analisis} Años)")
@@ -404,7 +410,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
     cd2.metric(f"DGR {años_analisis} Años (Periodo Actual)", f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D")
 
-    # --- NUEVA GRÁFICA DE SIMULADOR DE YIELD ON COST (YoC) CONSERVADOR ---
+    # --- SIMULADOR DE YIELD ON COST (YoC) CONSERVADOR ---
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
     
@@ -440,27 +446,20 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
     
-    # Etiquetas del eje X: Año arriba y porcentaje debajo (Sin la palabra "Neto" para que rote limpio).
-    # Usamos color amarillo (#faca2b) para máximo contraste.
     x_labels_yoc = []
     for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
         año_futuro = año_actual + año
         x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
 
     fig_yoc = go.Figure()
-    
-    # Barras azules para el Dividendo Bruto Proyectado
     fig_yoc.add_trace(go.Bar(
         x=x_labels_yoc, y=div_bruto_proyectado, name=f'Div. Esperado ({sym})', marker_color='#00d4ff', yaxis='y1',
         text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'
     ))
-    
-    # Línea verde para el Yield on Cost Neto
     fig_yoc.add_trace(go.Scatter(
         x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", 
         mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'
     ))
-    
     fig_yoc.update_layout(
         template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")),
@@ -564,13 +563,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         st.error(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y peligroso: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
     
     if payout_forward != -1:
-        # Evaluar la tendencia del Forward Payout respecto al Histórico
-        if payout_forward < (payout_ratio - 1): 
-            tendencia_fw = "mejorará"
-        elif payout_forward > (payout_ratio + 1): 
-            tendencia_fw = "empeorará"
-        else: 
-            tendencia_fw = "se mantendrá estable"
+        if payout_forward < (payout_ratio - 1): tendencia_fw = "mejorará"
+        elif payout_forward > (payout_ratio + 1): tendencia_fw = "empeorará"
+        else: tendencia_fw = "se mantendrá estable"
 
         if 0 < payout_forward <= payout_limite_bpa:
             msg_fw = f"Sano: el beneficio futuro cubre el dividendo y la cobertura {tendencia_fw}" if tendencia_fw != "empeorará" else f"Sano: aunque la cobertura {tendencia_fw} ligeramente, sigue en niveles seguros"
