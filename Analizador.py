@@ -440,8 +440,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
     
-    # Etiquetas del eje X SOLO CON EL AÑO (para evitar que se tuerzan)
-    x_labels_yoc = [str(año_actual + año) for año in años_proyeccion]
+    # Etiquetas del eje X: Año arriba y porcentaje debajo (Sin la palabra "Neto" para que rote limpio).
+    # Usamos color amarillo (#faca2b) para máximo contraste.
+    x_labels_yoc = []
+    for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
+        año_futuro = año_actual + año
+        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
 
     fig_yoc = go.Figure()
     
@@ -451,24 +455,20 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'
     ))
     
-    # Línea verde para el Yield on Cost Neto (CON TEXTOS FLOTANTES)
+    # Línea verde para el Yield on Cost Neto (SIN textos flotantes)
     fig_yoc.add_trace(go.Scatter(
         x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", 
-        mode='lines+markers+text', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2',
-        text=[f"{val:.1f}%" for val in yoc_neto_lista], textposition="top center", textfont=dict(color="#21c354", size=11)
+        mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'
     ))
-    
-    # Calculamos el máximo para darle un poco de aire extra arriba y que no corte los textos flotantes
-    max_yoc = max(yoc_neto_lista) if yoc_neto_lista else 10
     
     fig_yoc.update_layout(
         template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")),
-        yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#21c354")), tickfont=dict(color="#21c354"), overlaying='y', side='right', showgrid=False, range=[0, max_yoc * 1.15]),
-        xaxis=dict(tickangle=0), # Forzamos que los años salgan totalmente rectos
+        yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         title=dict(text=f"Basado en {txt_ritmo}: +{dgr_proyeccion:.1f}% anual constante", font=dict(size=14, color="#aaa"))
     )
+    # Dejamos que Plotly gestione la rotación automáticamente como hace en la histórica
     st.plotly_chart(fig_yoc, use_container_width=True)
 
     # --- HISTORIAL ANUAL DE RECOMPRAS ---
