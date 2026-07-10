@@ -436,15 +436,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     # Proyección del dividendo bruto en la moneda local
     div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     
-    # Proyección del YoC Bruto y Neto
+    # Proyección del YoC Neto
     yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
     
-    # Etiquetas del eje X con el año futuro y el YoC Neto debajo (como en el histórico)
-    x_labels_yoc = []
-    for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
-        año_futuro = año_actual + año
-        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#21c354; font-size:12px'>{yoc_n:.2f}% Neto</span>")
+    # Etiquetas del eje X SOLO CON EL AÑO (para evitar que se tuerzan)
+    x_labels_yoc = [str(año_actual + año) for año in años_proyeccion]
 
     fig_yoc = go.Figure()
     
@@ -454,16 +451,21 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'
     ))
     
-    # Línea verde para el Yield on Cost Neto
+    # Línea verde para el Yield on Cost Neto (CON TEXTOS FLOTANTES)
     fig_yoc.add_trace(go.Scatter(
         x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", 
-        mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'
+        mode='lines+markers+text', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2',
+        text=[f"{val:.1f}%" for val in yoc_neto_lista], textposition="top center", textfont=dict(color="#21c354", size=11)
     ))
+    
+    # Calculamos el máximo para darle un poco de aire extra arriba y que no corte los textos flotantes
+    max_yoc = max(yoc_neto_lista) if yoc_neto_lista else 10
     
     fig_yoc.update_layout(
         template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")),
-        yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#21c354")), tickfont=dict(color="#21c354"), overlaying='y', side='right', showgrid=False),
+        yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#21c354")), tickfont=dict(color="#21c354"), overlaying='y', side='right', showgrid=False, range=[0, max_yoc * 1.15]),
+        xaxis=dict(tickangle=0), # Forzamos que los años salgan totalmente rectos
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         title=dict(text=f"Basado en {txt_ritmo}: +{dgr_proyeccion:.1f}% anual constante", font=dict(size=14, color="#aaa"))
     )
