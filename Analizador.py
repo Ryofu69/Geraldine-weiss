@@ -404,9 +404,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
     cd2.metric(f"DGR {años_analisis} Años (Periodo Actual)", f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D")
 
-    # --- SIMULADOR DE YIELD ON COST (YoC) CONSERVADOR ---
+    # --- NUEVA GRÁFICA DE SIMULADOR DE YIELD ON COST (YoC) CONSERVADOR ---
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost)")
+    st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
     
     val_5y = dgr_5y if dgr_5y is not None else -1
     val_periodo = dgr_periodo if dgr_periodo is not None else -1
@@ -429,15 +429,45 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         txt_ritmo = "Crecimiento Estancado"
     
     dgr_proyeccion = min(dgr_proyeccion, 15.0)
+
+    # Generar los datos para la gráfica de YoC
+    años_proyeccion = list(range(1, 16))
     
-    yoc_5 = yield_actual * ((1 + dgr_proyeccion/100) ** 5)
-    yoc_10 = yield_actual * ((1 + dgr_proyeccion/100) ** 10)
-    yoc_15 = yield_actual * ((1 + dgr_proyeccion/100) ** 15)
+    # Proyección del dividendo bruto en la moneda local
+    div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     
-    cp1, cp2, cp3 = st.columns(3)
-    cp1.metric("YoC Esperado a 5 Años", f"{yoc_5:.2f}% ({yoc_5 * net_mult:.2f}% neto)", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
-    cp2.metric("YoC Esperado a 10 Años", f"{yoc_10:.2f}% ({yoc_10 * net_mult:.2f}% neto)", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
-    cp3.metric("YoC Esperado a 15 Años", f"{yoc_15:.2f}% ({yoc_15 * net_mult:.2f}% neto)", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
+    # Proyección del YoC Bruto y Neto
+    yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
+    yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
+    
+    # Etiquetas del eje X con el año futuro y el YoC Neto debajo (como en el histórico)
+    x_labels_yoc = []
+    for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
+        año_futuro = año_actual + año
+        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#21c354; font-size:12px'>{yoc_n:.2f}% Neto</span>")
+
+    fig_yoc = go.Figure()
+    
+    # Barras azules para el Dividendo Bruto Proyectado
+    fig_yoc.add_trace(go.Bar(
+        x=x_labels_yoc, y=div_bruto_proyectado, name=f'Div. Esperado ({sym})', marker_color='#00d4ff', yaxis='y1',
+        text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'
+    ))
+    
+    # Línea verde para el Yield on Cost Neto
+    fig_yoc.add_trace(go.Scatter(
+        x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", 
+        mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'
+    ))
+    
+    fig_yoc.update_layout(
+        template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")),
+        yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#21c354")), tickfont=dict(color="#21c354"), overlaying='y', side='right', showgrid=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        title=dict(text=f"Basado en {txt_ritmo}: +{dgr_proyeccion:.1f}% anual constante", font=dict(size=14, color="#aaa"))
+    )
+    st.plotly_chart(fig_yoc, use_container_width=True)
 
     # --- HISTORIAL ANUAL DE RECOMPRAS ---
     if not shares_yearly.empty and len(shares_yearly) > 1:
@@ -519,7 +549,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         elif price_to_book <= 5.0: 
             st.warning(f"Precio/Libros (P/B): {price_to_book:.2f}x (Valoración exigente, habitual en empresas de calidad)")
         else: 
-            # Flexibilizamos el aviso para empresas asset-light
             aviso_pb = "(Atención: Prima extrema. Aceptable SOLO si es una empresa tecnológica, de software o hace recompras agresivas)" if es_tecnologica else "(Peligro: Cotiza con una prima extrema sobre su valor contable real)"
             st.error(f"Precio/Libros (P/B): {price_to_book:.2f}x {aviso_pb}")
 
