@@ -445,7 +445,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     x_labels_yoc = []
     for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
         año_futuro = año_actual + año
-        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
+        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.2f}%</span>")
 
     fig_yoc = go.Figure()
     
@@ -455,7 +455,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'
     ))
     
-    # Línea verde para el Yield on Cost Neto (SIN textos flotantes)
+    # Línea verde para el Yield on Cost Neto
     fig_yoc.add_trace(go.Scatter(
         x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", 
         mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'
@@ -468,7 +468,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         title=dict(text=f"Basado en {txt_ritmo}: +{dgr_proyeccion:.1f}% anual constante", font=dict(size=14, color="#aaa"))
     )
-    # Dejamos que Plotly gestione la rotación automáticamente como hace en la histórica
     st.plotly_chart(fig_yoc, use_container_width=True)
 
     # --- HISTORIAL ANUAL DE RECOMPRAS ---
