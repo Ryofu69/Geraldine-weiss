@@ -29,8 +29,13 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     industry = info.get('industry', '')
     es_regulada_o_reit = 'utility' in sector.lower() or 'utilities' in sector.lower() or 'reit' in industry.lower() or 'real estate' in sector.lower()
     
+    # Umbrales máximos para el Semáforo Verde
     payout_limite_bpa = 80.0 if es_regulada_o_reit else 50.0
     payout_limite_fcf = 85.0 if es_regulada_o_reit else 60.0
+    
+    # Umbrales máximos para el Semáforo Amarillo (Zona de precaución)
+    payout_amarillo_bpa = 85.0 if es_regulada_o_reit else 60.0
+    payout_amarillo_fcf = 90.0 if es_regulada_o_reit else 70.0
 
     currency = info.get('currency', 'USD')
     divisor_uk = 1.0 
@@ -108,7 +113,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     yield_actual = (forward_dividend / precio_actual) * 100
 
-    # --- FUNDAMENTALES ---
+    # --- FUNDAMENTALES Y NUEVAS MÉTRICAS ---
     payout_ratio = get_safe('payoutRatio') * 100
     per = get_safe('trailingPE', get_safe('forwardPE'))
     deuda_equity = get_safe('debtToEquity') 
@@ -117,6 +122,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     bpa_trailing = get_safe('trailingEps')
     bpa_forward = get_safe('forwardEps')
     per_forward = get_safe('forwardPE')
+    
+    # NUEVAS MÉTRICAS: P/B y Deuda Total
+    price_to_book = get_safe('priceToBook', -1)
+    total_debt = get_safe('totalDebt', 0)
     
     respaldo_institucional = get_safe('heldPercentInstitutions') * 100
     payout_forward = (forward_dividend / bpa_forward) * 100 if bpa_forward > 0 else -1
@@ -156,6 +165,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     payout_fcf = -1
     p_fcf = -1
     fcf_yield = 0
+    deuda_fcf = -1 # Ratio Deuda / FCF
     
     if fcf != 0 and shares > 0:
         fcf_per_share = fcf / shares
@@ -164,6 +174,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             payout_fcf = (forward_dividend / fcf_per_share) * 100
             p_fcf = precio_actual / fcf_per_share
             fcf_yield = (fcf_per_share / precio_actual) * 100
+            
+    # Calculamos cuántos años de FCF harían falta para pagar la deuda entera
+    if fcf > 0:
+        deuda_fcf = total_debt / fcf
 
     # --- BARRAS DE DIVIDENDOS Y DGR DINÁMICO ---
     dividendos_barras = divs_por_año.copy()
@@ -172,7 +186,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
     
-    # Evaluar incrementos en base al periodo seleccionado
     divs_recientes = dividendos_barras.tail(años_analisis + 1)
     incrementos_dividendo = int((divs_recientes.diff().dropna() > 0).sum())
 
@@ -195,7 +208,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             else: break
 
     # --- VARIACIÓN DE ACCIONES DINÁMICA ---
-    # Se descargan 3 años extra del periodo seleccionado para asegurar el cálculo YoY
     fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
     variacion_acciones = None
     shares_yearly = pd.Series(dtype=float)
@@ -273,7 +285,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         """, unsafe_allow_html=True)
 
     col1, col2, col3, col4 = st.columns(4)
-    # INYECCIÓN DEL NETO EN LAS TARJETAS PRINCIPALES
     with col1: metric_color("Cotización Actual", f"{precio_actual / divisor_uk:.2f}{sym}", f"Yield: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% neto)", txt_extra_actual, color_actual)
     with col2: metric_color("Franja Infravalorada", f"{precio_compra / divisor_uk:.2f}{sym}", f"Yield {yield_infravalorado:.2f}% ({yield_infravalorado * net_mult:.2f}% neto)", txt_extra_infra, "#21c354") 
     with col3: metric_color("Precio Justo (Media)", f"{precio_justo / divisor_uk:.2f}{sym}", f"Yield {yield_medio:.2f}% ({yield_medio * net_mult:.2f}% neto)", txt_extra_justo, "#faca2b") 
@@ -286,8 +297,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     # --- ALGORITMO AUTOMÁTICO: BLUE CHIP SCORE (0/10) ---
     score = 0
     if yield_actual >= yield_medio: score += 1
-    if 0 < payout_ratio <= payout_limite_bpa: score += 1
-    if 0 < payout_fcf <= payout_limite_fcf: score += 1
+    if 0 < payout_ratio <= payout_amarillo_bpa: score += 1 
+    if 0 < payout_fcf <= payout_amarillo_fcf: score += 1   
     if 0 < per <= 20: score += 1
     if 0 < p_fcf <= 20: score += 1
     if variacion_acciones is not None and variacion_acciones < 0: score += 1
@@ -335,7 +346,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
-    # 2. BENEFICIOS Y PROYECCIONES
+    # 2. BENEFICIOS Y PROYECCIONES (CON NUEVAS MÉTRICAS)
     st.subheader("📊 Beneficios, Proyecciones y Acciones")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("BPA Actual", f"{bpa_trailing / divisor_uk:.2f}{sym}" if bpa_trailing != 0 else "N/D")
@@ -353,6 +364,22 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         c5.metric(f"Acciones ({años_analisis}Y)", "N/D")
 
     st.markdown("<br>", unsafe_allow_html=True)
+    
+    # NUEVA FILA DE MÉTRICAS (P/B, FCF YIELD Y DEUDA)
+    st.markdown("#### ⚖️ Valoración Contable y Solvencia Real")
+    cv1, cv2, cv3 = st.columns(3)
+    cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x" if price_to_book > 0 else "N/D")
+    cv2.metric("FCF Yield (Rentabilidad de Caja)", f"{fcf_yield:.2f}%" if fcf_yield > 0 else "N/D")
+    
+    if deuda_fcf > 0:
+        if deuda_fcf < 3: d_estado, d_color = "Excelente", "normal"
+        elif deuda_fcf < 5: d_estado, d_color = "Aceptable", "off"
+        else: d_estado, d_color = "Peligro", "inverse"
+        cv3.metric("Deuda Total / FCF", f"{deuda_fcf:.2f} Años", delta=d_estado, delta_color=d_color)
+    else:
+        cv3.metric("Deuda Total / FCF", "N/D" if total_debt == 0 else "FCF Negativo")
+
+    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 📈 Crecimiento Anual Compuesto del Dividendo (CAGR / DGR)")
     cd1, cd2 = st.columns(2)
     cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
@@ -362,7 +389,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost)")
     
-    # Estrategia Conservadora: Elegir el DGR más bajo entre el de 5 años y el periodo analizado
     val_5y = dgr_5y if dgr_5y is not None else -1
     val_periodo = dgr_periodo if dgr_periodo is not None else -1
 
@@ -389,7 +415,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     yoc_10 = yield_actual * ((1 + dgr_proyeccion/100) ** 10)
     yoc_15 = yield_actual * ((1 + dgr_proyeccion/100) ** 15)
     
-    # INYECCIÓN DEL NETO EN EL YOC
     cp1, cp2, cp3 = st.columns(3)
     cp1.metric("YoC Esperado a 5 Años", f"{yoc_5:.2f}% ({yoc_5 * net_mult:.2f}% neto)", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
     cp2.metric("YoC Esperado a 10 Años", f"{yoc_10:.2f}% ({yoc_10 * net_mult:.2f}% neto)", f"{txt_ritmo}: +{dgr_proyeccion:.1f}% anual")
@@ -449,26 +474,45 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
-    # 3. DECÁLOGO DE CALIDAD
+    # 3. DECÁLOGO DE CALIDAD (CON SEMÁFOROS AMARILLOS Y NUEVAS MÉTRICAS)
     st.subheader(f"📋 Decálogo de Calidad del Blue Chip ({años_analisis} Años)")
     
-    # INYECCIÓN DEL NETO EN EL DECÁLOGO
     if yield_actual >= yield_infravalorado: st.success(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Excelente, supera el {yield_infravalorado:.2f}%)")
     elif yield_actual >= yield_medio: st.warning(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Aceptable, superior a media de {yield_medio:.2f}%)")
     else: st.error(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Pobre, inferior a media de {yield_medio:.2f}%)")
 
-    if 0 < payout_ratio <= payout_limite_bpa: st.success(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
-    else: st.error(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado, el límite de su sector exige < {payout_limite_bpa:.0f}%)")
+    # Semáforo transicional para Payout BPA
+    if 0 < payout_ratio <= payout_limite_bpa:
+        st.success(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
+    elif payout_limite_bpa < payout_ratio <= payout_amarillo_bpa:
+        st.warning(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Atención: Excede el límite óptimo de {payout_limite_bpa:.0f}%, pero se mantiene cubierto bajo el {payout_amarillo_bpa:.0f}%)")
+    else:
+        st.error(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y peligroso: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
     
-    if payout_forward != -1:
-        if 0 < payout_forward <= payout_limite_bpa: st.success(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Sano, beneficio futuro cubre el dividendo)")
-        else: st.warning(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Atención: la cobertura empeorará el año que viene)")
-    else: st.error("Forward Payout: No disponible por BPA futuro negativo")
-
+    # Semáforo transicional para Payout FCF
     if payout_fcf != -1:
-        if payout_fcf <= payout_limite_fcf: st.success(f"Payout (FCF / Caja Real): {payout_fcf:.2f}% (Caja fuerte para su sector, exige < {payout_limite_fcf:.0f}%)")
-        else: st.error(f"Payout (FCF / Caja Real): {payout_fcf:.2f}% (Peligro, supera el límite sectorial de {payout_limite_fcf:.0f}%)")
-    else: st.error(f"Payout (FCF): NEGATIVO (Quema de caja)")
+        if payout_fcf <= payout_limite_fcf:
+            st.success(f"Payout (FCF / Caja Real): {payout_fcf:.2f}% (Caja fuerte para su sector, exige < {payout_limite_fcf:.0f}%)")
+        elif payout_limite_fcf < payout_fcf <= payout_amarillo_fcf:
+            st.warning(f"Payout (FCF / Caja Real): {payout_fcf:.2f}% (Precaución: El dividendo consume más caja de lo ideal, rozando el límite sectorial de {payout_amarillo_fcf:.0f}%)")
+        else:
+            st.error(f"Payout (FCF / Caja Real): {payout_fcf:.2f}% (Peligro crítico: la empresa destina demasiada caja al dividendo, supera el {payout_amarillo_fcf:.0f}%)")
+    else:
+        st.error(f"Payout (FCF): NEGATIVO (La empresa está quemando caja real)")
+
+    # Semáforo para Precio/Libros (P/B)
+    if price_to_book > 0:
+        if price_to_book <= 2.5: st.success(f"Precio/Libros (P/B): {price_to_book:.2f}x (Cotiza a una valoración contable muy atractiva)")
+        elif price_to_book <= 5.0: st.warning(f"Precio/Libros (P/B): {price_to_book:.2f}x (Valoración exigente, habitual en empresas ligeras de activos o muy rentables)")
+        else: st.error(f"Precio/Libros (P/B): {price_to_book:.2f}x (Peligro: Cotiza con una prima extrema sobre su valor contable real)")
+
+    # Semáforo para Deuda/FCF
+    if deuda_fcf != -1:
+        if deuda_fcf <= 3.0: st.success(f"Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Excelente: Puede liquidar su deuda con la caja íntegra de {deuda_fcf:.1f} años)")
+        elif deuda_fcf <= 5.0: st.warning(f"Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Aceptable: Nivel de apalancamiento controlable)")
+        else: st.error(f"Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Peligro: Alta carga de deuda respecto a su capacidad de generar caja)")
+    elif total_debt > 0 and fcf <= 0:
+        st.error("Solvencia (Deuda/FCF): PELIGRO (Tiene deuda estructural y quema caja libre)")
 
     if 0 < per <= 20: st.success(f"PER (Beneficio Contable): {per:.2f} (Valoración atractiva)")
     else: st.error(f"PER (Beneficio Contable): {per:.2f} (Múltiplo caro)")
@@ -513,23 +557,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         elif dgr_periodo > 0: st.warning(f"Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Sostenido)")
         else: st.error(f"Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Estancado)")
 
-    if deuda_equity == 0.0: st.warning("Deuda/Capital: 0.00% (Posible Patrimonio Negativo por recompras masivas)")
-    elif 0 < deuda_equity <= 50: st.success(f"Deuda/Capital: {deuda_equity:.2f}% (Balance sano)")
-    else: st.error(f"Deuda/Capital: {deuda_equity:.2f}% (Apalancamiento elevado)")
-
-    if market_cap > 10_000_000_000: st.success(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
-    else: st.error(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
-
-    if current_ratio > 0:
-        if current_ratio >= 1.5: st.success(f"Liquidez (Current Ratio): {current_ratio:.2f} (Caja solvente)")
-        elif current_ratio >= 1.0: st.warning(f"Liquidez (Current Ratio): {current_ratio:.2f} (Justa)")
-        else: st.error(f"Liquidez (Current Ratio): {current_ratio:.2f} (Falta de liquidez a corto plazo)")
-
 # --- FRONTEND DE LA APLICACIÓN ---
 st.title("Screener Fundamental - Método Geraldine Weiss")
 st.markdown("Introduce el ticker de una empresa para extraer sus datos financieros, rentabilidad real (FCF) y calcular sus bandas de valoración históricas.")
 
-# Nueva estructura con 4 columnas para incluir la retención fiscal
 col_input, col_period, col_tax, col_btn = st.columns([2.5, 1.5, 1, 1])
 
 with col_input:
@@ -541,7 +572,6 @@ with col_period:
     años_analisis = opciones_periodo[seleccion]
 
 with col_tax:
-    # Retención por defecto en España (19%) pero ajustable
     impuesto = st.number_input("Retención (%)", min_value=0.0, max_value=50.0, value=19.0, step=1.0)
 
 with col_btn:
