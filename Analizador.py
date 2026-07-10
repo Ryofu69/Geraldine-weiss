@@ -445,7 +445,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     x_labels_yoc = []
     for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
         año_futuro = año_actual + año
-        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.2f}%</span>")
+        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
 
     fig_yoc = go.Figure()
     
@@ -564,10 +564,25 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         st.error(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y peligroso: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
     
     if payout_forward != -1:
-        if 0 < payout_forward <= payout_limite_bpa: st.success(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Sano, beneficio futuro cubre el dividendo)")
-        elif payout_limite_bpa < payout_forward <= payout_amarillo_bpa: st.warning(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Justo: beneficio futuro algo ajustado pero aceptable)")
-        else: st.warning(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Atención: la cobertura empeorará significativamente el año que viene)")
-    else: st.error("Forward Payout: No disponible por BPA futuro negativo")
+        # Evaluar la tendencia del Forward Payout respecto al Histórico
+        if payout_forward < (payout_ratio - 1): 
+            tendencia_fw = "mejorará"
+        elif payout_forward > (payout_ratio + 1): 
+            tendencia_fw = "empeorará"
+        else: 
+            tendencia_fw = "se mantendrá estable"
+
+        if 0 < payout_forward <= payout_limite_bpa:
+            msg_fw = f"Sano: el beneficio futuro cubre el dividendo y la cobertura {tendencia_fw}" if tendencia_fw != "empeorará" else f"Sano: aunque la cobertura {tendencia_fw} ligeramente, sigue en niveles seguros"
+            st.success(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% ({msg_fw})")
+        elif payout_limite_bpa < payout_forward <= payout_amarillo_bpa:
+            msg_fw = f"Justo pero aceptable: la cobertura es alta pero {tendencia_fw} respecto al actual" if tendencia_fw == "mejorará" else f"Atención: la cobertura {tendencia_fw} y entra en zona ajustada" if tendencia_fw == "empeorará" else "Justo pero aceptable: la cobertura se mantiene estable"
+            st.warning(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% ({msg_fw})")
+        else:
+            msg_fw = f"Peligro: sigue en niveles críticos, aunque la cobertura {tendencia_fw} levemente" if tendencia_fw == "mejorará" else f"Peligro crítico: la cobertura {tendencia_fw} aún más y agravará el riesgo" if tendencia_fw == "empeorará" else "Peligro: la cobertura se mantiene estancada en niveles de alto riesgo"
+            st.error(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% ({msg_fw})")
+    else: 
+        st.error("Forward Payout: No disponible por BPA futuro negativo")
 
     if payout_fcf != -1:
         if payout_fcf <= payout_limite_fcf:
