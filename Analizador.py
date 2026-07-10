@@ -123,7 +123,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     bpa_forward = get_safe('forwardEps')
     per_forward = get_safe('forwardPE')
     
-    # NUEVAS MÉTRICAS: P/B y Deuda Total
     price_to_book = get_safe('priceToBook', -1)
     total_debt = get_safe('totalDebt', 0)
     
@@ -165,7 +164,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     payout_fcf = -1
     p_fcf = -1
     fcf_yield = 0
-    deuda_fcf = -1 # Ratio Deuda / FCF
+    deuda_fcf = -1 
     
     if fcf != 0 and shares > 0:
         fcf_per_share = fcf / shares
@@ -175,7 +174,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             p_fcf = precio_actual / fcf_per_share
             fcf_yield = (fcf_per_share / precio_actual) * 100
             
-    # Calculamos cuántos años de FCF harían falta para pagar la deuda entera
     if fcf > 0:
         deuda_fcf = total_debt / fcf
 
@@ -346,7 +344,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
-    # 2. BENEFICIOS Y PROYECCIONES (CON NUEVAS MÉTRICAS)
+    # 2. BENEFICIOS Y PROYECCIONES
     st.subheader("📊 Beneficios, Proyecciones y Acciones")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("BPA Actual", f"{bpa_trailing / divisor_uk:.2f}{sym}" if bpa_trailing != 0 else "N/D")
@@ -365,19 +363,42 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # NUEVA FILA DE MÉTRICAS (P/B, FCF YIELD Y DEUDA)
+    # NUEVA FILA DE MÉTRICAS CON INDICADORES DE RANGO
     st.markdown("#### ⚖️ Valoración Contable y Solvencia Real")
     cv1, cv2, cv3 = st.columns(3)
-    cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x" if price_to_book > 0 else "N/D")
-    cv2.metric("FCF Yield (Rentabilidad de Caja)", f"{fcf_yield:.2f}%" if fcf_yield > 0 else "N/D")
     
+    # Métrica 1: P/B
+    if price_to_book > 0:
+        pb_color = "off" if price_to_book <= 5.0 else "inverse"
+        cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", "Óptimo < 2.5x", delta_color=pb_color)
+    else:
+        cv1.metric("Precio / Valor en Libros (P/B)", "N/D")
+        
+    # Métrica 2: FCF Yield
+    if fcf_yield > 0:
+        fcf_color = "normal" if fcf_yield > yield_actual else "inverse"
+        cv2.metric("FCF Yield (Rentabilidad de Caja)", f"{fcf_yield:.2f}%", f"Óptimo > {yield_actual:.2f}% (Div. Bruto)", delta_color=fcf_color)
+    else:
+        cv2.metric("FCF Yield (Rentabilidad de Caja)", "N/D")
+        
+    # Métrica 3: Deuda / FCF
     if deuda_fcf > 0:
-        if deuda_fcf < 3: d_estado, d_color = "Excelente", "normal"
-        elif deuda_fcf < 5: d_estado, d_color = "Aceptable", "off"
-        else: d_estado, d_color = "Peligro", "inverse"
+        if deuda_fcf < 3: d_estado, d_color = "Óptimo < 3.0 Años", "normal"
+        elif deuda_fcf < 5: d_estado, d_color = "Aceptable < 5.0 Años", "off"
+        else: d_estado, d_color = "Peligro > 5.0 Años", "inverse"
         cv3.metric("Deuda Total / FCF", f"{deuda_fcf:.2f} Años", delta=d_estado, delta_color=d_color)
     else:
         cv3.metric("Deuda Total / FCF", "N/D" if total_debt == 0 else "FCF Negativo")
+
+    # ALERTA INTELIGENTE (DETECTOR DE INGENIERÍA FINANCIERA)
+    if variacion_acciones is not None and variacion_acciones < -1.0:
+        if price_to_book > 5.0 or deuda_fcf > 4.0:
+            mensajes_alerta = []
+            if price_to_book > 5.0: mensajes_alerta.append("un **P/B muy elevado** (distorsión del patrimonio contable)")
+            if deuda_fcf > 4.0: mensajes_alerta.append("una **Deuda/FCF en zona de aviso** (apalancamiento mantenido)")
+            
+            motivos = " y ".join(mensajes_alerta)
+            st.info(f"🕵️‍♂️ **Aviso Analítico Avanzado:** La empresa presenta {motivos}. Al tener un historial agresivo de destrucción de acciones ({variacion_acciones:.2f}%), **revisa si estos datos son fruto de la ingeniería financiera (recompras masivas)** más que de un deterioro real del negocio.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 📈 Crecimiento Anual Compuesto del Dividendo (CAGR / DGR)")
@@ -385,7 +406,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
     cd2.metric(f"DGR {años_analisis} Años (Periodo Actual)", f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D")
 
-    # --- NUEVO PANEL: SIMULADOR DE YIELD ON COST (YoC) CONSERVADOR ---
+    # --- SIMULADOR DE YIELD ON COST (YoC) CONSERVADOR ---
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost)")
     
@@ -474,14 +495,13 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
-    # 3. DECÁLOGO DE CALIDAD (CON SEMÁFOROS AMARILLOS Y NUEVAS MÉTRICAS)
+    # 3. DECÁLOGO DE CALIDAD
     st.subheader(f"📋 Decálogo de Calidad del Blue Chip ({años_analisis} Años)")
     
     if yield_actual >= yield_infravalorado: st.success(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Excelente, supera el {yield_infravalorado:.2f}%)")
     elif yield_actual >= yield_medio: st.warning(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Aceptable, superior a media de {yield_medio:.2f}%)")
     else: st.error(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Pobre, inferior a media de {yield_medio:.2f}%)")
 
-    # Semáforo transicional para Payout BPA
     if 0 < payout_ratio <= payout_limite_bpa:
         st.success(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
     elif payout_limite_bpa < payout_ratio <= payout_amarillo_bpa:
@@ -489,7 +509,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else:
         st.error(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y peligroso: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
     
-    # Semáforo transicional para Payout FCF
+    if payout_forward != -1:
+        if 0 < payout_forward <= payout_limite_bpa: st.success(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Sano, beneficio futuro cubre el dividendo)")
+        elif payout_limite_bpa < payout_forward <= payout_amarillo_bpa: st.warning(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Justo: beneficio futuro algo ajustado pero aceptable)")
+        else: st.warning(f"Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Atención: la cobertura empeorará significativamente el año que viene)")
+    else: st.error("Forward Payout: No disponible por BPA futuro negativo")
+
     if payout_fcf != -1:
         if payout_fcf <= payout_limite_fcf:
             st.success(f"Payout (FCF / Caja Real): {payout_fcf:.2f}% (Caja fuerte para su sector, exige < {payout_limite_fcf:.0f}%)")
@@ -500,13 +525,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else:
         st.error(f"Payout (FCF): NEGATIVO (La empresa está quemando caja real)")
 
-    # Semáforo para Precio/Libros (P/B)
     if price_to_book > 0:
         if price_to_book <= 2.5: st.success(f"Precio/Libros (P/B): {price_to_book:.2f}x (Cotiza a una valoración contable muy atractiva)")
         elif price_to_book <= 5.0: st.warning(f"Precio/Libros (P/B): {price_to_book:.2f}x (Valoración exigente, habitual en empresas ligeras de activos o muy rentables)")
         else: st.error(f"Precio/Libros (P/B): {price_to_book:.2f}x (Peligro: Cotiza con una prima extrema sobre su valor contable real)")
 
-    # Semáforo para Deuda/FCF
     if deuda_fcf != -1:
         if deuda_fcf <= 3.0: st.success(f"Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Excelente: Puede liquidar su deuda con la caja íntegra de {deuda_fcf:.1f} años)")
         elif deuda_fcf <= 5.0: st.warning(f"Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Aceptable: Nivel de apalancamiento controlable)")
