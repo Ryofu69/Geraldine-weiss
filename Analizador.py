@@ -28,6 +28,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     sector = info.get('sector', '')
     industry = info.get('industry', '')
     es_regulada_o_reit = 'utility' in sector.lower() or 'utilities' in sector.lower() or 'reit' in industry.lower() or 'real estate' in sector.lower()
+    es_tecnologica = 'technology' in sector.lower() or 'software' in industry.lower()
     
     # Umbrales máximos para el Semáforo Verde
     payout_limite_bpa = 80.0 if es_regulada_o_reit else 50.0
@@ -367,21 +368,18 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.markdown("#### ⚖️ Valoración Contable y Solvencia Real")
     cv1, cv2, cv3 = st.columns(3)
     
-    # Métrica 1: P/B
     if price_to_book > 0:
         pb_color = "off" if price_to_book <= 5.0 else "inverse"
         cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", "Óptimo < 2.5x", delta_color=pb_color)
     else:
         cv1.metric("Precio / Valor en Libros (P/B)", "N/D")
         
-    # Métrica 2: FCF Yield
     if fcf_yield > 0:
         fcf_color = "normal" if fcf_yield > yield_actual else "inverse"
         cv2.metric("FCF Yield (Rentabilidad de Caja)", f"{fcf_yield:.2f}%", f"Óptimo > {yield_actual:.2f}% (Div. Bruto)", delta_color=fcf_color)
     else:
         cv2.metric("FCF Yield (Rentabilidad de Caja)", "N/D")
         
-    # Métrica 3: Deuda / FCF
     if deuda_fcf > 0:
         if deuda_fcf < 3: d_estado, d_color = "Óptimo < 3.0 Años", "normal"
         elif deuda_fcf < 5: d_estado, d_color = "Aceptable < 5.0 Años", "off"
@@ -390,7 +388,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else:
         cv3.metric("Deuda Total / FCF", "N/D" if total_debt == 0 else "FCF Negativo")
 
-    # ALERTA INTELIGENTE (DETECTOR DE INGENIERÍA FINANCIERA)
+    # ALERTA INTELIGENTE
     if variacion_acciones is not None and variacion_acciones < -1.0:
         if price_to_book > 5.0 or deuda_fcf > 4.0:
             mensajes_alerta = []
@@ -495,12 +493,38 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
-    # 3. DECÁLOGO DE CALIDAD
+    # ==========================================
+    # 3. DECÁLOGO DE CALIDAD REESTRUCTURADO
+    # ==========================================
     st.subheader(f"📋 Decálogo de Calidad del Blue Chip ({años_analisis} Años)")
+    
+    # ------------------------------------------
+    st.markdown("#### 💰 1. Valoración y Rentabilidad")
     
     if yield_actual >= yield_infravalorado: st.success(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Excelente, supera el {yield_infravalorado:.2f}%)")
     elif yield_actual >= yield_medio: st.warning(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Aceptable, superior a media de {yield_medio:.2f}%)")
     else: st.error(f"Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Pobre, inferior a media de {yield_medio:.2f}%)")
+
+    if 0 < per <= 20: st.success(f"PER (Beneficio Contable): {per:.2f} (Valoración atractiva)")
+    else: st.error(f"PER (Beneficio Contable): {per:.2f} (Múltiplo caro)")
+
+    if p_fcf != -1:
+        if 0 < p_fcf <= 20: st.success(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
+        else: st.error(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
+    else: st.error("P/FCF (Efectivo Real): NEGATIVO")
+
+    if price_to_book > 0:
+        if price_to_book <= 2.5: 
+            st.success(f"Precio/Libros (P/B): {price_to_book:.2f}x (Cotiza a una valoración contable muy atractiva)")
+        elif price_to_book <= 5.0: 
+            st.warning(f"Precio/Libros (P/B): {price_to_book:.2f}x (Valoración exigente, habitual en empresas de calidad)")
+        else: 
+            # Flexibilizamos el aviso para empresas asset-light
+            aviso_pb = "(Atención: Prima extrema. Aceptable SOLO si es una empresa tecnológica, de software o hace recompras agresivas)" if es_tecnologica else "(Peligro: Cotiza con una prima extrema sobre su valor contable real)"
+            st.error(f"Precio/Libros (P/B): {price_to_book:.2f}x {aviso_pb}")
+
+    # ------------------------------------------
+    st.markdown("#### 🛡️ 2. Seguridad del Dividendo (Cobertura)")
 
     if 0 < payout_ratio <= payout_limite_bpa:
         st.success(f"Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
@@ -525,10 +549,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else:
         st.error(f"Payout (FCF): NEGATIVO (La empresa está quemando caja real)")
 
-    if price_to_book > 0:
-        if price_to_book <= 2.5: st.success(f"Precio/Libros (P/B): {price_to_book:.2f}x (Cotiza a una valoración contable muy atractiva)")
-        elif price_to_book <= 5.0: st.warning(f"Precio/Libros (P/B): {price_to_book:.2f}x (Valoración exigente, habitual en empresas ligeras de activos o muy rentables)")
-        else: st.error(f"Precio/Libros (P/B): {price_to_book:.2f}x (Peligro: Cotiza con una prima extrema sobre su valor contable real)")
+    # ------------------------------------------
+    st.markdown("#### 🏗️ 3. Solvencia y Gestión del Capital")
 
     if deuda_fcf != -1:
         if deuda_fcf <= 3.0: st.success(f"Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Excelente: Puede liquidar su deuda con la caja íntegra de {deuda_fcf:.1f} años)")
@@ -537,18 +559,22 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     elif total_debt > 0 and fcf <= 0:
         st.error("Solvencia (Deuda/FCF): PELIGRO (Tiene deuda estructural y quema caja libre)")
 
-    if 0 < per <= 20: st.success(f"PER (Beneficio Contable): {per:.2f} (Valoración atractiva)")
-    else: st.error(f"PER (Beneficio Contable): {per:.2f} (Múltiplo caro)")
+    if deuda_equity == 0.0: st.warning("Deuda/Capital: 0.00% (Posible Patrimonio Negativo por recompras masivas)")
+    elif 0 < deuda_equity <= 50: st.success(f"Deuda/Capital: {deuda_equity:.2f}% (Balance sano)")
+    else: st.error(f"Deuda/Capital: {deuda_equity:.2f}% (Apalancamiento elevado)")
 
-    if p_fcf != -1:
-        if 0 < p_fcf <= 20: st.success(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
-        else: st.error(f"P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
-    else: st.error("P/FCF (Efectivo Real): NEGATIVO")
+    if current_ratio > 0:
+        if current_ratio >= 1.5: st.success(f"Liquidez (Current Ratio): {current_ratio:.2f} (Caja solvente)")
+        elif current_ratio >= 1.0: st.warning(f"Liquidez (Current Ratio): {current_ratio:.2f} (Justa)")
+        else: st.error(f"Liquidez (Current Ratio): {current_ratio:.2f} (Falta de liquidez a corto plazo)")
 
     if variacion_acciones is not None:
         if variacion_acciones < 0: st.success(f"Acciones en circulación: {variacion_acciones:.2f}% en {años_analisis} años (Excelente, la empresa destruye acciones)")
         elif variacion_acciones <= 5: st.warning(f"Acciones en circulación: +{variacion_acciones:.2f}% en {años_analisis} años (Estable / Ligera dilución)")
         else: st.error(f"Acciones en circulación: +{variacion_acciones:.2f}% en {años_analisis} años (Peligro, la empresa diluye al accionista)")
+
+    # ------------------------------------------
+    st.markdown("#### 📈 4. Historial y Crecimiento")
 
     if años_pagando >= 25 and racha_sin_recortes >= 12: st.success(f"Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata consagrada)")
     else: st.warning(f"Historial: {años_pagando} años pagando | Racha sin recortes: {racha_sin_recortes} años")
@@ -565,11 +591,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         else:
             st.error(f"Consistencia BPA (Proxy Yahoo): Solo {años_crecimiento_bpa} años de crecimiento de {total_años_bpa_datos} evaluados (Excesiva ciclicidad reciente)")
 
-    if respaldo_institucional > 0:
-        if respaldo_institucional >= 50.0: st.success(f"Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
-        else: st.warning(f"Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
-    else: st.warning("Respaldo Institucional: Datos no disponibles en Yahoo")
-
     if dgr_5y is not None:
         if dgr_5y >= 10: st.success(f"Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Excelente)")
         elif dgr_5y > 0: st.warning(f"Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Positivo)")
@@ -579,6 +600,17 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         if dgr_periodo >= 10: st.success(f"Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Excelente ritmo continuo)")
         elif dgr_periodo > 0: st.warning(f"Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Sostenido)")
         else: st.error(f"Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Estancado)")
+
+    # ------------------------------------------
+    st.markdown("#### 🏢 5. Fortaleza Institucional")
+
+    if market_cap > 10_000_000_000: st.success(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
+    else: st.error(f"Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
+
+    if respaldo_institucional > 0:
+        if respaldo_institucional >= 50.0: st.success(f"Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
+        else: st.warning(f"Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
+    else: st.warning("Respaldo Institucional: Datos no disponibles en Yahoo")
 
 # --- FRONTEND DE LA APLICACIÓN ---
 st.title("Screener Fundamental - Método Geraldine Weiss")
