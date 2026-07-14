@@ -24,9 +24,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         try: return float(val)
         except (ValueError, TypeError): return default
 
-    # --- DETECCIÓN DE SECTOR Y PAÍS (NUEVO) ---
-    sector = info.get('sector', '')
-    industry = info.get('industry', '')
+    # --- DETECCIÓN DE SECTOR, INDUSTRIA Y PAÍS ---
+    sector = info.get('sector', 'Desconocido')
+    industry = info.get('industry', 'Desconocido')
     pais = info.get('country', 'Desconocido')
     
     es_regulada_o_reit = 'utility' in sector.lower() or 'utilities' in sector.lower() or 'reit' in industry.lower() or 'real estate' in sector.lower()
@@ -272,7 +272,15 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
     
-    # --- NUEVA ALERTA FISCAL ---
+    # --- INFO DE SECTOR Y SUBSECTOR EN CABECERA (NUEVO) ---
+    st.markdown(f"""
+    <div style="background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px; margin-bottom: 20px;">
+        <strong>Macro-Sector:</strong> <span style="color: #00d4ff;">{sector}</span> &nbsp;&nbsp;|&nbsp;&nbsp; 
+        <strong>Industria (Nicho):</strong> <span style="color: #21c354;">{industry}</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # --- ALERTA FISCAL ---
     st.markdown("### 🌍 Perfil Fiscal y Retención en Origen")
     if pais in ['United States', 'Netherlands', 'Canada']:
         st.success(f"✅ **{pais}**: Retención 15%. Recuperable 100% por doble imposición. Eficiencia fiscal máxima.")
@@ -341,7 +349,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if cond_per: score += 0.5
     if cond_consistencia: score += 0.5
 
-    # Etiquetas visuales de puntuación (para inyectar en el Decálogo)
+    # Etiquetas visuales de puntuación
     t_fcf = "[🎯 +1.5 / 1.5 pts]" if cond_fcf else "[❌ 0.0 / 1.5 pts]"
     t_pfcf = "[🎯 +1.5 / 1.5 pts]" if cond_pfcf else "[❌ 0.0 / 1.5 pts]"
     t_deuda = "[🎯 +1.5 / 1.5 pts]" if cond_deuda else "[❌ 0.0 / 1.5 pts]"
