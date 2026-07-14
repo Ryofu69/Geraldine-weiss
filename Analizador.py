@@ -24,11 +24,15 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         try: return float(val)
         except (ValueError, TypeError): return default
 
-    # --- DETECCIÓN DE SECTOR (MÉTODO WEISS REAL) ---
+    # --- DETECCIÓN DE SECTOR Y PAÍS (NUEVO) ---
     sector = info.get('sector', '')
     industry = info.get('industry', '')
+    pais = info.get('country', 'Desconocido')
+    
     es_regulada_o_reit = 'utility' in sector.lower() or 'utilities' in sector.lower() or 'reit' in industry.lower() or 'real estate' in sector.lower()
     es_tecnologica = 'technology' in sector.lower() or 'software' in industry.lower()
+    es_financiera = 'financial' in sector.lower() or 'bank' in industry.lower()
+    es_industrial = 'industrial' in sector.lower() or 'basic materials' in sector.lower()
     
     # Umbrales máximos para el Semáforo Verde
     payout_limite_bpa = 80.0 if es_regulada_o_reit else 50.0
@@ -267,6 +271,22 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     tipo_empresa_txt = "🏢 Sector Inmobiliario/Regulado (Filtros Flexibles)" if es_regulada_o_reit else "🏭 Sector Industrial/General (Filtros Estrictos)"
     
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
+    
+    # --- NUEVA ALERTA FISCAL ---
+    st.markdown("### 🌍 Perfil Fiscal y Retención en Origen")
+    if pais in ['United States', 'Netherlands', 'Canada']:
+        st.success(f"✅ **{pais}**: Retención 15%. Recuperable 100% por doble imposición. Eficiencia fiscal máxima.")
+    elif pais == 'United Kingdom':
+        st.success(f"✅ **{pais}**: Retención 0% (salvo REITs). Excelente para la rentabilidad neta.")
+    elif pais == 'Spain':
+        st.success(f"✅ **{pais}**: Retención local 19%. Sin fricciones internacionales.")
+    elif pais == 'Ireland':
+        st.warning(f"⚠️ **{pais}**: Retención 25% (Irlanda). Peligro de perder un 10% irrecuperable según gestión del bróker.")
+    elif pais in ['France', 'Germany', 'Switzerland']:
+        st.error(f"❌ **{pais}**: Retención muy alta (>26%). Trámites burocráticos complejos para recuperar exceso.")
+    else:
+        st.info(f"ℹ️ **{pais}**: Verifica el convenio de doble imposición.")
+
     st.subheader(f"🎯 Precios Objetivo y Valoración Actual (Basado en {años_analisis} Años)")
     
     if precio_actual <= precio_compra: color_actual = "#21c354" 
@@ -392,13 +412,23 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # NUEVA FILA DE MÉTRICAS CON INDICADORES DE RANGO
+    # NUEVA FILA DE MÉTRICAS CON INDICADORES DE RANGO Y P/B DINÁMICO
     st.markdown("#### ⚖️ Valoración Contable y Solvencia Real")
     cv1, cv2, cv3 = st.columns(3)
     
     if price_to_book > 0:
-        pb_color = "off" if price_to_book <= 5.0 else "inverse"
-        cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", "Óptimo < 2.5x", delta_color=pb_color)
+        if es_financiera or es_industrial:
+            pb_optimo, pb_max = 1.5, 2.5
+            txt_opt = "Óptimo < 1.5x (Fin/Ind)"
+        elif es_tecnologica:
+            pb_optimo, pb_max = 5.0, 10.0
+            txt_opt = "Óptimo < 5.0x (Tech/Soft)"
+        else:
+            pb_optimo, pb_max = 2.5, 5.0
+            txt_opt = "Óptimo < 2.5x (General)"
+            
+        pb_color = "off" if price_to_book <= pb_optimo else "inverse"
+        cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", txt_opt, delta_color=pb_color)
     else:
         cv1.metric("Precio / Valor en Libros (P/B)", "N/D")
         
@@ -432,7 +462,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
     cd2.metric(f"DGR {años_analisis} Años (Periodo Actual)", f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D")
 
-    # --- NUEVA GRÁFICA DE SIMULADOR DE YIELD ON COST (YoC) CONSERVADOR ---
+    # --- GRÁFICA DE SIMULADOR DE YIELD ON COST (YoC) CONSERVADOR ---
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
     
@@ -458,13 +488,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     dgr_proyeccion = min(dgr_proyeccion, 15.0)
 
-    # Generar los datos para la gráfica de YoC
     años_proyeccion = list(range(1, 16))
-    
-    # Proyección del dividendo bruto en la moneda local
     div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
-    
-    # Proyección del YoC Neto
     yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
     
@@ -566,13 +591,22 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else: st.error(f"{t_pfcf} P/FCF (Efectivo Real): NEGATIVO")
 
     if price_to_book > 0:
-        if price_to_book <= 2.5: 
-            st.success(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x (Cotiza a una valoración contable muy atractiva)")
-        elif price_to_book <= 5.0: 
-            st.warning(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x (Valoración exigente, habitual en empresas de calidad)")
+        if es_financiera or es_industrial:
+            l_verde, l_amarillo = 1.5, 2.5
+            ctx = "Sector Fin/Ind (Exige P/B estricto)"
+        elif es_tecnologica:
+            l_verde, l_amarillo = 5.0, 10.0
+            ctx = "Sector Tech/Software (P/B alto por intangibles)"
+        else:
+            l_verde, l_amarillo = 2.5, 5.0
+            ctx = "Sector General"
+
+        if price_to_book <= l_verde: 
+            st.success(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Atractivo)")
+        elif price_to_book <= l_amarillo: 
+            st.warning(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Exigente, pero en el límite)")
         else: 
-            aviso_pb = "(Atención: Prima extrema. Aceptable SOLO si es una empresa tecnológica, de software o hace recompras agresivas)" if es_tecnologica else "(Peligro: Cotiza con una prima extrema sobre su valor contable real)"
-            st.error(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x {aviso_pb}")
+            st.error(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Sobrevaloración contable extrema o recompras masivas)")
 
     # ------------------------------------------
     st.markdown("#### 🛡️ 2. Seguridad del Dividendo (Cobertura)")
@@ -701,3 +735,4 @@ if analizar and ticker_input:
             screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
         except Exception as e: 
             st.error(f"Se ha producido un error al descargar los datos: {e}")
+
