@@ -11,6 +11,49 @@ warnings.filterwarnings('ignore')
 # Configuración principal de la página
 st.set_page_config(page_title="Screener Geraldine Weiss", page_icon="📊", layout="wide")
 
+# --- DICCIONARIOS DE TRADUCCIÓN AL ESPAÑOL ---
+TRADUCCION_SECTORES = {
+    'Technology': 'Tecnología',
+    'Healthcare': 'Salud y Farmacia',
+    'Financial Services': 'Servicios Financieros',
+    'Consumer Cyclical': 'Consumo Cíclico',
+    'Industrials': 'Industrial',
+    'Consumer Defensive': 'Consumo Defensivo',
+    'Energy': 'Energía',
+    'Real Estate': 'Inmobiliario (Real Estate)',
+    'Utilities': 'Servicios Públicos (Utilities)',
+    'Basic Materials': 'Materiales Básicos',
+    'Communication Services': 'Servicios de Comunicación'
+}
+
+TRADUCCION_INDUSTRIAS = {
+    'Software - Infrastructure': 'Software de Infraestructura',
+    'Software - Application': 'Software de Aplicaciones',
+    'Information Technology Services': 'Consultoría y Servicios TI',
+    'Consumer Electronics': 'Electrónica de Consumo',
+    'Semiconductors': 'Semiconductores',
+    'Banks - Diversified': 'Banca Diversificada',
+    'Banks - Regional': 'Banca Regional',
+    'Specialty & Commercial Finance': 'Finanzas Especializadas',
+    'Publishing': 'Edición y Publicaciones',
+    'Telecom Services': 'Telecomunicaciones',
+    'Entertainment': 'Entretenimiento y Medios',
+    'Broadcasting': 'Radiodifusión',
+    'Beverages - Non-Alcoholic': 'Bebidas no alcohólicas',
+    'Restaurants': 'Restaurantes',
+    'Aerospace & Defense': 'Aeroespacial y Defensa',
+    'Specialty Retail': 'Venta Minorista Especializada',
+    'Discount Stores': 'Tiendas de Descuento',
+    'Drug Manufacturers - General': 'Farmacéuticas',
+    'Medical Devices': 'Dispositivos Médicos',
+    'REIT - Retail': 'REIT (Comercial)',
+    'REIT - Specialty': 'REIT (Especializado)',
+    'REIT - Industrial': 'REIT (Industrial)',
+    'Utilities - Regulated Electric': 'Eléctrica Regulada',
+    'Utilities - Regulated Water': 'Agua Regulada',
+    'Household & Personal Products': 'Productos del Hogar y Personales'
+}
+
 def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info
@@ -24,15 +67,19 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         try: return float(val)
         except (ValueError, TypeError): return default
 
-    # --- DETECCIÓN DE SECTOR, INDUSTRIA Y PAÍS ---
-    sector = info.get('sector', 'Desconocido')
-    industry = info.get('industry', 'Desconocido')
+    # --- DETECCIÓN DE SECTOR, INDUSTRIA Y PAÍS (EN INGLÉS PARA LA LÓGICA) ---
+    sector_en = info.get('sector', 'Desconocido')
+    industry_en = info.get('industry', 'Desconocido')
     pais = info.get('country', 'Desconocido')
     
-    es_regulada_o_reit = 'utility' in sector.lower() or 'utilities' in sector.lower() or 'reit' in industry.lower() or 'real estate' in sector.lower()
-    es_tecnologica = 'technology' in sector.lower() or 'software' in industry.lower()
-    es_financiera = 'financial' in sector.lower() or 'bank' in industry.lower()
-    es_industrial = 'industrial' in sector.lower() or 'basic materials' in sector.lower()
+    # --- TRADUCCIÓN AL ESPAÑOL PARA LA INTERFAZ VISUAL ---
+    sector_es = TRADUCCION_SECTORES.get(sector_en, sector_en)
+    industry_es = TRADUCCION_INDUSTRIAS.get(industry_en, industry_en)
+    
+    es_regulada_o_reit = 'utility' in sector_en.lower() or 'utilities' in sector_en.lower() or 'reit' in industry_en.lower() or 'real estate' in sector_en.lower()
+    es_tecnologica = 'technology' in sector_en.lower() or 'software' in industry_en.lower()
+    es_financiera = 'financial' in sector_en.lower() or 'bank' in industry_en.lower()
+    es_industrial = 'industrial' in sector_en.lower() or 'basic materials' in sector_en.lower()
     
     # Umbrales máximos para el Semáforo Verde
     payout_limite_bpa = 80.0 if es_regulada_o_reit else 50.0
@@ -272,11 +319,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
     
-    # --- INFO DE SECTOR Y SUBSECTOR EN CABECERA (NUEVO) ---
+    # --- INFO DE SECTOR Y SUBSECTOR TRADUCIDA ---
     st.markdown(f"""
     <div style="background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px; margin-bottom: 20px;">
-        <strong>Macro-Sector:</strong> <span style="color: #00d4ff;">{sector}</span> &nbsp;&nbsp;|&nbsp;&nbsp; 
-        <strong>Industria (Nicho):</strong> <span style="color: #21c354;">{industry}</span>
+        <strong>Macro-Sector:</strong> <span style="color: #00d4ff;">{sector_es}</span> &nbsp;&nbsp;|&nbsp;&nbsp; 
+        <strong>Industria (Nicho):</strong> <span style="color: #21c354;">{industry_es}</span>
     </div>
     """, unsafe_allow_html=True)
     
