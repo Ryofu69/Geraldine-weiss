@@ -108,7 +108,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     yield_actual = (forward_dividend / precio_actual) * 100
 
-    # --- FUNDAMENTALES Y NUEVAS MÉTRICAS ---
+    # --- FUNDAMENTALES Y MÉTRICAS ---
     payout_ratio = get_safe('payoutRatio') * 100
     per = get_safe('trailingPE', get_safe('forwardPE'))
     per_actual = get_safe('trailingPE')
@@ -264,13 +264,26 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     </div>
     """, unsafe_allow_html=True)
     
+    # --- MOTOR DE PERFIL FISCAL AMPLIADO (EUROPA) ---
     st.markdown("### 🌍 Perfil Fiscal y Retención en Origen")
-    if pais in ['United States', 'Netherlands', 'Canada']: st.success(f"✅ **{pais}**: Retención 15%. Recuperable 100% por doble imposición. Eficiencia fiscal máxima.")
-    elif pais == 'United Kingdom': st.success(f"✅ **{pais}**: Retención 0% (salvo REITs). Excelente para la rentabilidad neta.")
-    elif pais == 'Spain': st.success(f"✅ **{pais}**: Retención local 19%. Sin fricciones internacionales.")
-    elif pais == 'Ireland': st.warning(f"⚠️ **{pais}**: Retención 25% (Irlanda). Peligro de perder un 10% irrecuperable según gestión del bróker.")
-    elif pais in ['France', 'Germany', 'Switzerland']: st.error(f"❌ **{pais}**: Retención muy alta (>26%). Trámites burocráticos complejos para recuperar exceso.")
-    else: st.info(f"ℹ️ **{pais}**: Verifica el convenio de doble imposición.")
+    if pais in ['United States', 'Netherlands', 'Canada']: 
+        st.success(f"✅ **{pais}**: Retención en origen del 15%. Al coincidir con el máximo deducible en España por doble imposición internacional, es 100% recuperable automáticamente en tu declaración de la Renta.")
+    elif pais == 'United Kingdom': 
+        st.success(f"✅ **{pais}**: Retención en origen del 0% (salvo algunos REITs). Eficiencia fiscal óptima en origen, solo tributas el impuesto local configurado.")
+    elif pais == 'Spain': 
+        st.success(f"✅ **{pais}**: Mercado local. Retención directa del {impuesto_pct}%. Sin trámites ni retenciones en el extranjero.")
+    elif pais == 'Denmark':
+        st.warning(f"⚠️ **{pais} (Novo Nordisk, etc.)**: Retención estándar en origen muy elevada del 27%. El convenio con España limita la retención final al 15% (que recuperas en tu Renta). El **12% restante se queda retenido en Dinamarca** y exige un trámite de reclamación directa ante su hacienda (*Skat*).")
+    elif pais == 'Switzerland':
+        st.error(f"❌ **{pais}**: Retención en origen extrema del 35%. El convenio te permite deducir el 15% en España, pero el **20% sobrante queda bloqueado en Suiza** a menos que inicies el complejo proceso burocrático de devolución internacional (Formulario 81).")
+    elif pais == 'Germany':
+        st.error(f"❌ **{pais}**: Retención en origen del 26.375% (incluye el impuesto de solidaridad). Recuperas el 15% en España de forma automática, pero el **11.375% restante se pierde** si no reclamas su devolución rellenando los formularios de la hacienda federal alemana (*BZSt*).")
+    elif pais == 'France':
+        st.error(f"❌ **{pais}**: Retención estándar en origen del 25% (puede reducirse al 12.8% si tu bróker tramita los formularios de residencia previos). De lo contrario, tendrás que reclamar el exceso por encima del 15% a la hacienda francesa.")
+    elif pais == 'Ireland': 
+        st.warning(f"⚠️ **{pais}**: Retención en origen del 25%. Puedes deducir el 15% en España, pero el **10% restante exige trámites complejos** de devolución en origen según las capacidades de tu bróker.")
+    else: 
+        st.info(f"ℹ️ **{pais}**: Verifica el convenio de doble imposición internacional vigente y las tasas de retención actuales para residentes españoles.")
 
     st.subheader(f"🎯 Precios Objetivo y Valoración Actual (Basado en {años_analisis} Años)")
     
@@ -497,7 +510,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.divider()
 
     # ==========================================
-    # NUEVA FILA DE BENEFICIOS CON DELTAS DINÁMICOS
+    # FILA DE BENEFICIOS CON DELTAS DINÁMICOS
     # ==========================================
     st.subheader("📊 Beneficios, Proyecciones y Acciones")
     
@@ -562,7 +575,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             if price_to_book > 5.0: mensajes_alerta.append("un **P/B muy elevado** (distorsión del patrimonio contable)")
             if deuda_fcf > 4.0: mensajes_alerta.append("una **Deuda/FCF en zona de aviso** (apalancamiento mantenido)")
             motivos = " y ".join(mensajes_alerta)
-            st.info(f"🕵️‍♂️ **Aviso Analítico Avanzado:** La empresa presenta {motivos}. Al tener un historial agresivo de destrucción de acciones ({variacion_acciones:.2f}%), **revisa si estos datos son fruto de la ingeniería financiera (recompras masivas)** más que de un deterioro real del negocio.")
+            st.info(f"🕵️‍♂️ **Aviso Analítico Avanzado:** La empresa presenta {motivos}. Al tener un historial agresivo de destrucción de acciones ({variacion_acciones:.2f}%), **revisa si estos datos son fruto de la ingeniería financiera (recompras masivas)** más que de un deterioration real del negocio.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 📈 Crecimiento Anual Compuesto del Dividendo (CAGR / DGR)")
@@ -603,7 +616,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.plotly_chart(fig_divs, use_container_width=True)
 
     # ==========================================
-    # 3. DECÁLOGO DE CALIDAD REESTRUCTURADO Y ETIQUETADO
+    # 3. DECÁLOGO DE CALIDAD REESTRUCTURADO
     # ==========================================
     st.divider()
     st.subheader(f"📋 Decálogo de Calidad del Blue Chip ({años_analisis} Años)")
@@ -670,12 +683,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         elif variacion_acciones <= 5: st.warning(f"{t_acc} Acciones en circulación: +{variacion_acciones:.2f}% en {años_analisis} años (Estable / Ligera dilución)")
         else: st.error(f"{t_acc} Acciones en circulación: +{variacion_acciones:.2f}% en {años_analisis} años (Peligro, la empresa diluye al accionista)")
 
-    st.markdown("#### 📈 4. Historial y Crecimiento")
+    st.markdown("#### 🛡️ 4. Historial y Crecimiento")
     if años_pagando >= 25 and racha_sin_recortes >= 12: st.success(f"{t_hist} Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata consagrada)")
     else: st.warning(f"{t_hist} Historial: {años_pagando} años pagando | Racha sin recortes: {racha_sin_recortes} años")
 
     if incrementos_dividendo >= min(5, años_analisis): st.success(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): El dividendo ha subido {incrementos_dividendo} veces en los últimos {años_analisis} años (Cumple exigencia de crecimiento)")
-    else: st.error(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): Solo {incrementos_dividendo} aumentos detectados en {años_analisis} años (Falta de crecimiento activo)")
+    else: st.error(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): Solo {incrementos_dividendo} aumentos detectados in {años_analisis} años (Falta de crecimiento activo)")
 
     if total_años_bpa_datos > 0:
         ratio_bpa = años_crecimiento_bpa / total_años_bpa_datos
@@ -763,7 +776,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 # --- FRONTEND DE LA APLICACIÓN ---
 st.title("Screener Fundamental - Método Geraldine Weiss")
-ticker_input = st.text_input("Ticker:", "WKL.AS").upper()
+ticker_input = st.text_input("Ticker:", "NVO").upper() # Cambiado por defecto a NVO para probar Dinamarca
 años_analisis = st.selectbox("Periodo:", [5, 10, 12, 15, 20], index=2)
 impuesto = st.number_input("Retención (%)", value=19.0)
 
