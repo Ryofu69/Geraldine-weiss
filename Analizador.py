@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="Screener Geraldine Weiss", page_icon="📊", layout="wide")
 
-# Diccionario de respaldo: Solo traduce lo que es seguro, el resto se queda en inglés
+# Diccionario de respaldo
 TRADUCCION = {
     'Technology': 'Tecnología', 'Healthcare': 'Salud', 'Financial Services': 'Servicios Financieros',
     'Consumer Cyclical': 'Consumo Cíclico', 'Industrials': 'Industrial', 'Consumer Defensive': 'Consumo Defensivo',
@@ -575,83 +575,89 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
 
     # ==========================================
-    # PANEL TÉCNICO MACD, VOLUMEN Y BANDAS WEISS (Corto Plazo)
+    # PANEL TÉCNICO MACD, VOLUMEN Y BANDAS WEISS (Vista Lupa 2 Meses)
     # ==========================================
     st.divider()
-    st.markdown("### ⏱️ Timing de Entrada: Análisis Técnico a Corto Plazo (1 Año)")
-    st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las velas crucen o toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
+    st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
+    st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
 
-    fecha_tecnico = pd.Timestamp.now().normalize() - pd.DateOffset(years=1)
-    
-    # Extraemos df_tech de historial_analisis para poder heredar la columna 'Div_Anual'
-    df_tech = historial_analisis[historial_analisis.index >= fecha_tecnico].copy()
+    # Calculamos el MACD con 1 año de datos para que la línea media sea precisa
+    fecha_calculo_macd = pd.Timestamp.now().normalize() - pd.DateOffset(years=1)
+    df_tech_full = historial_analisis[historial_analisis.index >= fecha_calculo_macd].copy()
 
-    if len(df_tech) > 30: 
-        # Calculamos los precios objetivo para las bandas en el corto plazo
-        df_tech['Precio_Compra'] = (df_tech['Div_Anual'] / yield_infravalorado) * 100
-        df_tech['Precio_Justo'] = (df_tech['Div_Anual'] / yield_medio) * 100
-        df_tech['Precio_Venta'] = (df_tech['Div_Anual'] / yield_sobrevalorado) * 100
+    if len(df_tech_full) > 30: 
+        # Calculamos los precios objetivo para las bandas
+        df_tech_full['Precio_Compra'] = (df_tech_full['Div_Anual'] / yield_infravalorado) * 100
+        df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
+        df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
 
         if currency == 'GBp':
             for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
-                df_tech[col] = df_tech[col] / divisor_uk
+                df_tech_full[col] = df_tech_full[col] / divisor_uk
 
-        # Cálculo manual de MACD (12, 26, 9)
-        ema12 = df_tech['Close'].ewm(span=12, adjust=False).mean()
-        ema26 = df_tech['Close'].ewm(span=26, adjust=False).mean()
-        df_tech['MACD'] = ema12 - ema26
-        df_tech['Signal'] = df_tech['MACD'].ewm(span=9, adjust=False).mean()
-        df_tech['Histogram'] = df_tech['MACD'] - df_tech['Signal']
+        # Cálculo manual de MACD (12, 26, 9) sobre el año completo
+        ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
+        ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
+        df_tech_full['MACD'] = ema12 - ema26
+        df_tech_full['Signal'] = df_tech_full['MACD'].ewm(span=9, adjust=False).mean()
+        df_tech_full['Histogram'] = df_tech_full['MACD'] - df_tech_full['Signal']
 
-        colors_vol = ['#21c354' if row['Close'] >= row['Open'] else '#ff4b4b' for index, row in df_tech.iterrows()]
-        colors_hist = ['#21c354' if val >= 0 else '#ff4b4b' for val in df_tech['Histogram']]
+        # --- RECORTE VISUAL ("LUPA") A 2 MESES ---
+        fecha_display = pd.Timestamp.now().normalize() - pd.DateOffset(months=2)
+        df_tech = df_tech_full[df_tech_full.index >= fecha_display].copy()
 
-        fig_tech = make_subplots(rows=3, cols=1, shared_xaxes=True, 
-                                 vertical_spacing=0.03, 
-                                 row_heights=[0.5, 0.2, 0.3])
+        if not df_tech.empty:
+            colors_vol = ['#21c354' if row['Close'] >= row['Open'] else '#ff4b4b' for index, row in df_tech.iterrows()]
+            colors_hist = ['#21c354' if val >= 0 else '#ff4b4b' for val in df_tech['Histogram']]
 
-        # Fila 1: Velas Japonesas
-        fig_tech.add_trace(go.Candlestick(
-            x=df_tech.index, open=df_tech['Open'], high=df_tech['High'],
-            low=df_tech['Low'], close=df_tech['Close'], name='Precio',
-            increasing_line_color='#21c354', decreasing_line_color='#ff4b4b',
-            showlegend=False
-        ), row=1, col=1)
+            fig_tech = make_subplots(rows=3, cols=1, shared_xaxes=True, 
+                                     vertical_spacing=0.03, 
+                                     row_heights=[0.5, 0.2, 0.3])
 
-        # Fila 1: Bandas de Valoración Superpuestas
-        fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
-        fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True), row=1, col=1)
-        fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
+            # Fila 1: Barras OHLC (Más limpias que las velas)
+            fig_tech.add_trace(go.Ohlc(
+                x=df_tech.index, open=df_tech['Open'], high=df_tech['High'],
+                low=df_tech['Low'], close=df_tech['Close'], name='Precio',
+                increasing_line_color='#21c354', decreasing_line_color='#ff4b4b',
+                showlegend=False
+            ), row=1, col=1)
 
-        # Fila 2: Volumen
-        fig_tech.add_trace(go.Bar(
-            x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False
-        ), row=2, col=1)
+            # Fila 1: Bandas de Valoración Superpuestas
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True), row=1, col=1)
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
 
-        # Fila 3: MACD
-        fig_tech.add_trace(go.Bar(
-            x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False
-        ), row=3, col=1)
-        fig_tech.add_trace(go.Scatter(
-            x=df_tech.index, y=df_tech['MACD'], name='MACD', line=dict(color='#00d4ff', width=1.5), showlegend=False
-        ), row=3, col=1)
-        fig_tech.add_trace(go.Scatter(
-            x=df_tech.index, y=df_tech['Signal'], name='Señal', line=dict(color='#ff9900', width=1.5), showlegend=False
-        ), row=3, col=1)
+            # Fila 2: Volumen
+            fig_tech.add_trace(go.Bar(
+                x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False
+            ), row=2, col=1)
 
-        # Diseño del gráfico
-        fig_tech.update_layout(
-            template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=650,
-            showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            xaxis_rangeslider_visible=False 
-        )
-        
-        fig_tech.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
-        
-        st.plotly_chart(fig_tech, use_container_width=True)
+            # Fila 3: MACD
+            fig_tech.add_trace(go.Bar(
+                x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False
+            ), row=3, col=1)
+            fig_tech.add_trace(go.Scatter(
+                x=df_tech.index, y=df_tech['MACD'], name='MACD', line=dict(color='#00d4ff', width=1.5), showlegend=False
+            ), row=3, col=1)
+            fig_tech.add_trace(go.Scatter(
+                x=df_tech.index, y=df_tech['Signal'], name='Señal', line=dict(color='#ff9900', width=1.5), showlegend=False
+            ), row=3, col=1)
+
+            # Diseño del gráfico
+            fig_tech.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=650,
+                showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                xaxis_rangeslider_visible=False 
+            )
+            
+            fig_tech.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+            
+            st.plotly_chart(fig_tech, use_container_width=True)
+        else:
+            st.info("No hay suficientes datos recientes en Yahoo Finance para dibujar el panel de 2 meses.")
     else:
-        st.info("No hay suficientes datos recientes en Yahoo Finance para calcular el panel técnico (MACD/Volumen).")
+        st.info("No hay suficientes datos históricos en Yahoo Finance para calcular el panel técnico (MACD/Volumen).")
 
 # --- FRONTEND DE LA APLICACIÓN ---
 st.title("Screener Fundamental - Método Geraldine Weiss")
