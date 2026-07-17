@@ -395,14 +395,17 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
         if not df_tech.empty:
             
-            # --- MÓDULO DE ANÁLISIS AUTOMÁTICO ---
-            ult_close = df_tech['Close'].iloc[-1]
-            ult_suelo = df_tech['Precio_Compra'].iloc[-1]
+            # --- MÓDULO DE ANÁLISIS AUTOMÁTICO SINCRONIZADO CON COTIZACIÓN ACTUAL ---
+            ult_close_val = precio_actual / divisor_uk
+            ult_suelo_val = precio_compra / divisor_uk
             
-            if ult_suelo > 0:
-                dist_suelo = ((ult_close - ult_suelo) / ult_suelo) * 100
+            precio_str = f"{ult_close_val:.2f}{sym}"
+            suelo_str = f"{ult_suelo_val:.2f}{sym}"
+
+            if ult_suelo_val > 0:
+                dist_suelo = ((ult_close_val - ult_suelo_val) / ult_suelo_val) * 100
             else:
-                dist_suelo = 999.0 # Salvaguarda matemática
+                dist_suelo = 999.0
 
             ult_macd = df_tech['MACD'].iloc[-1]
             ult_signal = df_tech['Signal'].iloc[-1]
@@ -413,10 +416,15 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             max_vol_reciente = df_tech['Volume'].tail(5).max()
             vol_elevado = max_vol_reciente > (avg_vol * 1.5)
 
-            analisis_ia = "🧠 **Análisis de la IA:** "
+            analisis_ia = f"🧠 **Análisis de la IA (Leyendo cotización actual: {precio_str}):** "
 
-            if dist_suelo <= 1.0:
-                analisis_ia += "🎯 **En Zona de Disparo.** El precio está tocando o por debajo del Suelo Fundamental. "
+            if dist_suelo <= 0:
+                descuento_extra = abs(dist_suelo)
+                if descuento_extra > 0.5:
+                    analisis_ia += f"🎯 **En Zona de Disparo.** El precio ({precio_str}) cotiza un **{descuento_extra:.1f}% por debajo** de tu Suelo Fundamental ({suelo_str}). "
+                else:
+                    analisis_ia += f"🎯 **En Zona de Disparo.** El precio ({precio_str}) está tocando el Suelo Fundamental ({suelo_str}). "
+                
                 if vol_elevado: analisis_ia += "Se detecta volumen extremo reciente (posible capitulación). "
                 if ult_macd > ult_signal and ult_hist > 0:
                     analisis_ia += "El MACD confirma giro alcista. **Escenario de COMPRA IDEAL.**"
@@ -424,14 +432,16 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                     analisis_ia += "El MACD sigue bajista pero pierde fuerza. Atento al inminente cruce al alza."
                 else:
                     analisis_ia += "El MACD sigue cayendo con fuerza. Compra si eres un fundamental estricto, o espera si prefieres confirmación técnica."
-            elif 1.0 < dist_suelo <= 5.0:
-                analisis_ia += f"🟡 **Alerta Temprana / Rebote.** El precio está un {dist_suelo:.1f}% por encima del suelo exigido. "
+            
+            elif 0 < dist_suelo <= 5.0:
+                analisis_ia += f"🟡 **Alerta Temprana / Rebote.** El precio ({precio_str}) está a un **{dist_suelo:.1f}%** de tu zona de compra ({suelo_str}). "
                 if ult_macd > ult_signal:
                     analisis_ia += "El MACD es alcista. Si la acción acaba de rebotar desde la línea verde, es buena entrada aunque llegues algo tarde."
                 else:
                     analisis_ia += "El MACD es bajista. Lo ideal es esperar a que siga corrigiendo hasta tocar la línea verde discontinua para maximizar el margen de seguridad."
+            
             else:
-                analisis_ia += f"🔴 **Fuera de Zona.** El precio cotiza un {dist_suelo:.1f}% por encima del suelo exigido por Weiss. "
+                analisis_ia += f"🔴 **Fuera de Zona.** El precio ({precio_str}) cotiza un **{dist_suelo:.1f}%** por encima del suelo exigido ({suelo_str}). "
                 analisis_ia += "No hay margen de seguridad suficiente. Observa desde la barrera y pon alertas por si la acción sufre una corrección severa."
 
             st.info(analisis_ia)
