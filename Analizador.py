@@ -255,10 +255,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
     
+    # Colores restaurados en la cabecera
     st.markdown(f"""
     <div style="background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px; margin-bottom: 20px;">
-        <strong>Sector:</strong> {sector_final} &nbsp;&nbsp;|&nbsp;&nbsp; 
-        <strong>Industry:</strong> {industry_final}
+        <strong>Sector:</strong> <span style="color: #00d4ff;">{sector_final}</span> &nbsp;&nbsp;|&nbsp;&nbsp; 
+        <strong>Industry:</strong> <span style="color: #21c354;">{industry_final}</span>
     </div>
     """, unsafe_allow_html=True)
     
@@ -337,6 +338,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     elif score >= 5.0: st.warning(f"⚖️ **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Aceptable. Tiene solidez pero presenta debilidades en su flujo de efectivo o valoración.")
     else: st.error(f"🚨 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Calidad Insuficiente. No supera los filtros de caja real y seguridad.")
 
+    # ==========================================
+    # 1. GRÁFICO EVOLUCIÓN HISTÓRICA (Largo Plazo)
+    # ==========================================
     st.markdown(f"### 📈 Evolución Histórica de Valoración ({años_analisis} Años)")
     df_grafico = historial_analisis[['Close']].copy()
     if not df_grafico.empty:
@@ -359,6 +363,82 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         fig.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
+
+    # ==========================================
+    # 2. PANEL TÉCNICO MACD, VOLUMEN Y BANDAS WEISS (Vista Lupa 2 Meses)
+    # ==========================================
+    st.divider()
+    st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
+    st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
+
+    fecha_calculo_macd = pd.Timestamp.now().normalize() - pd.DateOffset(years=1)
+    df_tech_full = historial_analisis[historial_analisis.index >= fecha_calculo_macd].copy()
+
+    if len(df_tech_full) > 30: 
+        df_tech_full['Precio_Compra'] = (df_tech_full['Div_Anual'] / yield_infravalorado) * 100
+        df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
+        df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
+
+        if currency == 'GBp':
+            for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
+                df_tech_full[col] = df_tech_full[col] / divisor_uk
+
+        ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
+        ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
+        df_tech_full['MACD'] = ema12 - ema26
+        df_tech_full['Signal'] = df_tech_full['MACD'].ewm(span=9, adjust=False).mean()
+        df_tech_full['Histogram'] = df_tech_full['MACD'] - df_tech_full['Signal']
+
+        fecha_display = pd.Timestamp.now().normalize() - pd.DateOffset(months=2)
+        df_tech = df_tech_full[df_tech_full.index >= fecha_display].copy()
+
+        if not df_tech.empty:
+            colors_vol = ['#21c354' if row['Close'] >= row['Open'] else '#ff4b4b' for index, row in df_tech.iterrows()]
+            colors_hist = ['#21c354' if val >= 0 else '#ff4b4b' for val in df_tech['Histogram']]
+
+            fig_tech = make_subplots(rows=3, cols=1, shared_xaxes=True, 
+                                     vertical_spacing=0.03, 
+                                     row_heights=[0.5, 0.2, 0.3])
+
+            fig_tech.add_trace(go.Ohlc(
+                x=df_tech.index, open=df_tech['Open'], high=df_tech['High'],
+                low=df_tech['Low'], close=df_tech['Close'], name='Precio',
+                increasing_line_color='#21c354', decreasing_line_color='#ff4b4b',
+                showlegend=False
+            ), row=1, col=1)
+
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True), row=1, col=1)
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
+
+            fig_tech.add_trace(go.Bar(
+                x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False
+            ), row=2, col=1)
+
+            fig_tech.add_trace(go.Bar(
+                x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False
+            ), row=3, col=1)
+            fig_tech.add_trace(go.Scatter(
+                x=df_tech.index, y=df_tech['MACD'], name='MACD', line=dict(color='#00d4ff', width=1.5), showlegend=False
+            ), row=3, col=1)
+            fig_tech.add_trace(go.Scatter(
+                x=df_tech.index, y=df_tech['Signal'], name='Señal', line=dict(color='#ff9900', width=1.5), showlegend=False
+            ), row=3, col=1)
+
+            fig_tech.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=800,
+                showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                xaxis_rangeslider_visible=False 
+            )
+            
+            fig_tech.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+            
+            st.plotly_chart(fig_tech, use_container_width=True)
+        else:
+            st.info("No hay suficientes datos recientes en Yahoo Finance para dibujar el panel de 2 meses.")
+    else:
+        st.info("No hay suficientes datos históricos en Yahoo Finance para calcular el panel técnico (MACD/Volumen).")
 
     st.divider()
 
@@ -415,36 +495,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     cd1, cd2 = st.columns(2)
     cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
     cd2.metric(f"DGR {años_analisis} Años (Periodo Actual)", f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
-    
-    val_5y = dgr_5y if dgr_5y is not None else -1
-    val_periodo = dgr_periodo if dgr_periodo is not None else -1
-
-    if val_5y > 0 and val_periodo > 0:
-        if val_5y < val_periodo: dgr_proyeccion = val_5y; txt_ritmo = "Ritmo Conservador (5A)"
-        else: dgr_proyeccion = val_periodo; txt_ritmo = f"Ritmo Conservador ({años_analisis}A)"
-    elif val_5y > 0: dgr_proyeccion = val_5y; txt_ritmo = "Ritmo Disponible (5A)"
-    elif val_periodo > 0: dgr_proyeccion = val_periodo; txt_ritmo = f"Ritmo Disponible ({años_analisis}A)"
-    else: dgr_proyeccion = 0.0; txt_ritmo = "Crecimiento Estancado"
-    
-    dgr_proyeccion = min(dgr_proyeccion, 15.0)
-    años_proyeccion = list(range(1, 16))
-    div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
-    yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
-    yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
-    
-    x_labels_yoc = []
-    for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
-        año_futuro = año_actual + año
-        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
-
-    fig_yoc = go.Figure()
-    fig_yoc.add_trace(go.Bar(x=x_labels_yoc, y=div_bruto_proyectado, name=f'Div. Esperado ({sym})', marker_color='#00d4ff', yaxis='y1', text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'))
-    fig_yoc.add_trace(go.Scatter(x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'))
-    fig_yoc.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")), yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), title=dict(text=f"Basado en {txt_ritmo}: +{dgr_proyeccion:.1f}% anual constante", font=dict(size=14, color="#aaa")))
-    st.plotly_chart(fig_yoc, use_container_width=True)
 
     if not shares_yearly.empty and len(shares_yearly) > 1:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -578,80 +628,37 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
 
     # ==========================================
-    # PANEL TÉCNICO MACD, VOLUMEN Y BANDAS WEISS (Vista Lupa 2 Meses)
+    # 4. PROYECCIÓN DE RENTABILIDAD A 15 AÑOS
     # ==========================================
     st.divider()
-    st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
-    st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
+    st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
+    
+    val_5y = dgr_5y if dgr_5y is not None else -1
+    val_periodo = dgr_periodo if dgr_periodo is not None else -1
 
-    fecha_calculo_macd = pd.Timestamp.now().normalize() - pd.DateOffset(years=1)
-    df_tech_full = historial_analisis[historial_analisis.index >= fecha_calculo_macd].copy()
+    if val_5y > 0 and val_periodo > 0:
+        if val_5y < val_periodo: dgr_proyeccion = val_5y; txt_ritmo = "Ritmo Conservador (5A)"
+        else: dgr_proyeccion = val_periodo; txt_ritmo = f"Ritmo Conservador ({años_analisis}A)"
+    elif val_5y > 0: dgr_proyeccion = val_5y; txt_ritmo = "Ritmo Disponible (5A)"
+    elif val_periodo > 0: dgr_proyeccion = val_periodo; txt_ritmo = f"Ritmo Disponible ({años_analisis}A)"
+    else: dgr_proyeccion = 0.0; txt_ritmo = "Crecimiento Estancado"
+    
+    dgr_proyeccion = min(dgr_proyeccion, 15.0)
+    años_proyeccion = list(range(1, 16))
+    div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
+    yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
+    yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
+    
+    x_labels_yoc = []
+    for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
+        año_futuro = año_actual + año
+        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
 
-    if len(df_tech_full) > 30: 
-        df_tech_full['Precio_Compra'] = (df_tech_full['Div_Anual'] / yield_infravalorado) * 100
-        df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
-        df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
-
-        if currency == 'GBp':
-            for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
-                df_tech_full[col] = df_tech_full[col] / divisor_uk
-
-        ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
-        ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
-        df_tech_full['MACD'] = ema12 - ema26
-        df_tech_full['Signal'] = df_tech_full['MACD'].ewm(span=9, adjust=False).mean()
-        df_tech_full['Histogram'] = df_tech_full['MACD'] - df_tech_full['Signal']
-
-        fecha_display = pd.Timestamp.now().normalize() - pd.DateOffset(months=2)
-        df_tech = df_tech_full[df_tech_full.index >= fecha_display].copy()
-
-        if not df_tech.empty:
-            colors_vol = ['#21c354' if row['Close'] >= row['Open'] else '#ff4b4b' for index, row in df_tech.iterrows()]
-            colors_hist = ['#21c354' if val >= 0 else '#ff4b4b' for val in df_tech['Histogram']]
-
-            fig_tech = make_subplots(rows=3, cols=1, shared_xaxes=True, 
-                                     vertical_spacing=0.03, 
-                                     row_heights=[0.5, 0.2, 0.3])
-
-            fig_tech.add_trace(go.Ohlc(
-                x=df_tech.index, open=df_tech['Open'], high=df_tech['High'],
-                low=df_tech['Low'], close=df_tech['Close'], name='Precio',
-                increasing_line_color='#21c354', decreasing_line_color='#ff4b4b',
-                showlegend=False
-            ), row=1, col=1)
-
-            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
-            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True), row=1, col=1)
-            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
-
-            fig_tech.add_trace(go.Bar(
-                x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False
-            ), row=2, col=1)
-
-            fig_tech.add_trace(go.Bar(
-                x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False
-            ), row=3, col=1)
-            fig_tech.add_trace(go.Scatter(
-                x=df_tech.index, y=df_tech['MACD'], name='MACD', line=dict(color='#00d4ff', width=1.5), showlegend=False
-            ), row=3, col=1)
-            fig_tech.add_trace(go.Scatter(
-                x=df_tech.index, y=df_tech['Signal'], name='Señal', line=dict(color='#ff9900', width=1.5), showlegend=False
-            ), row=3, col=1)
-
-            fig_tech.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=800,
-                showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                xaxis_rangeslider_visible=False 
-            )
-            
-            fig_tech.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
-            
-            st.plotly_chart(fig_tech, use_container_width=True)
-        else:
-            st.info("No hay suficientes datos recientes en Yahoo Finance para dibujar el panel de 2 meses.")
-    else:
-        st.info("No hay suficientes datos históricos en Yahoo Finance para calcular el panel técnico (MACD/Volumen).")
+    fig_yoc = go.Figure()
+    fig_yoc.add_trace(go.Bar(x=x_labels_yoc, y=div_bruto_proyectado, name=f'Div. Esperado ({sym})', marker_color='#00d4ff', yaxis='y1', text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'))
+    fig_yoc.add_trace(go.Scatter(x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'))
+    fig_yoc.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")), yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), title=dict(text=f"Basado en {txt_ritmo}: +{dgr_proyeccion:.1f}% anual constante", font=dict(size=14, color="#aaa")))
+    st.plotly_chart(fig_yoc, use_container_width=True)
 
 # --- FRONTEND DE LA APLICACIÓN ---
 st.title("Screener Fundamental - Método Geraldine Weiss")
