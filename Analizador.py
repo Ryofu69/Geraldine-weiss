@@ -394,6 +394,49 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech = df_tech_full[df_tech_full.index >= fecha_display].copy()
 
         if not df_tech.empty:
+            
+            # --- MÓDULO DE ANÁLISIS AUTOMÁTICO ---
+            ult_close = df_tech['Close'].iloc[-1]
+            ult_suelo = df_tech['Precio_Compra'].iloc[-1]
+            
+            if ult_suelo > 0:
+                dist_suelo = ((ult_close - ult_suelo) / ult_suelo) * 100
+            else:
+                dist_suelo = 999.0 # Salvaguarda matemática
+
+            ult_macd = df_tech['MACD'].iloc[-1]
+            ult_signal = df_tech['Signal'].iloc[-1]
+            ult_hist = df_tech['Histogram'].iloc[-1]
+            penult_hist = df_tech['Histogram'].iloc[-2] if len(df_tech) > 1 else 0
+
+            avg_vol = df_tech['Volume'].mean()
+            max_vol_reciente = df_tech['Volume'].tail(5).max()
+            vol_elevado = max_vol_reciente > (avg_vol * 1.5)
+
+            analisis_ia = "🧠 **Análisis de la IA:** "
+
+            if dist_suelo <= 1.0:
+                analisis_ia += "🎯 **En Zona de Disparo.** El precio está tocando o por debajo del Suelo Fundamental. "
+                if vol_elevado: analisis_ia += "Se detecta volumen extremo reciente (posible capitulación). "
+                if ult_macd > ult_signal and ult_hist > 0:
+                    analisis_ia += "El MACD confirma giro alcista. **Escenario de COMPRA IDEAL.**"
+                elif ult_macd < ult_signal and ult_hist > penult_hist:
+                    analisis_ia += "El MACD sigue bajista pero pierde fuerza. Atento al inminente cruce al alza."
+                else:
+                    analisis_ia += "El MACD sigue cayendo con fuerza. Compra si eres un fundamental estricto, o espera si prefieres confirmación técnica."
+            elif 1.0 < dist_suelo <= 5.0:
+                analisis_ia += f"🟡 **Alerta Temprana / Rebote.** El precio está un {dist_suelo:.1f}% por encima del suelo exigido. "
+                if ult_macd > ult_signal:
+                    analisis_ia += "El MACD es alcista. Si la acción acaba de rebotar desde la línea verde, es buena entrada aunque llegues algo tarde."
+                else:
+                    analisis_ia += "El MACD es bajista. Lo ideal es esperar a que siga corrigiendo hasta tocar la línea verde discontinua para maximizar el margen de seguridad."
+            else:
+                analisis_ia += f"🔴 **Fuera de Zona.** El precio cotiza un {dist_suelo:.1f}% por encima del suelo exigido por Weiss. "
+                analisis_ia += "No hay margen de seguridad suficiente. Observa desde la barrera y pon alertas por si la acción sufre una corrección severa."
+
+            st.info(analisis_ia)
+            # ----------------------------------------
+
             colors_vol = ['#21c354' if row['Close'] >= row['Open'] else '#ff4b4b' for index, row in df_tech.iterrows()]
             colors_hist = ['#21c354' if val >= 0 else '#ff4b4b' for val in df_tech['Histogram']]
 
@@ -687,7 +730,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     color_linea = '#21c354' if dgr_proyeccion >= 0 else '#ff4b4b'
     signo_dgr = "+" if dgr_proyeccion > 0 else ""
 
-    # --- TEXTO SACADO FUERA DEL GRÁFICO PARA MÓVILES ---
     st.markdown(f"> **Cálculo de la proyección:** Basado en {txt_ritmo} con un <span style='color:{color_linea};'>**{signo_dgr}{dgr_proyeccion:.1f}% anual constante**</span>.", unsafe_allow_html=True)
 
     fig_yoc = go.Figure()
