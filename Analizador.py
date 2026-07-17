@@ -658,7 +658,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     val_periodo = dgr_periodo if dgr_periodo is not None else None
 
     if val_5y is not None and val_periodo is not None:
-        # Cogemos siempre el peor escenario para protegernos (sea crecimiento bajo o caída brusca)
         dgr_proyeccion = min(val_5y, val_periodo)
         txt_ritmo = "Ritmo Conservador (5A)" if dgr_proyeccion == val_5y else f"Ritmo Conservador ({años_analisis}A)"
     elif val_5y is not None:
@@ -671,12 +670,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         dgr_proyeccion = 0.0
         txt_ritmo = "Crecimiento Nulo / Estancado"
     
-    # Cap máximo hacia arriba (para no distorsionar con crecimientos irreales), pero permitimos caídas libres hacia abajo
     dgr_proyeccion = min(dgr_proyeccion, 15.0)
     
     años_proyeccion = list(range(1, 16))
     
-    # Cálculo con DGR que puede ser negativo
     div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
@@ -686,10 +683,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         año_futuro = año_actual + año
         x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
 
-    # Colores dinámicos: azul/verde si sube o se mantiene, rojo si es un recorte de dividendo
     color_barras = '#00d4ff' if dgr_proyeccion >= 0 else '#ff4b4b'
     color_linea = '#21c354' if dgr_proyeccion >= 0 else '#ff4b4b'
     signo_dgr = "+" if dgr_proyeccion > 0 else ""
+
+    # --- TEXTO SACADO FUERA DEL GRÁFICO PARA MÓVILES ---
+    st.markdown(f"> **Cálculo de la proyección:** Basado en {txt_ritmo} con un <span style='color:{color_linea};'>**{signo_dgr}{dgr_proyeccion:.1f}% anual constante**</span>.", unsafe_allow_html=True)
 
     fig_yoc = go.Figure()
     fig_yoc.add_trace(go.Bar(
@@ -702,12 +701,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     ))
     
     fig_yoc.update_layout(
-        template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=350, hovermode="x unified", 
+        template='plotly_dark', margin=dict(l=0, r=0, t=10, b=40), height=350, hovermode="x unified", 
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
         yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color=color_barras)), tickfont=dict(color=color_barras)), 
         yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), 
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), 
-        title=dict(text=f"Basado en {txt_ritmo}: {signo_dgr}{dgr_proyeccion:.1f}% anual constante", font=dict(size=14, color="#aaa"))
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
 
