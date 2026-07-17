@@ -408,7 +408,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 showlegend=False
             ), row=1, col=1)
 
-            # --- AMBAS LÍNEAS (TECHO Y PRECIO JUSTO) OCULTAS POR DEFECTO ---
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
@@ -633,12 +632,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if dgr_5y is not None:
         if dgr_5y >= 10: st.success(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Excelente)")
         elif dgr_5y > 0: st.warning(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Positivo)")
-        else: st.error(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Estancado)")
+        else: st.error(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Estancado / Recortes)")
 
     if dgr_periodo is not None:
         if dgr_periodo >= 10: st.success(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Excelente ritmo continuo)")
         elif dgr_periodo > 0: st.warning(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Sostenido)")
-        else: st.error(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Estancado)")
+        else: st.error(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Estancado / Recortes)")
 
     st.markdown("#### 🏢 5. Fortaleza Institucional")
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
@@ -655,18 +654,29 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.divider()
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
     
-    val_5y = dgr_5y if dgr_5y is not None else -1
-    val_periodo = dgr_periodo if dgr_periodo is not None else -1
+    val_5y = dgr_5y if dgr_5y is not None else None
+    val_periodo = dgr_periodo if dgr_periodo is not None else None
 
-    if val_5y > 0 and val_periodo > 0:
-        if val_5y < val_periodo: dgr_proyeccion = val_5y; txt_ritmo = "Ritmo Conservador (5A)"
-        else: dgr_proyeccion = val_periodo; txt_ritmo = f"Ritmo Conservador ({años_analisis}A)"
-    elif val_5y > 0: dgr_proyeccion = val_5y; txt_ritmo = "Ritmo Disponible (5A)"
-    elif val_periodo > 0: dgr_proyeccion = val_periodo; txt_ritmo = f"Ritmo Disponible ({años_analisis}A)"
-    else: dgr_proyeccion = 0.0; txt_ritmo = "Crecimiento Estancado"
+    if val_5y is not None and val_periodo is not None:
+        # Cogemos siempre el peor escenario para protegernos (sea crecimiento bajo o caída brusca)
+        dgr_proyeccion = min(val_5y, val_periodo)
+        txt_ritmo = "Ritmo Conservador (5A)" if dgr_proyeccion == val_5y else f"Ritmo Conservador ({años_analisis}A)"
+    elif val_5y is not None:
+        dgr_proyeccion = val_5y
+        txt_ritmo = "Ritmo Disponible (5A)"
+    elif val_periodo is not None:
+        dgr_proyeccion = val_periodo
+        txt_ritmo = f"Ritmo Disponible ({años_analisis}A)"
+    else:
+        dgr_proyeccion = 0.0
+        txt_ritmo = "Crecimiento Nulo / Estancado"
     
+    # Cap máximo hacia arriba (para no distorsionar con crecimientos irreales), pero permitimos caídas libres hacia abajo
     dgr_proyeccion = min(dgr_proyeccion, 15.0)
+    
     años_proyeccion = list(range(1, 16))
+    
+    # Cálculo con DGR que puede ser negativo
     div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
     yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
@@ -676,10 +686,29 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         año_futuro = año_actual + año
         x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
 
+    # Colores dinámicos: azul/verde si sube o se mantiene, rojo si es un recorte de dividendo
+    color_barras = '#00d4ff' if dgr_proyeccion >= 0 else '#ff4b4b'
+    color_linea = '#21c354' if dgr_proyeccion >= 0 else '#ff4b4b'
+    signo_dgr = "+" if dgr_proyeccion > 0 else ""
+
     fig_yoc = go.Figure()
-    fig_yoc.add_trace(go.Bar(x=x_labels_yoc, y=div_bruto_proyectado, name=f'Div. Esperado ({sym})', marker_color='#00d4ff', yaxis='y1', text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'))
-    fig_yoc.add_trace(go.Scatter(x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'))
-    fig_yoc.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")), yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), title=dict(text=f"Basado en {txt_ritmo}: +{dgr_proyeccion:.1f}% anual constante", font=dict(size=14, color="#aaa")))
+    fig_yoc.add_trace(go.Bar(
+        x=x_labels_yoc, y=div_bruto_proyectado, name=f'Div. Esperado ({sym})', marker_color=color_barras, yaxis='y1', 
+        text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'
+    ))
+    fig_yoc.add_trace(go.Scatter(
+        x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", mode='lines+markers', 
+        line=dict(color=color_linea, width=3), marker=dict(size=8), yaxis='y2'
+    ))
+    
+    fig_yoc.update_layout(
+        template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=350, hovermode="x unified", 
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
+        yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color=color_barras)), tickfont=dict(color=color_barras)), 
+        yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), 
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), 
+        title=dict(text=f"Basado en {txt_ritmo}: {signo_dgr}{dgr_proyeccion:.1f}% anual constante", font=dict(size=14, color="#aaa"))
+    )
     st.plotly_chart(fig_yoc, use_container_width=True)
 
 # --- FRONTEND DE LA APLICACIÓN ---
