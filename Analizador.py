@@ -264,7 +264,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     </div>
     """, unsafe_allow_html=True)
     
-    # --- MOTOR DE PERFIL FISCAL AMPLIADO (EUROPA) ---
     st.markdown("### 🌍 Perfil Fiscal y Retención en Origen")
     if pais in ['United States', 'Netherlands', 'Canada']: 
         st.success(f"✅ **{pais}**: Retención en origen del 15%. Al coincidir con el máximo deducible en España por doble imposición internacional, es 100% recuperable automáticamente en tu declaración de la Renta.")
@@ -310,47 +309,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if precio_actual <= precio_compra: st.success("💡 ESTADO: En zona de COMPRA CLARA (Infravalorada).")
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
-
-    score = 0.0
-    cond_fcf = payout_fcf != -1 and payout_fcf <= payout_amarillo_fcf
-    cond_pfcf = p_fcf != -1 and 0 < p_fcf <= 20
-    cond_deuda = deuda_fcf != -1 and 0 < deuda_fcf <= 5.0
-    cond_historial = años_pagando >= 25 and racha_sin_recortes >= 12
-    cond_aumentos = incrementos_dividendo >= min(5, años_analisis)
-    cond_acciones = variacion_acciones is not None and variacion_acciones < 0
-    cond_yield = yield_actual >= yield_medio
-    cond_bpa = 0 < payout_ratio <= payout_amarillo_bpa
-    cond_per = 0 < per <= 20
-    ratio_bpa_val = (años_crecimiento_bpa / total_años_bpa_datos) if total_años_bpa_datos > 0 else 0
-    cond_consistencia = total_años_bpa_datos > 0 and ratio_bpa_val >= 0.65
-
-    if cond_fcf: score += 1.5
-    if cond_pfcf: score += 1.5
-    if cond_deuda: score += 1.5
-    if cond_historial: score += 1.5
-    if cond_aumentos: score += 1.0
-    if cond_acciones: score += 1.0
-    if cond_yield: score += 0.5
-    if cond_bpa: score += 0.5
-    if cond_per: score += 0.5
-    if cond_consistencia: score += 0.5
-
-    t_fcf = "[🎯 +1.5 / 1.5 pts]" if cond_fcf else "[❌ 0.0 / 1.5 pts]"
-    t_pfcf = "[🎯 +1.5 / 1.5 pts]" if cond_pfcf else "[❌ 0.0 / 1.5 pts]"
-    t_deuda = "[🎯 +1.5 / 1.5 pts]" if cond_deuda else "[❌ 0.0 / 1.5 pts]"
-    t_hist = "[🎯 +1.5 / 1.5 pts]" if cond_historial else "[❌ 0.0 / 1.5 pts]"
-    t_aum = "[🎯 +1.0 / 1.0 pts]" if cond_aumentos else "[❌ 0.0 / 1.0 pts]"
-    t_acc = "[🎯 +1.0 / 1.0 pts]" if cond_acciones else "[❌ 0.0 / 1.0 pts]"
-    t_yield = "[🎯 +0.5 / 0.5 pts]" if cond_yield else "[❌ 0.0 / 0.5 pts]"
-    t_bpa = "[🎯 +0.5 / 0.5 pts]" if cond_bpa else "[❌ 0.0 / 0.5 pts]"
-    t_per_t = "[🎯 +0.5 / 0.5 pts]" if cond_per else "[❌ 0.0 / 0.5 pts]"
-    t_cons = "[🎯 +0.5 / 0.5 pts]" if cond_consistencia else "[❌ 0.0 / 0.5 pts]"
-    t_info = "[ℹ️ Info]"
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    if score >= 8.0: st.success(f"🏆 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Sobresaliente. Fuerte generación de caja y altísima seguridad.")
-    elif score >= 5.0: st.warning(f"⚖️ **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Aceptable. Tiene solidez pero presenta debilidades en su flujo de efectivo o valoración.")
-    else: st.error(f"🚨 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Calidad Insuficiente. No supera los filtros de caja real y seguridad.")
 
     # ==========================================
     # 1. GRÁFICO EVOLUCIÓN HISTÓRICA (Largo Plazo)
@@ -474,6 +432,26 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 showlegend=False
             ), row=1, col=1)
 
+            # --- MARCADORES EX-DIVIDEND ESTILO TRADINGVIEW ---
+            divs_chart = dividendos[dividendos.index >= fecha_display]
+            for div_date, div_amount in divs_chart.items():
+                fig_tech.add_vline(x=div_date, line_width=1.5, line_dash="dot", line_color="#e040fb", 
+                                   annotation_text=f" Ⓓ {div_amount:.2f}{sym}", annotation_position="bottom right", 
+                                   annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
+                
+            ex_div_ts = info.get('exDividendDate')
+            if pd.notna(ex_div_ts) and ex_div_ts is not None:
+                try:
+                    ex_div_date_future = pd.to_datetime(ex_div_ts, unit='s').tz_localize(None).normalize()
+                    if ex_div_date_future >= pd.Timestamp.now().normalize():
+                        if ex_div_date_future not in divs_chart.index:
+                            fig_tech.add_vline(x=ex_div_date_future, line_width=1.5, line_dash="dot", line_color="#e040fb", 
+                                               annotation_text=" Ⓓ Próximo", annotation_position="bottom right", 
+                                               annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
+                except:
+                    pass
+            # ------------------------------------------------
+
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
@@ -575,7 +553,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             if price_to_book > 5.0: mensajes_alerta.append("un **P/B muy elevado** (distorsión del patrimonio contable)")
             if deuda_fcf > 4.0: mensajes_alerta.append("una **Deuda/FCF en zona de aviso** (apalancamiento mantenido)")
             motivos = " y ".join(mensajes_alerta)
-            st.info(f"🕵️‍♂️ **Aviso Analítico Avanzado:** La empresa presenta {motivos}. Al tener un historial agresivo de destrucción de acciones ({variacion_acciones:.2f}%), **revisa si estos datos son fruto de la ingeniería financiera (recompras masivas)** más que de un deterioration real del negocio.")
+            st.info(f"🕵️‍♂️ **Aviso Analítico Avanzado:** La empresa presenta {motivos}. Al tener un historial agresivo de destrucción de acciones ({variacion_acciones:.2f}%), **revisa si estos datos son fruto de la ingeniería financiera (recompras masivas)** más que de un deterioro real del negocio.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 📈 Crecimiento Anual Compuesto del Dividendo (CAGR / DGR)")
@@ -621,6 +599,42 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.divider()
     st.subheader(f"📋 Decálogo de Calidad del Blue Chip ({años_analisis} Años)")
     
+    score = 0.0
+    cond_fcf = payout_fcf != -1 and payout_fcf <= payout_amarillo_fcf
+    cond_pfcf = p_fcf != -1 and 0 < p_fcf <= 20
+    cond_deuda = deuda_fcf != -1 and 0 < deuda_fcf <= 5.0
+    cond_historial = años_pagando >= 25 and racha_sin_recortes >= 12
+    cond_aumentos = incrementos_dividendo >= min(5, años_analisis)
+    cond_acciones = variacion_acciones is not None and variacion_acciones < 0
+    cond_yield = yield_actual >= yield_medio
+    cond_bpa = 0 < payout_ratio <= payout_amarillo_bpa
+    cond_per = 0 < per <= 20
+    ratio_bpa_val = (años_crecimiento_bpa / total_años_bpa_datos) if total_años_bpa_datos > 0 else 0
+    cond_consistencia = total_años_bpa_datos > 0 and ratio_bpa_val >= 0.65
+
+    if cond_fcf: score += 1.5
+    if cond_pfcf: score += 1.5
+    if cond_deuda: score += 1.5
+    if cond_historial: score += 1.5
+    if cond_aumentos: score += 1.0
+    if cond_acciones: score += 1.0
+    if cond_yield: score += 0.5
+    if cond_bpa: score += 0.5
+    if cond_per: score += 0.5
+    if cond_consistencia: score += 0.5
+
+    t_fcf = "[🎯 +1.5 / 1.5 pts]" if cond_fcf else "[❌ 0.0 / 1.5 pts]"
+    t_pfcf = "[🎯 +1.5 / 1.5 pts]" if cond_pfcf else "[❌ 0.0 / 1.5 pts]"
+    t_deuda = "[🎯 +1.5 / 1.5 pts]" if cond_deuda else "[❌ 0.0 / 1.5 pts]"
+    t_hist = "[🎯 +1.5 / 1.5 pts]" if cond_historial else "[❌ 0.0 / 1.5 pts]"
+    t_aum = "[🎯 +1.0 / 1.0 pts]" if cond_aumentos else "[❌ 0.0 / 1.0 pts]"
+    t_acc = "[🎯 +1.0 / 1.0 pts]" if cond_acciones else "[❌ 0.0 / 1.0 pts]"
+    t_yield = "[🎯 +0.5 / 0.5 pts]" if cond_yield else "[❌ 0.0 / 0.5 pts]"
+    t_bpa = "[🎯 +0.5 / 0.5 pts]" if cond_bpa else "[❌ 0.0 / 0.5 pts]"
+    t_per_t = "[🎯 +0.5 / 0.5 pts]" if cond_per else "[❌ 0.0 / 0.5 pts]"
+    t_cons = "[🎯 +0.5 / 0.5 pts]" if cond_consistencia else "[❌ 0.0 / 0.5 pts]"
+    t_info = "[ℹ️ Info]"
+
     st.markdown("#### 💰 1. Valoración y Rentabilidad")
     if yield_actual >= yield_infravalorado: st.success(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Excelente, supera el {yield_infravalorado:.2f}%)")
     elif yield_actual >= yield_medio: st.warning(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Aceptable, superior a media de {yield_medio:.2f}%)")
@@ -688,7 +702,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else: st.warning(f"{t_hist} Historial: {años_pagando} años pagando | Racha sin recortes: {racha_sin_recortes} años")
 
     if incrementos_dividendo >= min(5, años_analisis): st.success(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): El dividendo ha subido {incrementos_dividendo} veces en los últimos {años_analisis} años (Cumple exigencia de crecimiento)")
-    else: st.error(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): Solo {incrementos_dividendo} aumentos detectados in {años_analisis} años (Falta de crecimiento activo)")
+    else: st.error(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): Solo {incrementos_dividendo} aumentos detectados en {años_analisis} años (Falta de crecimiento activo)")
 
     if total_años_bpa_datos > 0:
         ratio_bpa = años_crecimiento_bpa / total_años_bpa_datos
@@ -776,7 +790,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 # --- FRONTEND DE LA APLICACIÓN ---
 st.title("Screener Fundamental - Método Geraldine Weiss")
-ticker_input = st.text_input("Ticker:", "NVO").upper() # Cambiado por defecto a NVO para probar Dinamarca
+ticker_input = st.text_input("Ticker:", "NVO").upper() 
 años_analisis = st.selectbox("Periodo:", [5, 10, 12, 15, 20], index=2)
 impuesto = st.number_input("Retención (%)", value=19.0)
 
