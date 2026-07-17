@@ -257,7 +257,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
     
-    # Colores restaurados en la cabecera
     st.markdown(f"""
     <div style="background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px; margin-bottom: 20px;">
         <strong>Sector:</strong> <span style="color: #00d4ff;">{sector_final}</span> &nbsp;&nbsp;|&nbsp;&nbsp; 
@@ -409,8 +408,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 showlegend=False
             ), row=1, col=1)
 
+            # --- AMBAS LÍNEAS (TECHO Y PRECIO JUSTO) OCULTAS POR DEFECTO ---
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
-            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True), row=1, col=1)
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
 
             fig_tech.add_trace(go.Bar(
@@ -449,7 +449,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     # ==========================================
     st.subheader("📊 Beneficios, Proyecciones y Acciones")
     
-    # Cálculo de los deltas (indicadores de mejora)
     delta_bpa = None
     if bpa_trailing != 0 and bpa_forward != 0:
         var_bpa = ((bpa_forward - bpa_trailing) / abs(bpa_trailing)) * 100
@@ -461,7 +460,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         signo_per = "+" if var_per > 0 else ""
         delta_per = f"{signo_per}{var_per:.2f}%"
 
-    # Estructura dividida en 6 columnas
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     
     c1.metric("BPA Actual", f"{bpa_trailing / divisor_uk:.2f}{sym}" if bpa_trailing != 0 else "N/D")
