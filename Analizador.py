@@ -108,8 +108,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     yield_actual = (forward_dividend / precio_actual) * 100
 
+    # --- FUNDAMENTALES Y NUEVAS MÉTRICAS ---
     payout_ratio = get_safe('payoutRatio') * 100
     per = get_safe('trailingPE', get_safe('forwardPE'))
+    per_actual = get_safe('trailingPE')
     deuda_equity = get_safe('debtToEquity') 
     market_cap = get_safe('marketCap')
     current_ratio = get_safe('currentRatio') 
@@ -442,20 +444,42 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
+    # ==========================================
+    # NUEVA FILA DE BENEFICIOS CON DELTAS DINÁMICOS
+    # ==========================================
     st.subheader("📊 Beneficios, Proyecciones y Acciones")
-    c1, c2, c3, c4, c5 = st.columns(5)
+    
+    # Cálculo de los deltas (indicadores de mejora)
+    delta_bpa = None
+    if bpa_trailing != 0 and bpa_forward != 0:
+        var_bpa = ((bpa_forward - bpa_trailing) / abs(bpa_trailing)) * 100
+        delta_bpa = f"{var_bpa:.2f}%"
+
+    delta_per = None
+    if per_actual > 0 and per_forward > 0:
+        var_per = ((per_forward - per_actual) / per_actual) * 100
+        signo_per = "+" if var_per > 0 else ""
+        delta_per = f"{signo_per}{var_per:.2f}%"
+
+    # Estructura dividida en 6 columnas
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    
     c1.metric("BPA Actual", f"{bpa_trailing / divisor_uk:.2f}{sym}" if bpa_trailing != 0 else "N/D")
-    c2.metric("BPA Esperado (Forward)", f"{bpa_forward / divisor_uk:.2f}{sym}" if bpa_forward != 0 else "N/D")
-    c3.metric("PER Futuro", f"{per_forward:.2f}" if per_forward != 0 else "N/D")
-    c4.metric("Crecimiento BPA (3Y)", f"{crecimiento_bpa_3y:.2f}%" if crecimiento_bpa_3y is not None else "N/D")
+    c2.metric("BPA Esperado", f"{bpa_forward / divisor_uk:.2f}{sym}" if bpa_forward != 0 else "N/D", delta=delta_bpa)
+    
+    c3.metric("PER Actual", f"{per_actual:.2f}" if per_actual > 0 else "N/D")
+    c4.metric("PER Futuro", f"{per_forward:.2f}" if per_forward > 0 else "N/D", delta=delta_per, delta_color="inverse")
+    
+    c5.metric("Crecimiento BPA (3Y)", f"{crecimiento_bpa_3y:.2f}%" if crecimiento_bpa_3y is not None else "N/D")
     
     if variacion_acciones is not None:
         signo = "+" if variacion_acciones > 0 else ""
         if variacion_acciones < -0.5: estado_acc, color_acc = "- Recomprando", "inverse"
         elif variacion_acciones <= 1.0: estado_acc, color_acc = "Estable", "off"
         else: estado_acc, color_acc = "+ Diluyendo", "inverse"
-        c5.metric(f"Acciones ({años_analisis}Y)", f"{signo}{variacion_acciones:.2f}%", delta=estado_acc, delta_color=color_acc)
-    else: c5.metric(f"Acciones ({años_analisis}Y)", "N/D")
+        c6.metric(f"Acciones ({años_analisis}Y)", f"{signo}{variacion_acciones:.2f}%", delta=estado_acc, delta_color=color_acc)
+    else: 
+        c6.metric(f"Acciones ({años_analisis}Y)", "N/D")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### ⚖️ Valoración Contable y Solvencia Real")
