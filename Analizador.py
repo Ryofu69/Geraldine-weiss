@@ -19,6 +19,9 @@ TRADUCCION = {
     'Basic Materials': 'Materiales Básicos', 'Communication Services': 'Servicios de Comunicación'
 }
 
+# ==========================================
+# 1. FUNCIÓN DE ANÁLISIS INDIVIDUAL (PROFUNDO)
+# ==========================================
 def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     ticker = yf.Ticker(ticker_symbol)
     info = ticker.info
@@ -31,7 +34,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         try: return float(val)
         except (ValueError, TypeError): return default
 
-    # --- LÓGICA DE DETECCIÓN Y TRADUCCIÓN SEGURA ---
     sector_en = info.get('sector', 'Desconocido')
     industry_en = info.get('industry', 'Desconocido')
     pais = info.get('country', 'Desconocido')
@@ -98,7 +100,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
 
     historial_analisis['Yield_Diario'] = (historial_analisis['Div_Anual'] / historial_analisis['Close']) * 100
-
     yields_validos = historial_analisis['Yield_Diario'].dropna()
     yields_validos = yields_validos[yields_validos > 0]
 
@@ -108,7 +109,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     yield_actual = (forward_dividend / precio_actual) * 100
 
-    # --- FUNDAMENTALES Y MÉTRICAS ---
     payout_ratio = get_safe('payoutRatio') * 100
     per = get_safe('trailingPE', get_safe('forwardPE'))
     per_actual = get_safe('trailingPE')
@@ -241,18 +241,13 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else:
         pct_actual_vs_media = pct_infra_vs_media = pct_sobre_vs_media = 0
 
-    if pct_actual_vs_media <= 0:
-        txt_extra_actual = f"Descuento: {abs(pct_actual_vs_media):.1f}% vs Media"
-    else:
-        txt_extra_actual = f"Sobreprecio: +{pct_actual_vs_media:.1f}% vs Media"
+    if pct_actual_vs_media <= 0: txt_extra_actual = f"Descuento: {abs(pct_actual_vs_media):.1f}% vs Media"
+    else: txt_extra_actual = f"Sobreprecio: +{pct_actual_vs_media:.1f}% vs Media"
         
     txt_extra_infra = f"Suelo: {pct_infra_vs_media:.1f}% vs Media"
     txt_extra_justo = f"Ancla ({años_analisis}A)"
     txt_extra_sobre = f"Techo: +{pct_sobre_vs_media:.1f}% vs Media"
 
-    # ==========================================
-    # INTERFAZ VISUAL STREAMLIT
-    # ==========================================
     tipo_empresa_txt = "🏢 Sector Inmobiliario/Regulado (Filtros Flexibles)" if es_regulada_o_reit else "🏭 Sector Industrial/General (Filtros Estrictos)"
     
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
@@ -266,23 +261,23 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     st.markdown("### 🌍 Perfil Fiscal y Retención en Origen")
     if pais in ['United States', 'Netherlands', 'Canada']: 
-        st.success(f"✅ **{pais}**: Retención en origen del 15%. Al coincidir con el máximo deducible en España por doble imposición internacional, es 100% recuperable automáticamente en tu declaración de la Renta.")
+        st.success(f"✅ **{pais}**: Retención en origen del 15%. Al coincidir con el máximo deducible en España, es 100% recuperable automáticamente en la Renta.")
     elif pais == 'United Kingdom': 
-        st.success(f"✅ **{pais}**: Retención en origen del 0% (salvo algunos REITs). Eficiencia fiscal óptima en origen, solo tributas el impuesto local configurado.")
+        st.success(f"✅ **{pais}**: Retención en origen del 0% (salvo algunos REITs). Eficiencia fiscal óptima en origen.")
     elif pais == 'Spain': 
-        st.success(f"✅ **{pais}**: Mercado local. Retención directa del {impuesto_pct}%. Sin trámites ni retenciones en el extranjero.")
+        st.success(f"✅ **{pais}**: Mercado local. Retención directa del {impuesto_pct}%. Sin trámites internacionales.")
     elif pais == 'Denmark':
-        st.warning(f"⚠️ **{pais} (Novo Nordisk, etc.)**: Retención estándar en origen muy elevada del 27%. El convenio con España limita la retención final al 15% (que recuperas en tu Renta). El **12% restante se queda retenido en Dinamarca** y exige un trámite de reclamación directa ante su hacienda (*Skat*).")
+        st.warning(f"⚠️ **{pais}**: Retención del 27%. Recuperas 15% en España. El **12% restante queda retenido en Dinamarca** (exige reclamación ante *Skat*).")
     elif pais == 'Switzerland':
-        st.error(f"❌ **{pais}**: Retención en origen extrema del 35%. El convenio te permite deducir el 15% en España, pero el **20% sobrante queda bloqueado en Suiza** a menos que inicies el complejo proceso burocrático de devolución internacional (Formulario 81).")
+        st.error(f"❌ **{pais}**: Retención extrema del 35%. Recuperas 15% en España. El **20% sobrante queda bloqueado** (exige Formulario 81).")
     elif pais == 'Germany':
-        st.error(f"❌ **{pais}**: Retención en origen del 26.375% (incluye el impuesto de solidaridad). Recuperas el 15% en España de forma automática, pero el **11.375% restante se pierde** si no reclamas su devolución rellenando los formularios de la hacienda federal alemana (*BZSt*).")
+        st.error(f"❌ **{pais}**: Retención del 26.375%. Recuperas 15% en España. El **11.375% restante se pierde** si no reclamas al *BZSt* alemán.")
     elif pais == 'France':
-        st.error(f"❌ **{pais}**: Retención estándar en origen del 25% (puede reducirse al 12.8% si tu bróker tramita los formularios de residencia previos). De lo contrario, tendrás que reclamar el exceso por encima del 15% a la hacienda francesa.")
+        st.error(f"❌ **{pais}**: Retención del 25% (o 12.8% si el bróker tramita residencia previa). Cuidado con la doble imposición.")
     elif pais == 'Ireland': 
-        st.warning(f"⚠️ **{pais}**: Retención en origen del 25%. Puedes deducir el 15% en España, pero el **10% restante exige trámites complejos** de devolución en origen según las capacidades de tu bróker.")
+        st.warning(f"⚠️ **{pais}**: Retención del 25%. Recuperas 15% en España, el **10% restante exige trámites complejos**.")
     else: 
-        st.info(f"ℹ️ **{pais}**: Verifica el convenio de doble imposición internacional vigente y las tasas de retención actuales para residentes españoles.")
+        st.info(f"ℹ️ **{pais}**: Verifica el convenio de doble imposición internacional vigente.")
 
     st.subheader(f"🎯 Precios Objetivo y Valoración Actual (Basado en {años_analisis} Años)")
     
@@ -311,7 +306,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
 
     # ==========================================
-    # 1. GRÁFICO EVOLUCIÓN HISTÓRICA (Largo Plazo)
+    # 1. GRÁFICO EVOLUCIÓN HISTÓRICA
     # ==========================================
     st.markdown(f"### 📈 Evolución Histórica de Valoración ({años_analisis} Años)")
     df_grafico = historial_analisis[['Close']].copy()
@@ -337,11 +332,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         st.plotly_chart(fig, use_container_width=True)
 
     # ==========================================
-    # 2. PANEL TÉCNICO MACD, VOLUMEN Y BANDAS WEISS (Vista Lupa 2 Meses)
+    # 2. PANEL TÉCNICO MACD, VOLUMEN Y BANDAS WEISS
     # ==========================================
     st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
-    st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
+    st.markdown("> **Uso:** Busca picos rojos de volumen (Capitulación) tocando la línea verde discontinua (Suelo). Dispara cuando el MACD cruce al alza.")
 
     fecha_calculo_macd = pd.Timestamp.now().normalize() - pd.DateOffset(years=1)
     df_tech_full = historial_analisis[historial_analisis.index >= fecha_calculo_macd].copy()
@@ -365,79 +360,45 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech = df_tech_full[df_tech_full.index >= fecha_display].copy()
 
         if not df_tech.empty:
-            
-            # --- MÓDULO DE ANÁLISIS AUTOMÁTICO SINCRONIZADO CON COTIZACIÓN ACTUAL ---
             ult_close_val = precio_actual / divisor_uk
             ult_suelo_val = precio_compra / divisor_uk
-            
             precio_str = f"{ult_close_val:.2f}{sym}"
             suelo_str = f"{ult_suelo_val:.2f}{sym}"
 
-            if ult_suelo_val > 0:
-                dist_suelo = ((ult_close_val - ult_suelo_val) / ult_suelo_val) * 100
-            else:
-                dist_suelo = 999.0
-
+            dist_suelo = ((ult_close_val - ult_suelo_val) / ult_suelo_val) * 100 if ult_suelo_val > 0 else 999.0
             ult_macd = df_tech['MACD'].iloc[-1]
             ult_signal = df_tech['Signal'].iloc[-1]
             ult_hist = df_tech['Histogram'].iloc[-1]
             penult_hist = df_tech['Histogram'].iloc[-2] if len(df_tech) > 1 else 0
-
             avg_vol = df_tech['Volume'].mean()
-            max_vol_reciente = df_tech['Volume'].tail(5).max()
-            vol_elevado = max_vol_reciente > (avg_vol * 1.5)
+            vol_elevado = df_tech['Volume'].tail(5).max() > (avg_vol * 1.5)
 
-            analisis_ia = f"🧠 **Análisis de la IA (Leyendo cotización actual: {precio_str}):** "
-
+            analisis_ia = f"🧠 **Análisis IA (Cotización: {precio_str}):** "
             if dist_suelo <= 0:
                 descuento_extra = abs(dist_suelo)
-                if descuento_extra > 0.5:
-                    analisis_ia += f"🎯 **En Zona de Disparo.** El precio ({precio_str}) cotiza un **{descuento_extra:.1f}% por debajo** de tu Suelo Fundamental ({suelo_str}). "
-                else:
-                    analisis_ia += f"🎯 **En Zona de Disparo.** El precio ({precio_str}) está tocando el Suelo Fundamental ({suelo_str}). "
-                
-                if vol_elevado: analisis_ia += "Se detecta volumen extremo reciente (posible capitulación). "
-                if ult_macd > ult_signal and ult_hist > 0:
-                    analisis_ia += "El MACD confirma giro alcista. **Escenario de COMPRA IDEAL.**"
-                elif ult_macd < ult_signal and ult_hist > penult_hist:
-                    analisis_ia += "El MACD sigue bajista pero pierde fuerza. Atento al inminente cruce al alza."
-                else:
-                    analisis_ia += "El MACD sigue cayendo con fuerza. Compra si eres un fundamental estricto, o espera si prefieres confirmación técnica."
-            
+                analisis_ia += f"🎯 **Zona de Disparo.** Precio a {descuento_extra:.1f}% por debajo del Suelo ({suelo_str}). " if descuento_extra > 0.5 else f"🎯 **Zona de Disparo.** Precio tocando el Suelo ({suelo_str}). "
+                if vol_elevado: analisis_ia += "Volumen extremo detectado. "
+                if ult_macd > ult_signal and ult_hist > 0: analisis_ia += "MACD confirma giro alcista. COMPRA IDEAL."
+                elif ult_macd < ult_signal and ult_hist > penult_hist: analisis_ia += "MACD bajista pero perdiendo fuerza."
+                else: analisis_ia += "MACD cayendo. Compra fundamental o espera confirmación técnica."
             elif 0 < dist_suelo <= 5.0:
-                analisis_ia += f"🟡 **Alerta Temprana / Rebote.** El precio ({precio_str}) está a un **{dist_suelo:.1f}%** de tu zona de compra ({suelo_str}). "
-                if ult_macd > ult_signal:
-                    analisis_ia += "El MACD es alcista. Si la acción acaba de rebotar desde la línea verde, es buena entrada aunque llegues algo tarde."
-                else:
-                    analisis_ia += "El MACD es bajista. Lo ideal es esperar a que siga corrigiendo hasta tocar la línea verde discontinua para maximizar el margen de seguridad."
-            
+                analisis_ia += f"🟡 **Rebote.** Precio a **{dist_suelo:.1f}%** de zona compra ({suelo_str}). "
+                analisis_ia += "MACD alcista (llegaste un poco tarde al rebote)." if ult_macd > ult_signal else "MACD bajista (espera a que toque línea verde)."
             else:
-                analisis_ia += f"🔴 **Fuera de Zona.** El precio ({precio_str}) cotiza un **{dist_suelo:.1f}%** por encima del suelo exigido ({suelo_str}). "
-                analisis_ia += "No hay margen de seguridad suficiente. Observa desde la barrera y pon alertas por si la acción sufre una corrección severa."
+                analisis_ia += f"🔴 **Fuera de Zona.** Precio un **{dist_suelo:.1f}%** por encima del suelo ({suelo_str}). Sin margen de seguridad suficiente."
 
             st.info(analisis_ia)
-            # ----------------------------------------
 
             colors_vol = ['#21c354' if row['Close'] >= row['Open'] else '#ff4b4b' for index, row in df_tech.iterrows()]
             colors_hist = ['#21c354' if val >= 0 else '#ff4b4b' for val in df_tech['Histogram']]
 
-            fig_tech = make_subplots(rows=3, cols=1, shared_xaxes=True, 
-                                     vertical_spacing=0.03, 
-                                     row_heights=[0.5, 0.2, 0.3])
+            fig_tech = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.5, 0.2, 0.3])
 
-            fig_tech.add_trace(go.Ohlc(
-                x=df_tech.index, open=df_tech['Open'], high=df_tech['High'],
-                low=df_tech['Low'], close=df_tech['Close'], name='Precio',
-                increasing_line_color='#21c354', decreasing_line_color='#ff4b4b',
-                showlegend=False
-            ), row=1, col=1)
+            fig_tech.add_trace(go.Ohlc(x=df_tech.index, open=df_tech['Open'], high=df_tech['High'], low=df_tech['Low'], close=df_tech['Close'], name='Precio', increasing_line_color='#21c354', decreasing_line_color='#ff4b4b', showlegend=False), row=1, col=1)
 
-            # --- MARCADORES EX-DIVIDEND ESTILO TRADINGVIEW ---
             divs_chart = dividendos[dividendos.index >= fecha_display]
             for div_date, div_amount in divs_chart.items():
-                fig_tech.add_vline(x=div_date, line_width=1.5, line_dash="dot", line_color="#e040fb", 
-                                   annotation_text=f" Ⓓ {div_amount:.2f}{sym}", annotation_position="bottom right", 
-                                   annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
+                fig_tech.add_vline(x=div_date, line_width=1.5, line_dash="dot", line_color="#e040fb", annotation_text=f" Ⓓ {div_amount:.2f}{sym}", annotation_position="bottom right", annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
                 
             ex_div_ts = info.get('exDividendDate')
             if pd.notna(ex_div_ts) and ex_div_ts is not None:
@@ -445,156 +406,44 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                     ex_div_date_future = pd.to_datetime(ex_div_ts, unit='s').tz_localize(None).normalize()
                     if ex_div_date_future >= pd.Timestamp.now().normalize():
                         if ex_div_date_future not in divs_chart.index:
-                            fig_tech.add_vline(x=ex_div_date_future, line_width=1.5, line_dash="dot", line_color="#e040fb", 
-                                               annotation_text=" Ⓓ Próximo", annotation_position="bottom right", 
-                                               annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
-                except:
-                    pass
-            # ------------------------------------------------
+                            fig_tech.add_vline(x=ex_div_date_future, line_width=1.5, line_dash="dot", line_color="#e040fb", annotation_text=" Ⓓ Próximo", annotation_position="bottom right", annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
+                except: pass
 
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
 
-            fig_tech.add_trace(go.Bar(
-                x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False
-            ), row=2, col=1)
+            fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False), row=2, col=1)
+            fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False), row=3, col=1)
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['MACD'], name='MACD', line=dict(color='#00d4ff', width=1.5), showlegend=False), row=3, col=1)
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Signal'], name='Señal', line=dict(color='#ff9900', width=1.5), showlegend=False), row=3, col=1)
 
-            fig_tech.add_trace(go.Bar(
-                x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False
-            ), row=3, col=1)
-            fig_tech.add_trace(go.Scatter(
-                x=df_tech.index, y=df_tech['MACD'], name='MACD', line=dict(color='#00d4ff', width=1.5), showlegend=False
-            ), row=3, col=1)
-            fig_tech.add_trace(go.Scatter(
-                x=df_tech.index, y=df_tech['Signal'], name='Señal', line=dict(color='#ff9900', width=1.5), showlegend=False
-            ), row=3, col=1)
-
-            fig_tech.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=800,
-                showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                xaxis_rangeslider_visible=False 
-            )
-            
+            fig_tech.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=800, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False)
             fig_tech.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
-            
             st.plotly_chart(fig_tech, use_container_width=True)
-        else:
-            st.info("No hay suficientes datos recientes en Yahoo Finance para dibujar el panel de 2 meses.")
-    else:
-        st.info("No hay suficientes datos históricos en Yahoo Finance para calcular el panel técnico (MACD/Volumen).")
 
+    # ==========================================
+    # 3. MÉTRICAS Y ACCIONES
+    # ==========================================
     st.divider()
-
-    # ==========================================
-    # FILA DE BENEFICIOS CON DELTAS DINÁMICOS
-    # ==========================================
     st.subheader("📊 Beneficios, Proyecciones y Acciones")
     
-    delta_bpa = None
-    if bpa_trailing != 0 and bpa_forward != 0:
-        var_bpa = ((bpa_forward - bpa_trailing) / abs(bpa_trailing)) * 100
-        delta_bpa = f"{var_bpa:.2f}%"
-
-    delta_per = None
-    if per_actual > 0 and per_forward > 0:
-        var_per = ((per_forward - per_actual) / per_actual) * 100
-        signo_per = "+" if var_per > 0 else ""
-        delta_per = f"{signo_per}{var_per:.2f}%"
+    delta_bpa = f"{((bpa_forward - bpa_trailing) / abs(bpa_trailing)) * 100:.2f}%" if bpa_trailing != 0 and bpa_forward != 0 else None
+    delta_per = f"{'+' if ((per_forward - per_actual) / per_actual) * 100 > 0 else ''}{((per_forward - per_actual) / per_actual) * 100:.2f}%" if per_actual > 0 and per_forward > 0 else None
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    
     c1.metric("BPA Actual", f"{bpa_trailing / divisor_uk:.2f}{sym}" if bpa_trailing != 0 else "N/D")
     c2.metric("BPA Esperado", f"{bpa_forward / divisor_uk:.2f}{sym}" if bpa_forward != 0 else "N/D", delta=delta_bpa)
-    
     c3.metric("PER Actual", f"{per_actual:.2f}" if per_actual > 0 else "N/D")
     c4.metric("PER Futuro", f"{per_forward:.2f}" if per_forward > 0 else "N/D", delta=delta_per, delta_color="inverse")
-    
     c5.metric("Crecimiento BPA (3Y)", f"{crecimiento_bpa_3y:.2f}%" if crecimiento_bpa_3y is not None else "N/D")
-    
     if variacion_acciones is not None:
-        signo = "+" if variacion_acciones > 0 else ""
-        if variacion_acciones < -0.5: estado_acc, color_acc = "- Recomprando", "inverse"
-        elif variacion_acciones <= 1.0: estado_acc, color_acc = "Estable", "off"
-        else: estado_acc, color_acc = "+ Diluyendo", "inverse"
-        c6.metric(f"Acciones ({años_analisis}Y)", f"{signo}{variacion_acciones:.2f}%", delta=estado_acc, delta_color=color_acc)
-    else: 
-        c6.metric(f"Acciones ({años_analisis}Y)", "N/D")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("#### ⚖️ Valoración Contable y Solvencia Real")
-    cv1, cv2, cv3 = st.columns(3)
-    
-    if price_to_book > 0:
-        if es_financiera or es_industrial: pb_optimo, pb_max = 1.5, 2.5; txt_opt = "Óptimo < 1.5x (Fin/Ind)"
-        elif es_tecnologica: pb_optimo, pb_max = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
-        else: pb_optimo, pb_max = 2.5, 5.0; txt_opt = "Óptimo < 2.5x (General)"
-            
-        pb_color = "off" if price_to_book <= pb_optimo else "inverse"
-        cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", txt_opt, delta_color=pb_color)
-    else: cv1.metric("Precio / Valor en Libros (P/B)", "N/D")
-        
-    if fcf_yield > 0:
-        fcf_color = "normal" if fcf_yield > yield_actual else "inverse"
-        cv2.metric("FCF Yield (Rentabilidad de Caja)", f"{fcf_yield:.2f}%", f"Óptimo > {yield_actual:.2f}% (Div. Bruto)", delta_color=fcf_color)
-    else: cv2.metric("FCF Yield (Rentabilidad de Caja)", "N/D")
-        
-    if deuda_fcf > 0:
-        if deuda_fcf < 3: d_estado, d_color = "Óptimo < 3.0 Años", "normal"
-        elif deuda_fcf < 5: d_estado, d_color = "Aceptable < 5.0 Años", "off"
-        else: d_estado, d_color = "Peligro > 5.0 Años", "inverse"
-        cv3.metric("Deuda Total / FCF", f"{deuda_fcf:.2f} Años", delta=d_estado, delta_color=d_color)
-    else: cv3.metric("Deuda Total / FCF", "N/D" if total_debt == 0 else "FCF Negativo")
-
-    if variacion_acciones is not None and variacion_acciones < -1.0:
-        if price_to_book > 5.0 or deuda_fcf > 4.0:
-            mensajes_alerta = []
-            if price_to_book > 5.0: mensajes_alerta.append("un **P/B muy elevado** (distorsión del patrimonio contable)")
-            if deuda_fcf > 4.0: mensajes_alerta.append("una **Deuda/FCF en zona de aviso** (apalancamiento mantenido)")
-            motivos = " y ".join(mensajes_alerta)
-            st.info(f"🕵️‍♂️ **Aviso Analítico Avanzado:** La empresa presenta {motivos}. Al tener un historial agresivo de destrucción de acciones ({variacion_acciones:.2f}%), **revisa si estos datos son fruto de la ingeniería financiera (recompras masivas)** más que de un deterioro real del negocio.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("#### 📈 Crecimiento Anual Compuesto del Dividendo (CAGR / DGR)")
-    cd1, cd2 = st.columns(2)
-    cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
-    cd2.metric(f"DGR {años_analisis} Años (Periodo Actual)", f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D")
-
-    if not shares_yearly.empty and len(shares_yearly) > 1:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown(f"#### 🔄 Historial Anual de Recompras / Dilución ({años_analisis} Años)")
-        yoy_shares_total = shares_yearly.pct_change().dropna() * 100
-        yoy_shares_analisis = yoy_shares_total.tail(años_analisis)
-        text_labels = [f"+{val:.2f}%" if val > 0 else f"{val:.2f}%" for val in yoy_shares_analisis.values]
-        colores_barras = ['#21c354' if val < -0.1 else '#ff4b4b' if val > 1.0 else '#faca2b' for val in yoy_shares_analisis.values]
-        fig_shares = go.Figure()
-        fig_shares.add_trace(go.Bar(x=yoy_shares_analisis.index.astype(str), y=yoy_shares_analisis.values, marker_color=colores_barras, text=text_labels, textposition='auto'))
-        fig_shares.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=230, yaxis_title="Variación Anual (%)", xaxis_title="", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_shares, use_container_width=True)
-
-    if not dividendos_barras.empty:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown(f"#### 💰 Historial de Dividendos Anuales y Crecimiento YoY ({años_analisis} Años)")
-        crecimiento_yoy_total = dividendos_barras.pct_change() * 100
-        divs_analisis = dividendos_barras.tail(años_analisis)
-        crecimiento_yoy_analisis = crecimiento_yoy_total.tail(años_analisis)
-        if len(divs_analisis) > 0:
-            x_labels_enriquecidos = []
-            for year, val in zip(divs_analisis.index, crecimiento_yoy_analisis.values):
-                if pd.isna(val): x_labels_enriquecidos.append(str(year))
-                else:
-                    color_pct = '#21c354' if val > 0 else '#ff4b4b'
-                    signo_pct = '+' if val > 0 else ''
-                    x_labels_enriquecidos.append(f"{year}<br><span style='color:{color_pct}; font-size:12px'>{signo_pct}{val:.1f}%</span>")
-            fig_divs = go.Figure()
-            fig_divs.add_trace(go.Bar(x=x_labels_enriquecidos, y=divs_analisis.values, name=f"Dividendo ({sym})", marker_color='#00d4ff', yaxis='y1', text=[f"{val:.2f}{sym}" for val in divs_analisis.values], textposition='auto'))
-            fig_divs.add_trace(go.Scatter(x=x_labels_enriquecidos, y=crecimiento_yoy_analisis.values, name="Crecimiento YoY", mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'))
-            fig_divs.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=300, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")), yaxis2=dict(title=dict(text="Crecimiento (%)", font=dict(color="#21c354")), tickfont=dict(color="#21c354"), overlaying='y', side='right', showgrid=False), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig_divs, use_container_width=True)
+        estado_acc, color_acc = ("- Recomprando", "inverse") if variacion_acciones < -0.5 else (("Estable", "off") if variacion_acciones <= 1.0 else ("+ Diluyendo", "inverse"))
+        c6.metric(f"Acciones ({años_analisis}Y)", f"{'+' if variacion_acciones > 0 else ''}{variacion_acciones:.2f}%", delta=estado_acc, delta_color=color_acc)
+    else: c6.metric(f"Acciones ({años_analisis}Y)", "N/D")
 
     # ==========================================
-    # 3. DECÁLOGO DE CALIDAD REESTRUCTURADO
+    # 4. DECÁLOGO DE CALIDAD
     # ==========================================
     st.divider()
     st.subheader(f"📋 Decálogo de Calidad del Blue Chip ({años_analisis} Años)")
@@ -633,135 +482,55 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     t_bpa = "[🎯 +0.5 / 0.5 pts]" if cond_bpa else "[❌ 0.0 / 0.5 pts]"
     t_per_t = "[🎯 +0.5 / 0.5 pts]" if cond_per else "[❌ 0.0 / 0.5 pts]"
     t_cons = "[🎯 +0.5 / 0.5 pts]" if cond_consistencia else "[❌ 0.0 / 0.5 pts]"
-    t_info = "[ℹ️ Info]"
 
     st.markdown("#### 💰 1. Valoración y Rentabilidad")
-    if yield_actual >= yield_infravalorado: st.success(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Excelente, supera el {yield_infravalorado:.2f}%)")
-    elif yield_actual >= yield_medio: st.warning(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Aceptable, superior a media de {yield_medio:.2f}%)")
-    else: st.error(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Pobre, inferior a media de {yield_medio:.2f}%)")
-
-    if 0 < per <= 20: st.success(f"{t_per_t} PER (Beneficio Contable): {per:.2f} (Valoración atractiva)")
-    else: st.error(f"{t_per_t} PER (Beneficio Contable): {per:.2f} (Múltiplo caro)")
-
-    if p_fcf != -1:
-        if 0 < p_fcf <= 20: st.success(f"{t_pfcf} P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
-        else: st.error(f"{t_pfcf} P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
-    else: st.error(f"{t_pfcf} P/FCF (Efectivo Real): NEGATIVO")
-
-    if price_to_book > 0:
-        if es_financiera or es_industrial: l_verde, l_amarillo = 1.5, 2.5; ctx = "Sector Fin/Ind (Exige P/B estricto)"
-        elif es_tecnologica: l_verde, l_amarillo = 5.0, 10.0; ctx = "Sector Tech/Software (P/B alto por intangibles)"
-        else: l_verde, l_amarillo = 2.5, 5.0; ctx = "Sector General"
-        if price_to_book <= l_verde: st.success(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Atractivo)")
-        elif price_to_book <= l_amarillo: st.warning(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Exigente, pero en el límite)")
-        else: st.error(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Sobrevaloración contable extrema o recompras masivas)")
-
-    st.markdown("#### 🛡️ 2. Seguridad del Dividendo (Cobertura)")
-    if 0 < payout_ratio <= payout_limite_bpa: st.success(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
-    elif payout_limite_bpa < payout_ratio <= payout_amarillo_bpa: st.warning(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Atención: Excede el límite óptimo de {payout_limite_bpa:.0f}%, pero se mantiene cubierto bajo el {payout_amarillo_bpa:.0f}%)")
-    else: st.error(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y peligroso: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
+    if yield_actual >= yield_infravalorado: st.success(f"{t_yield} Rent. Bruta: {yield_actual:.2f}% (Supera suelo del {yield_infravalorado:.2f}%)")
+    elif yield_actual >= yield_medio: st.warning(f"{t_yield} Rent. Bruta: {yield_actual:.2f}% (Superior a media del {yield_medio:.2f}%)")
+    else: st.error(f"{t_yield} Rent. Bruta: {yield_actual:.2f}% (Pobre, inferior a media)")
     
-    if payout_forward != -1:
-        if payout_forward < (payout_ratio - 1): tendencia_fw = "mejorará"
-        elif payout_forward > (payout_ratio + 1): tendencia_fw = "empeorará"
-        else: tendencia_fw = "se mantendrá estable"
-        if 0 < payout_forward <= payout_limite_bpa: st.success(f"{t_info} Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Sano: la cobertura {tendencia_fw})")
-        elif payout_limite_bpa < payout_forward <= payout_amarillo_bpa: st.warning(f"{t_info} Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Justo: la cobertura {tendencia_fw})")
-        else: st.error(f"{t_info} Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Peligro: la cobertura {tendencia_fw})")
-    else: st.error(f"{t_info} Forward Payout: No disponible por BPA futuro negativo")
+    if p_fcf != -1:
+        if 0 < p_fcf <= 20: st.success(f"{t_pfcf} P/FCF (Caja Real): {p_fcf:.2f} (Barato)")
+        else: st.error(f"{t_pfcf} P/FCF (Caja Real): {p_fcf:.2f} (Caro)")
 
+    st.markdown("#### 🛡️ 2. Seguridad del Dividendo")
     if payout_fcf != -1:
-        if payout_fcf <= payout_limite_fcf: st.success(f"{t_fcf} Payout (FCF / Caja Real): {payout_fcf:.2f}% (Caja fuerte para su sector, exige < {payout_limite_fcf:.0f}%)")
-        elif payout_limite_fcf < payout_fcf <= payout_amarillo_fcf: st.warning(f"{t_fcf} Payout (FCF / Caja Real): {payout_fcf:.2f}% (Precaución: El dividendo consume más caja de lo ideal, rozando el límite sectorial de {payout_amarillo_fcf:.0f}%)")
-        else: st.error(f"{t_fcf} Payout (FCF / Caja Real): {payout_fcf:.2f}% (Peligro crítico: la empresa destina demasiada caja al dividendo, supera el {payout_amarillo_fcf:.0f}%)")
-    else: st.error(f"{t_fcf} Payout (FCF): NEGATIVO (La empresa está quemando caja real)")
+        if payout_fcf <= payout_limite_fcf: st.success(f"{t_fcf} Payout FCF: {payout_fcf:.2f}% (Caja muy sana, límite {payout_limite_fcf:.0f}%)")
+        elif payout_fcf <= payout_amarillo_fcf: st.warning(f"{t_fcf} Payout FCF: {payout_fcf:.2f}% (Justo, límite {payout_amarillo_fcf:.0f}%)")
+        else: st.error(f"{t_fcf} Payout FCF: {payout_fcf:.2f}% (Peligro, destina mucha caja al dividendo)")
 
-    st.markdown("#### 🏗️ 3. Solvencia y Gestión del Capital")
+    st.markdown("#### 🏗️ 3. Solvencia")
     if deuda_fcf != -1:
-        if deuda_fcf <= 3.0: st.success(f"{t_deuda} Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Excelente: Puede liquidar su deuda con la caja íntegra de {deuda_fcf:.1f} años)")
-        elif deuda_fcf <= 5.0: st.warning(f"{t_deuda} Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Aceptable: Nivel de apalancamiento controlable)")
-        else: st.error(f"{t_deuda} Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Peligro: Alta carga de deuda respecto a su capacidad de generar caja)")
-    elif total_debt > 0 and fcf <= 0: st.error(f"{t_deuda} Solvencia (Deuda/FCF): PELIGRO (Tiene deuda estructural y quema caja libre)")
+        if deuda_fcf <= 3.0: st.success(f"{t_deuda} Deuda/FCF: {deuda_fcf:.2f} años (Excelente)")
+        elif deuda_fcf <= 5.0: st.warning(f"{t_deuda} Deuda/FCF: {deuda_fcf:.2f} años (Aceptable)")
+        else: st.error(f"{t_deuda} Deuda/FCF: {deuda_fcf:.2f} años (Peligro, alta carga)")
 
-    if deuda_equity == 0.0: st.warning(f"{t_info} Deuda/Capital: 0.00% (Posible Patrimonio Negativo por recompras masivas)")
-    elif 0 < deuda_equity <= 50: st.success(f"{t_info} Deuda/Capital: {deuda_equity:.2f}% (Balance sano)")
-    else: st.error(f"{t_info} Deuda/Capital: {deuda_equity:.2f}% (Apalancamiento elevado)")
-
-    if current_ratio > 0:
-        if current_ratio >= 1.5: st.success(f"{t_info} Liquidez (Current Ratio): {current_ratio:.2f} (Caja solvente)")
-        elif current_ratio >= 1.0: st.warning(f"{t_info} Liquidez (Current Ratio): {current_ratio:.2f} (Justa)")
-        else: st.error(f"{t_info} Liquidez (Current Ratio): {current_ratio:.2f} (Falta de liquidez a corto plazo)")
-
-    if variacion_acciones is not None:
-        if variacion_acciones < 0: st.success(f"{t_acc} Acciones en circulación: {variacion_acciones:.2f}% en {años_analisis} años (Excelente, la empresa destruye acciones)")
-        elif variacion_acciones <= 5: st.warning(f"{t_acc} Acciones en circulación: +{variacion_acciones:.2f}% en {años_analisis} años (Estable / Ligera dilución)")
-        else: st.error(f"{t_acc} Acciones en circulación: +{variacion_acciones:.2f}% en {años_analisis} años (Peligro, la empresa diluye al accionista)")
-
-    st.markdown("#### 🛡️ 4. Historial y Crecimiento")
-    if años_pagando >= 25 and racha_sin_recortes >= 12: st.success(f"{t_hist} Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata consagrada)")
-    else: st.warning(f"{t_hist} Historial: {años_pagando} años pagando | Racha sin recortes: {racha_sin_recortes} años")
-
-    if incrementos_dividendo >= min(5, años_analisis): st.success(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): El dividendo ha subido {incrementos_dividendo} veces en los últimos {años_analisis} años (Cumple exigencia de crecimiento)")
-    else: st.error(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): Solo {incrementos_dividendo} aumentos detectados en {años_analisis} años (Falta de crecimiento activo)")
-
-    if total_años_bpa_datos > 0:
-        ratio_bpa = años_crecimiento_bpa / total_años_bpa_datos
-        if ratio_bpa >= 0.65: st.success(f"{t_cons} Consistencia BPA (Proxy Yahoo): Crecimiento neto positivo en {años_crecimiento_bpa} de {total_años_bpa_datos} años analizados (Consistente a corto plazo)")
-        else: st.error(f"{t_cons} Consistencia BPA (Proxy Yahoo): Solo {años_crecimiento_bpa} años de crecimiento de {total_años_bpa_datos} evaluados (Excesiva ciclicidad reciente)")
-
+    st.markdown("#### 📈 4. Historial DGR")
     if dgr_5y is not None:
-        if dgr_5y >= 10: st.success(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Excelente)")
-        elif dgr_5y > 0: st.warning(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Positivo)")
-        else: st.error(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Estancado / Recortes)")
-
-    if dgr_periodo is not None:
-        if dgr_periodo >= 10: st.success(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Excelente ritmo continuo)")
-        elif dgr_periodo > 0: st.warning(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Sostenido)")
-        else: st.error(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Estancado / Recortes)")
-
-    st.markdown("#### 🏢 5. Fortaleza Institucional")
-    if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
-    else: st.error(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
-
-    if respaldo_institucional > 0:
-        if respaldo_institucional >= 50.0: st.success(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
-        else: st.warning(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
-    else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
+        if dgr_5y >= 10: st.success(f"DGR 5A: {dgr_5y:.2f}% (Excelente ritmo)")
+        elif dgr_5y > 0: st.warning(f"DGR 5A: {dgr_5y:.2f}% (Positivo pero lento)")
+        else: st.error(f"DGR 5A: {dgr_5y:.2f}% (Recortes / Estancado)")
 
     # ==========================================
-    # 4. PROYECCIÓN DE RENTABILIDAD A 15 AÑOS
+    # 5. PROYECCIÓN YOC
     # ==========================================
     st.divider()
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
-    
     val_5y = dgr_5y if dgr_5y is not None else None
     val_periodo = dgr_periodo if dgr_periodo is not None else None
 
     if val_5y is not None and val_periodo is not None:
         dgr_proyeccion = min(val_5y, val_periodo)
         txt_ritmo = "Ritmo Conservador (5A)" if dgr_proyeccion == val_5y else f"Ritmo Conservador ({años_analisis}A)"
-    elif val_5y is not None:
-        dgr_proyeccion = val_5y
-        txt_ritmo = "Ritmo Disponible (5A)"
-    elif val_periodo is not None:
-        dgr_proyeccion = val_periodo
-        txt_ritmo = f"Ritmo Disponible ({años_analisis}A)"
-    else:
-        dgr_proyeccion = 0.0
-        txt_ritmo = "Crecimiento Nulo / Estancado"
+    elif val_5y is not None: dgr_proyeccion = val_5y; txt_ritmo = "Ritmo Disponible (5A)"
+    elif val_periodo is not None: dgr_proyeccion = val_periodo; txt_ritmo = f"Ritmo Disponible ({años_analisis}A)"
+    else: dgr_proyeccion = 0.0; txt_ritmo = "Estancado"
     
     dgr_proyeccion = min(dgr_proyeccion, 15.0)
-    
     años_proyeccion = list(range(1, 16))
     
     div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
-    yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
-    yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
-    
-    x_labels_yoc = []
-    for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
-        año_futuro = año_actual + año
-        x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
+    yoc_neto_lista = [(yield_actual * ((1 + dgr_proyeccion/100) ** año)) * net_mult for año in años_proyeccion]
+    x_labels_yoc = [f"{año_actual + año}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>" for año, yoc_n in zip(años_proyeccion, yoc_neto_lista)]
 
     color_barras = '#00d4ff' if dgr_proyeccion >= 0 else '#ff4b4b'
     color_linea = '#21c354' if dgr_proyeccion >= 0 else '#ff4b4b'
@@ -770,33 +539,148 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.markdown(f"> **Cálculo de la proyección:** Basado en {txt_ritmo} con un <span style='color:{color_linea};'>**{signo_dgr}{dgr_proyeccion:.1f}% anual constante**</span>.", unsafe_allow_html=True)
 
     fig_yoc = go.Figure()
-    fig_yoc.add_trace(go.Bar(
-        x=x_labels_yoc, y=div_bruto_proyectado, name=f'Div. Esperado ({sym})', marker_color=color_barras, yaxis='y1', 
-        text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'
-    ))
-    fig_yoc.add_trace(go.Scatter(
-        x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", mode='lines+markers', 
-        line=dict(color=color_linea, width=3), marker=dict(size=8), yaxis='y2'
-    ))
-    
-    fig_yoc.update_layout(
-        template='plotly_dark', margin=dict(l=0, r=0, t=10, b=40), height=350, hovermode="x unified", 
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
-        yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color=color_barras)), tickfont=dict(color=color_barras)), 
-        yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), 
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
+    fig_yoc.add_trace(go.Bar(x=x_labels_yoc, y=div_bruto_proyectado, name=f'Div. Esperado ({sym})', marker_color=color_barras, yaxis='y1', text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'))
+    fig_yoc.add_trace(go.Scatter(x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", mode='lines+markers', line=dict(color=color_linea, width=3), marker=dict(size=8), yaxis='y2'))
+    fig_yoc.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=40), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color=color_barras)), tickfont=dict(color=color_barras)), yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     st.plotly_chart(fig_yoc, use_container_width=True)
 
-# --- FRONTEND DE LA APLICACIÓN ---
-st.title("Screener Fundamental - Método Geraldine Weiss")
-ticker_input = st.text_input("Ticker:", "NVO").upper() 
-años_analisis = st.selectbox("Periodo:", [5, 10, 12, 15, 20], index=2)
-impuesto = st.number_input("Retención (%)", value=19.0)
 
-if st.button("Analizar"):
-    with st.spinner(f"Analizando {ticker_input} a {años_analisis} años..."):
-        try: 
-            screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
-        except Exception as e: 
-            st.error(f"Se ha producido un error al descargar los datos: {e}")
+# ==========================================
+# 2. FUNCIÓN LIGERA PARA SCREENER MASIVO
+# ==========================================
+def analizar_empresa_rapido(ticker_symbol, años_analisis):
+    try:
+        ticker = yf.Ticker(ticker_symbol.strip().upper())
+        info = ticker.info
+        
+        if 'dividendRate' not in info and 'trailingAnnualDividendRate' not in info:
+            return None
+            
+        dividendos = ticker.dividends
+        historial = ticker.history(period="15y")
+        
+        if dividendos.empty or len(historial) < 252: return None
+
+        historial.index = historial.index.tz_localize(None).normalize()
+        dividendos.index = dividendos.index.tz_localize(None).normalize()
+
+        fecha_corte = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis)
+        historial_analisis = historial[historial.index >= fecha_corte].copy()
+        if historial_analisis.empty: return None
+
+        precio_actual = historial_analisis['Close'].dropna().iloc[-1]
+        divs_por_año = dividendos.groupby(dividendos.index.year).sum()
+        forward_dividend = info.get('dividendRate', info.get('trailingAnnualDividendRate', 0))
+        if forward_dividend == 0: return None
+
+        historial_analisis['Year'] = historial_analisis.index.year
+        historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_por_año)
+        historial_analisis.loc[historial_analisis['Year'] == datetime.now().year, 'Div_Anual'] = forward_dividend
+        historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
+
+        historial_analisis['Yield_Diario'] = (historial_analisis['Div_Anual'] / historial_analisis['Close']) * 100
+        yields_validos = historial_analisis['Yield_Diario'].dropna()
+        yields_validos = yields_validos[yields_validos > 0]
+
+        yield_infravalorado = yields_validos.quantile(0.95)
+        precio_compra = (forward_dividend / yield_infravalorado) * 100 if yield_infravalorado > 0 else 0
+        dist_suelo = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 999
+        yield_actual = (forward_dividend / precio_actual) * 100
+        
+        dgr_5y = 0
+        if len(divs_por_año) >= 6:
+            div_actual = divs_por_año.iloc[-1]
+            div_5y = divs_por_año.iloc[-6]
+            if div_5y > 0: dgr_5y = ((div_actual / div_5y) ** (1/5) - 1) * 100
+
+        payout = info.get('payoutRatio', 1) * 100
+        fcf = info.get('freeCashflow', 0)
+        debt_fcf = info.get('totalDebt', 0) / fcf if fcf > 0 else 999
+        per = info.get('trailingPE', 99)
+        
+        score = 0
+        if 0 < payout <= 60: score += 2
+        if 0 < debt_fcf <= 5: score += 2
+        if 0 < per <= 20: score += 2
+        if yield_actual >= yields_validos.mean(): score += 2
+        if dgr_5y > 5: score += 2
+
+        estado = "🎯 COMPRA" if dist_suelo <= 1.0 else ("🟡 Cerca" if dist_suelo <= 10.0 else "🔴 Lejos")
+
+        return {
+            "Ticker": ticker_symbol.strip().upper(),
+            "Precio": round(precio_actual, 2),
+            "Suelo Weiss": round(precio_compra, 2),
+            "Distancia al Suelo %": round(dist_suelo, 2),
+            "Estado": estado,
+            "Score Calidad": score,
+            "Yield %": round(yield_actual, 2),
+            "DGR 5A %": round(dgr_5y, 2),
+            "Deuda/FCF": round(debt_fcf, 2)
+        }
+    except:
+        return None
+
+# ==========================================
+# ESTRUCTURA PRINCIPAL DE PESTAÑAS (UI)
+# ==========================================
+st.title("Sistema Fundamental - Método Geraldine Weiss")
+
+tab_individual, tab_masiva = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Masivo (Lotes)"])
+
+# ----------------- PESTAÑA 1: INDIVIDUAL -----------------
+with tab_individual:
+    col_input1, col_input2, col_input3 = st.columns(3)
+    with col_input1: ticker_input = st.text_input("Ticker individual:", "NVO").upper()
+    with col_input2: años_analisis = st.selectbox("Periodo Histórico:", [5, 10, 12, 15, 20], index=2)
+    with col_input3: impuesto = st.number_input("Retención (%)", value=19.0)
+
+    if st.button("Analizar Empresa"):
+        with st.spinner(f"Analizando {ticker_input} en profundidad..."):
+            try: 
+                screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
+            except Exception as e: 
+                st.error(f"Se ha producido un error: {e}")
+
+# ----------------- PESTAÑA 2: MASIVA -----------------
+with tab_masiva:
+    st.markdown("### 📡 Radar de Oportunidades Múltiples")
+    st.markdown("Pega aquí tu lista de seguimiento (*Watchlist*). El sistema buscará cuáles han caído a tu **Suelo Fundamental**.")
+    
+    tickers_masivos = st.text_area("Tickers (separados por comas):", "NVO, LOW, ACN, MSFT, JNJ, PG, PEP, HD")
+    años_masivos = st.selectbox("Periodo para el Suelo Masivo:", [5, 10, 12, 15, 20], index=2)
+
+    if st.button("🚀 Escanear Lista Completa"):
+        lista_tickers = [t for t in tickers_masivos.split(",") if t.strip()]
+        
+        if len(lista_tickers) > 0:
+            barra_progreso = st.progress(0)
+            texto_estado = st.empty()
+            resultados = []
+            
+            for idx, ticker in enumerate(lista_tickers):
+                texto_estado.text(f"Descargando y analizando {ticker} ({idx+1}/{len(lista_tickers)})...")
+                datos = analizar_empresa_rapido(ticker, años_masivos)
+                if datos: resultados.append(datos)
+                barra_progreso.progress((idx + 1) / len(lista_tickers))
+            
+            texto_estado.text("¡Escaneo finalizado!")
+            
+            if resultados:
+                df_res = pd.DataFrame(resultados)
+                df_res = df_res.sort_values(by="Distancia al Suelo %")
+                
+                st.dataframe(df_res.style.applymap(
+                    lambda x: 'background-color: #004d00' if x == "🎯 COMPRA" else ('background-color: #4d4d00' if x == "🟡 Cerca" else ''),
+                    subset=['Estado']
+                ), use_container_width=True)
+                
+                csv = df_res.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+                st.download_button(
+                    label="💾 Descargar CSV para Google Sheets",
+                    data=csv,
+                    file_name=f"Screener_Weiss_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.warning("No se encontraron datos de dividendos para ninguna de las empresas introducidas.")
