@@ -794,6 +794,14 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         yield_actual = (forward_dividend / precio_actual) * 100
         yield_neto = yield_actual * (1 - (impuesto_pct / 100))
 
+        # Distancia real para ordenar la tabla y mostrar en Cotización (respecto al Suelo)
+        dist_real_suelo = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 999.0
+        
+        # Distancias porcentuales visuales para las columnas
+        dist_pct_suelo = ((precio_compra - precio_actual) / precio_actual) * 100 if precio_actual > 0 else 0
+        dist_pct_justo = ((precio_justo - precio_actual) / precio_actual) * 100 if precio_actual > 0 else 0
+        dist_pct_techo = ((precio_venta - precio_actual) / precio_actual) * 100 if precio_actual > 0 else 0
+
         if precio_actual <= precio_compra:
             estado = "🎯 COMPRA"
         elif precio_actual >= precio_venta:
@@ -801,26 +809,18 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         else:
             estado = "🟡 MANTENER"
 
-        # Cálculos de distancias porcentuales idénticos al analizador normal (respecto a la media)
-        pct_actual_vs_media = ((precio_actual - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0
-        pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0
-        pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0
-
-        # Esta es la columna matemática pura para que la tabla sepa cómo ordenarse (Distancia real hasta el Suelo)
-        dist_real_suelo = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 999.0
-
         sym_m = "€" if currency == "EUR" else ("£" if currency in ["GBP", "GBp"] else "$")
 
         return {
             "Ticker": ticker_symbol.strip().upper(),
-            "Distancia al Suelo %": round(dist_real_suelo, 2),
-            "Cotización Actual": f"{precio_actual / divisor_uk:.2f}{sym_m} ({pct_actual_vs_media:+.1f}%)",
-            "Suelo (Infravalorada)": f"{precio_compra / divisor_uk:.2f}{sym_m} ({pct_infra_vs_media:+.1f}%)" if precio_compra > 0 else "N/D",
+            "Cotización Actual": f"{precio_actual / divisor_uk:.2f}{sym_m} ({dist_real_suelo:+.2f}%)",
             "Precio Justo (Media)": f"{precio_justo / divisor_uk:.2f}{sym_m}",
-            "Techo (Sobrevalorada)": f"{precio_venta / divisor_uk:.2f}{sym_m} ({pct_sobre_vs_media:+.1f}%)" if precio_venta > 0 else "N/D",
+            "Suelo (Infravalorada)": f"{precio_compra / divisor_uk:.2f}{sym_m} ({dist_pct_suelo:+.2f}%)" if precio_compra > 0 else "N/D",
+            "Techo (Sobrevalorada)": f"{precio_venta / divisor_uk:.2f}{sym_m} ({dist_pct_techo:+.2f}%)" if precio_venta > 0 else "N/D",
             "Yield Bruto %": f"{yield_actual:.2f}%",
             "Yield Neto %": f"{yield_neto:.2f}%",
-            "Estado": estado
+            "Estado": estado,
+            "_Dist_Suelo": dist_real_suelo # Columna invisible para orden matemático
         }
     except:
         return None
@@ -849,11 +849,11 @@ with tab_individual:
             except Exception as e: 
                 st.error(f"Se ha producido un error: {e}")
 
-# --- PESTAÑA 2: RADAR DE EMPRESAS MÚLTIPLES CON COLORIMETRÍA Y PORCENTAJES ---
+# --- PESTAÑA 2: RADAR DE EMPRESAS MÚLTIPLES ---
 with tab_masiva:
     st.markdown("### 📡 Radar Fundamental por Lotes")
     st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** (las que estén por debajo o más cerca del suelo).")
-    st.markdown("> *Nota: Los porcentajes entre paréntesis están calculados respecto al **Precio Justo (Media)**, exactamente igual que en tu analizador individual.*")
+    st.markdown("> *Nota: El porcentaje de la 'Cotización Actual' indica a qué distancia exacta se encuentra de tu **Suelo Fundamental** de compra.*")
     
     tickers_masivos = st.text_area("Lista de Tickers (separados por comas):", "NVO, LOW, ACN, MSFT, JNJ, PG, PEP, HD")
     
@@ -881,23 +881,20 @@ with tab_masiva:
             texto_estado.text("¡Escaneo masivo completado!")
             
             if resultados:
-                # 1. Ordenamos por la columna de cálculo real de menor a mayor
-                df_res = pd.DataFrame(resultados).sort_values(by="Distancia al Suelo %")
+                # 1. Creamos el DataFrame y ordenamos matemáticamente por la columna oculta
+                df_res = pd.DataFrame(resultados).sort_values(by="_Dist_Suelo")
                 
-                # 2. Función de coloreo semántico celda a celda
+                # 2. Eliminamos la columna de cálculo para que no se vea en pantalla
+                df_res = df_res.drop(columns=["_Dist_Suelo"])
+                
+                # 3. Función avanzada para pintar celdas individuales
                 def color_row(row):
                     styles = [''] * len(row)
                     est = row['Estado']
                     
                     for idx, col_name in enumerate(row.index):
-                        # Dar color a la columna matemática según su valor
-                        if col_name == 'Distancia al Suelo %':
-                            val = row[col_name]
-                            if val <= 1.0: styles[idx] = 'color: #21c354; font-weight: bold;'
-                            elif val <= 10.0: styles[idx] = 'color: #faca2b; font-weight: bold;'
-                            else: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
                         # La Cotización Actual cambia de color según lo infravalorada o sobrevalorada que esté la acción
-                        elif col_name == 'Cotización Actual':
+                        if col_name == 'Cotización Actual':
                             if "COMPRA" in est: styles[idx] = 'color: #21c354; font-weight: bold;'
                             elif "SOBREVALORADA" in est: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
                             else: styles[idx] = 'color: #faca2b; font-weight: bold;'
