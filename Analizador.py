@@ -732,7 +732,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 
 # ==========================================
-# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE (CON DECÁLOGO Y PUNTUACIONES)
+# 2. FUNCIÓN MEJORADA PARA EL RADAR MÚLTIPLE (CON DECÁLOGO)
 # ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     try:
@@ -973,8 +973,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
             "_sec": 1 if es_fin_ind else (2 if es_tech else 3),
-            "_pay_bpa": payout_bpa, "_l_bpa": payout_lim_bpa, "_a_bpa": payout_amarillo_bpa,
-            "_pay_fcf": payout_fcf, "_l_fcf": payout_lim_fcf, "_a_fcf": payout_amarillo_fcf,
+            "_pay_bpa": payout_bpa, "_l_bpa": payout_lim_bpa, "_a_bpa": payout_ama_bpa,
+            "_pay_fcf": payout_fcf, "_l_fcf": payout_lim_fcf, "_a_fcf": payout_ama_fcf,
             "_deuda": deuda_fcf,
             "_acc": variacion_acciones if variacion_acciones is not None else 999,
             "_dgr": dgr_5y if dgr_5y is not None else -999,
@@ -1124,13 +1124,13 @@ with tab_masiva:
                             else: styles[idx] = 'background-color: #4d4d00; color: white;'
                     return styles
                 
-                # Ocultar las variables lógicas para que la tabla sea legible
+                # Renderizamos la tabla mostrando SOLO las columnas legibles (ocultando las de lógica)
                 columnas_visibles = [c for c in df_res.columns if not c.startswith('_')]
                 styled_df = df_res.style.apply(color_row, axis=1)
                 
                 st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
                 
-                # Preparar descarga limpia
+                # Limpiamos el dataframe de exportación para que no lleve las columnas basura
                 df_export = df_res[columnas_visibles]
                 csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
                 st.download_button(
