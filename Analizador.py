@@ -20,7 +20,7 @@ TRADUCCION = {
 }
 
 # ==========================================
-# 1. FUNCIÓN DE ANÁLISIS INDIVIDUAL (INTACTA CON EL SCORE RESTAURADO)
+# 1. FUNCIÓN DE ANÁLISIS INDIVIDUAL
 # ==========================================
 def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     ticker = yf.Ticker(ticker_symbol)
@@ -253,6 +253,34 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     txt_extra_justo = f"Ancla ({años_analisis}A)"
     txt_extra_sobre = f"Techo: +{pct_sobre_vs_media:.1f}% vs Media"
 
+    # --- CÁLCULO DEL SCORE WEISS (ANTES DE PINTAR LA UI) ---
+    score = 0.0
+    cond_fcf = payout_fcf != -1 and payout_fcf <= payout_amarillo_fcf
+    cond_pfcf = p_fcf != -1 and 0 < p_fcf <= 20
+    cond_deuda = deuda_fcf != -1 and 0 < deuda_fcf <= 5.0
+    cond_historial = años_pagando >= 25 and racha_sin_recortes >= 12
+    cond_aumentos = incrementos_dividendo >= min(5, años_analisis)
+    cond_acciones = variacion_acciones is not None and variacion_acciones < 0
+    cond_yield = yield_actual >= yield_medio
+    cond_bpa = 0 < payout_ratio <= payout_amarillo_bpa
+    cond_per = 0 < per <= 20
+    ratio_bpa_val = (años_crecimiento_bpa / total_años_bpa_datos) if total_años_bpa_datos > 0 else 0
+    cond_consistencia = total_años_bpa_datos > 0 and ratio_bpa_val >= 0.65
+
+    if cond_fcf: score += 1.5
+    if cond_pfcf: score += 1.5
+    if cond_deuda: score += 1.5
+    if cond_historial: score += 1.5
+    if cond_aumentos: score += 1.0
+    if cond_acciones: score += 1.0
+    if cond_yield: score += 0.5
+    if cond_bpa: score += 0.5
+    if cond_per: score += 0.5
+    if cond_consistencia: score += 0.5
+
+    # ==========================================
+    # INTERFAZ VISUAL STREAMLIT
+    # ==========================================
     tipo_empresa_txt = "🏢 Sector Inmobiliario/Regulado (Filtros Flexibles)" if es_regulada_o_reit else "🏭 Sector Industrial/General (Filtros Estrictos)"
     
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
@@ -305,6 +333,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     with col2: metric_color("Franja Infravalorada", f"{precio_compra / divisor_uk:.2f}{sym}", f"Yield {yield_infravalorado:.2f}% ({yield_infravalorado * net_mult:.2f}% neto)", txt_extra_infra, "#21c354") 
     with col3: metric_color("Precio Justo (Media)", f"{precio_justo / divisor_uk:.2f}{sym}", f"Yield {yield_medio:.2f}% ({yield_medio * net_mult:.2f}% neto)", txt_extra_justo, "#faca2b") 
     with col4: metric_color("Franja Sobrevalorada", f"{precio_venta / divisor_uk:.2f}{sym}", f"Yield {yield_sobrevalorado:.2f}% ({yield_sobrevalorado * net_mult:.2f}% neto)", txt_extra_sobre, "#ff4b4b") 
+
+    # --- SCORE Y ESTADO (COLOCADOS JUNTOS AQUÍ) ---
+    st.markdown("<br>", unsafe_allow_html=True)
+    if score >= 8.0: st.success(f"🏆 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Sobresaliente. Fuerte generación de caja y altísima seguridad.")
+    elif score >= 5.0: st.warning(f"⚖️ **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Aceptable. Tiene solidez pero presenta debilidades en su flujo de efectivo o valoración.")
+    else: st.error(f"🚨 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Calidad Insuficiente. No supera los filtros de caja real y seguridad.")
 
     if precio_actual <= precio_compra: st.success("💡 ESTADO: En zona de COMPRA CLARA (Infravalorada).")
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
@@ -545,30 +579,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.divider()
     st.subheader(f"📋 Decálogo de Calidad del Blue Chip ({años_analisis} Años)")
     
-    score = 0.0
-    cond_fcf = payout_fcf != -1 and payout_fcf <= payout_amarillo_fcf
-    cond_pfcf = p_fcf != -1 and 0 < p_fcf <= 20
-    cond_deuda = deuda_fcf != -1 and 0 < deuda_fcf <= 5.0
-    cond_historial = años_pagando >= 25 and racha_sin_recortes >= 12
-    cond_aumentos = incrementos_dividendo >= min(5, años_analisis)
-    cond_acciones = variacion_acciones is not None and variacion_acciones < 0
-    cond_yield = yield_actual >= yield_medio
-    cond_bpa = 0 < payout_ratio <= payout_amarillo_bpa
-    cond_per = 0 < per <= 20
-    ratio_bpa_val = (años_crecimiento_bpa / total_años_bpa_datos) if total_años_bpa_datos > 0 else 0
-    cond_consistencia = total_años_bpa_datos > 0 and ratio_bpa_val >= 0.65
-
-    if cond_fcf: score += 1.5
-    if cond_pfcf: score += 1.5
-    if cond_deuda: score += 1.5
-    if cond_historial: score += 1.5
-    if cond_aumentos: score += 1.0
-    if cond_acciones: score += 1.0
-    if cond_yield: score += 0.5
-    if cond_bpa: score += 0.5
-    if cond_per: score += 0.5
-    if cond_consistencia: score += 0.5
-
     t_fcf = "[🎯 +1.5 / 1.5 pts]" if cond_fcf else "[❌ 0.0 / 1.5 pts]"
     t_pfcf = "[🎯 +1.5 / 1.5 pts]" if cond_pfcf else "[❌ 0.0 / 1.5 pts]"
     t_deuda = "[🎯 +1.5 / 1.5 pts]" if cond_deuda else "[❌ 0.0 / 1.5 pts]"
@@ -580,11 +590,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     t_per_t = "[🎯 +0.5 / 0.5 pts]" if cond_per else "[❌ 0.0 / 0.5 pts]"
     t_cons = "[🎯 +0.5 / 0.5 pts]" if cond_consistencia else "[❌ 0.0 / 0.5 pts]"
     t_info = "[ℹ️ Info]"
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    if score >= 8.0: st.success(f"🏆 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Sobresaliente. Fuerte generación de caja y altísima seguridad.")
-    elif score >= 5.0: st.warning(f"⚖️ **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Aceptable. Tiene solidez pero presenta debilidades en su flujo de efectivo o valoración.")
-    else: st.error(f"🚨 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Calidad Insuficiente. No supera los filtros de caja real y seguridad.")
 
     st.markdown("#### 💰 1. Valoración y Rentabilidad")
     if yield_actual >= yield_infravalorado: st.success(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Excelente, supera el {yield_infravalorado:.2f}%)")
@@ -737,7 +742,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 
 # ==========================================
-# 2. FUNCIÓN MEJORADA PARA EL RADAR MÚLTIPLE (CON DECÁLOGO)
+# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE (MEJORADA)
 # ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     try:
@@ -790,7 +795,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         if currency == 'GBp' and forward_dividend > 0:
             if forward_dividend < (precio_actual / 10): forward_dividend *= 100
 
-        # --- FIX AÑADIDO: REEMPLAZAR EL AÑO ACTUAL INCOMPLETO POR EL FORWARD DIVIDEND ---
+        # FIX AÑADIDO: REEMPLAZAR EL AÑO ACTUAL INCOMPLETO POR EL FORWARD DIVIDEND
         dividendos_barras = divs_por_año.copy()
         if año_actual in dividendos_barras.index:
             dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
