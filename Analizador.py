@@ -145,8 +145,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     try:
         inc_stmt = ticker.income_stmt
         if not inc_stmt.empty:
-            if 'Diluted EPS' in inc_stmt.index: eps_data = inc_stmt.loc['Diluted EPS'].dropna()
-            elif 'Basic EPS' in inc_stmt.index: eps_data = inc_stmt.loc['Basic EPS'].dropna()
+            if 'Diluted EPS' in inc_stmt.index: eps_data = info.get('Diluted EPS', [])
+            elif 'Basic EPS' in inc_stmt.index: eps_data = info.get('Basic EPS', [])
             else: eps_data = []
 
             if len(eps_data) >= 4:
@@ -696,13 +696,13 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     dgr_proyeccion = min(dgr_proyeccion, 15.0)
     años_proyeccion = list(range(1, 16))
     
-    div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
-    yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** año) for año in años_proyeccion]
+    div_bruto_proyectado = [forward_dividend * ((1 + dgr_proyeccion/100) ** year) for year in años_proyeccion]
+    yoc_bruto_lista = [yield_actual * ((1 + dgr_proyeccion/100) ** year) for year in años_proyeccion]
     yoc_neto_lista = [bruto * net_mult for bruto in yoc_bruto_lista]
     
     x_labels_yoc = []
-    for año, yoc_n in zip(años_proyeccion, yoc_neto_lista):
-        año_futuro = año_actual + año
+    for year, yoc_n in zip(años_proyeccion, yoc_neto_lista):
+        año_futuro = año_actual + year
         x_labels_yoc.append(f"{año_futuro}<br><span style='color:#faca2b; font-size:12px'>{yoc_n:.1f}%</span>")
 
     color_barras = '#00d4ff' if dgr_proyeccion >= 0 else '#ff4b4b'
@@ -732,29 +732,26 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 
 # ==========================================
-# 2. NUEVA FUNCIÓN LIGERA PARA EL RADAR MÚLTIPLE
+# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE (MEJORADA)
 # ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     try:
         ticker = yf.Ticker(ticker_symbol.strip().upper())
         info = ticker.info
         
-        if 'dividendRate' not in info and 'trailingAnnualDividendRate' not in info:
-            return None
+        if 'dividendRate' not in info and 'trailingAnnualDividendRate' not in info: return None
             
         dividendos = ticker.dividends
         historial = ticker.history(period="15y")
         
-        if dividendos.empty or len(historial) < 252: 
-            return None
+        if dividendos.empty or len(historial) < 252: return None
 
         historial.index = historial.index.tz_localize(None).normalize()
         dividendos.index = dividendos.index.tz_localize(None).normalize()
 
         fecha_corte = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis)
         ha = historial[historial.index >= fecha_corte].copy()
-        if ha.empty: 
-            return None
+        if ha.empty: return None
 
         precio_actual = ha['Close'].dropna().iloc[-1]
         divs_por_año = dividendos.groupby(dividendos.index.year).sum()
@@ -767,12 +764,10 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
 
         currency = info.get('currency', 'USD')
         divisor_uk = 1.0
-        if currency == 'GBp': 
-            divisor_uk = 100.0
+        if currency == 'GBp': divisor_uk = 100.0
 
         if currency == 'GBp' and forward_dividend > 0:
-            if forward_dividend < (precio_actual / 10): 
-                forward_dividend *= 100
+            if forward_dividend < (precio_actual / 10): forward_dividend *= 100
 
         ha['Year'] = ha.index.year
         ha['Div_Anual'] = ha['Year'].map(divs_por_año)
@@ -794,39 +789,73 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         yield_actual = (forward_dividend / precio_actual) * 100
         yield_neto = yield_actual * (1 - (impuesto_pct / 100))
 
-        # Distancia real para ordenar la tabla y mostrar en Cotización (respecto al Suelo)
+        # --- EXTRACCIÓN DE PARÁMETROS CLAVE WEISS / FCF / RECOMPRAS ---
+        payout_bpa = info.get('payoutRatio', 0) * 100 if info.get('payoutRatio') is not None else 0.0
+        fcf = info.get('freeCashflow', 0)
+        shares = info.get('sharesOutstanding', 0)
+        total_debt = info.get('totalDebt', 0)
+        per = info.get('trailingPE', info.get('forwardPE', 0))
+        if per is None: per = 0.0
+
+        payout_fcf = -1.0
+        if fcf > 0 and shares > 0 and forward_dividend > 0:
+            fcf_per_share = fcf / shares
+            if currency == 'GBp': fcf_per_share *= 100
+            if fcf_per_share > 0:
+                payout_fcf = (forward_dividend / fcf_per_share) * 100
+
+        debt_fcf = total_debt / fcf if fcf > 0 else -1.0
+
+        # Historial de recompras rápido (Proxy desde income_stmt)
+        variacion_acciones = 0.0
+        try:
+            inc_stmt = ticker.income_stmt
+            if not inc_stmt.empty:
+                for key in ['Basic Average Shares', 'Diluted Average Shares']:
+                    if key in inc_stmt.index:
+                        sh_data = inc_stmt.loc[key].dropna().sort_index()
+                        if len(sh_data) >= 2:
+                            acc_ini = sh_data.iloc[0]
+                            acc_fin = sh_data.iloc[-1]
+                            if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                            break
+        except: pass
+
+        # Distancia matemática al Suelo para ordenación de la tabla
         dist_real_suelo = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 999.0
         
-        # Distancias porcentuales visuales para las columnas
-        dist_pct_suelo = ((precio_compra - precio_actual) / precio_actual) * 100 if precio_actual > 0 else 0
-        dist_pct_justo = ((precio_justo - precio_actual) / precio_actual) * 100 if precio_actual > 0 else 0
-        dist_pct_techo = ((precio_venta - precio_actual) / precio_actual) * 100 if precio_actual > 0 else 0
+        # Distancias porcentuales visuales calculadas respecto a la Media (Precio Justo)
+        pct_actual_vs_media = ((precio_actual - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
+        pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
+        pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
 
-        if precio_actual <= precio_compra:
-            estado = "🎯 COMPRA"
-        elif precio_actual >= precio_venta:
-            estado = "🔴 SOBREVALORADA"
-        else:
-            estado = "🟡 MANTENER"
+        if precio_actual <= precio_compra: estado = "🎯 COMPRA"
+        elif precio_actual >= precio_venta: estado = "🔴 SOBREVALORADA"
+        else: estado = "🟡 MANTENER"
 
         sym_m = "€" if currency == "EUR" else ("£" if currency in ["GBP", "GBp"] else "$")
 
         return {
             "Ticker": ticker_symbol.strip().upper(),
             "Cotización Actual": f"{precio_actual / divisor_uk:.2f}{sym_m} ({dist_real_suelo:+.2f}%)",
+            "Suelo (Infravalorada)": f"{precio_compra / divisor_uk:.2f}{sym_m} ({pct_infra_vs_media:+.2f}%)" if precio_compra > 0 else "N/D",
             "Precio Justo (Media)": f"{precio_justo / divisor_uk:.2f}{sym_m}",
-            "Suelo (Infravalorada)": f"{precio_compra / divisor_uk:.2f}{sym_m} ({dist_pct_suelo:+.2f}%)" if precio_compra > 0 else "N/D",
-            "Techo (Sobrevalorada)": f"{precio_venta / divisor_uk:.2f}{sym_m} ({dist_pct_techo:+.2f}%)" if precio_venta > 0 else "N/D",
-            "Yield Bruto %": f"{yield_actual:.2f}%",
-            "Yield Neto %": f"{yield_neto:.2f}%",
+            "Techo (Sobrevalorada)": f"{precio_venta / divisor_uk:.2f}{sym_m} ({pct_sobre_vs_media:+.2f}%)" if precio_venta > 0 else "N/D",
+            "Yield Bruto": f"{yield_actual:.2f}%",
+            "Yield Neto": f"{yield_neto:.2f}%",
+            "Payout BPA": f"{payout_bpa:.2f}%" if payout_bpa > 0 else "N/D",
+            "Payout FCF": f"{payout_fcf:.2f}%" if payout_fcf >= 0 else "N/D",
+            "Deuda / FCF": f"{debt_fcf:.2f}A" if debt_fcf >= 0 else ("Quema Caja" if total_debt > 0 and fcf <= 0 else "0.00A"),
+            "PER": f"{per:.2f}" if per > 0 else "N/D",
+            "Var. Acciones": f"{variacion_acciones:+.2f}%",
             "Estado": estado,
-            "_Dist_Suelo": dist_real_suelo # Columna invisible para orden matemático
+            "_Dist_Suelo": dist_real_suelo  # Columna invisible para ordenación
         }
     except:
         return None
 
 # ==========================================
-# 3. MAQUETACIÓN FINAL EN PESTAÑAS (UI)
+# 3. MAQUETACIÓN EN PESTAÑAS (UI)
 # ==========================================
 st.title("Sistema Fundamental - Método Geraldine Weiss")
 
@@ -835,33 +864,26 @@ tab_individual, tab_masiva = st.tabs(["🔍 Análisis de Francotirador", "📑 S
 # --- PESTAÑA 1: ANALIZADOR INDIVIDUAL (INTACTO) ---
 with tab_individual:
     col_input1, col_input2, col_input3 = st.columns(3)
-    with col_input1: 
-        ticker_input = st.text_input("Ticker individual:", "NVO").upper()
-    with col_input2: 
-        años_analisis = st.selectbox("Periodo Histórico:", [5, 10, 12, 15, 20], index=2)
-    with col_input3: 
-        impuesto = st.number_input("Retención (%)", value=19.0, key="imp_ind")
+    with col_input1: ticker_input = st.text_input("Ticker individual:", "NVO").upper()
+    with col_input2: años_analisis = st.selectbox("Periodo Histórico:", [5, 10, 12, 15, 20], index=2)
+    with col_input3: impuesto = st.number_input("Retención (%)", value=19.0, key="imp_ind")
 
     if st.button("Analizar Empresa"):
         with st.spinner(f"Analizando {ticker_input} en profundidad..."):
-            try: 
-                screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
-            except Exception as e: 
-                st.error(f"Se ha producido un error: {e}")
+            try: screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
+            except Exception as e: st.error(f"Se ha producido un error: {e}")
 
-# --- PESTAÑA 2: RADAR DE EMPRESAS MÚLTIPLES ---
+# --- PESTAÑA 2: RADAR DE EMPRESAS MÚLTIPLES CON FILTROS DE CALIDAD ---
 with tab_masiva:
-    st.markdown("### 📡 Radar Fundamental por Lotes")
-    st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** (las que estén por debajo o más cerca del suelo).")
-    st.markdown("> *Nota: El porcentaje de la 'Cotización Actual' indica a qué distancia exacta se encuentra de tu **Suelo Fundamental** de compra.*")
+    st.markdown("### 📡 Radar Fundamental Completo por Lotes")
+    st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** respecto al Suelo Fundamental.")
+    st.markdown("> *Nota: El porcentaje de la 'Cotización Actual' indica a qué distancia exacta se encuentra de su **Suelo de Compra**. Los porcentajes de las franjas están medidos respecto a la **Media**.*")
     
     tickers_masivos = st.text_area("Lista de Tickers (separados por comas):", "NVO, LOW, ACN, MSFT, JNJ, PG, PEP, HD")
     
     col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        años_masivos = st.selectbox("Periodo para canal histórico:", [5, 10, 12, 15, 20], index=2, key="años_mas")
-    with col_m2:
-        impuesto_masivo = st.number_input("Retención (%)", value=19.0, key="imp_mas")
+    with col_m1: años_masivos = st.selectbox("Periodo para canal histórico:", [5, 10, 12, 15, 20], index=2, key="años_mas")
+    with col_m2: impuesto_masivo = st.number_input("Retención (%)", value=19.0, key="imp_mas")
 
     if st.button("🚀 Escanear Watchlist"):
         lista_tickers = [t.strip() for t in tickers_masivos.split(",") if t.strip()]
@@ -874,42 +896,35 @@ with tab_masiva:
             for idx, ticker in enumerate(lista_tickers):
                 texto_estado.text(f"Escaneando {ticker} ({idx+1}/{len(lista_tickers)})...")
                 datos = analizar_empresa_rapido(ticker, años_masivos, impuesto_masivo)
-                if datos: 
-                    resultados.append(datos)
+                if datos: resultados.append(datos)
                 barra_progreso.progress((idx + 1) / len(lista_tickers))
             
             texto_estado.text("¡Escaneo masivo completado!")
             
             if resultados:
-                # 1. Creamos el DataFrame y ordenamos matemáticamente por la columna oculta
+                # Ordenamos matemáticamente por la columna oculta y luego la eliminamos
                 df_res = pd.DataFrame(resultados).sort_values(by="_Dist_Suelo")
-                
-                # 2. Eliminamos la columna de cálculo para que no se vea en pantalla
                 df_res = df_res.drop(columns=["_Dist_Suelo"])
                 
-                # 3. Función avanzada para pintar celdas individuales
+                # Función avanzada de colorimetría para celdas
                 def color_row(row):
                     styles = [''] * len(row)
                     est = row['Estado']
                     
                     for idx, col_name in enumerate(row.index):
-                        # La Cotización Actual cambia de color según lo infravalorada o sobrevalorada que esté la acción
                         if col_name == 'Cotización Actual':
                             if "COMPRA" in est: styles[idx] = 'color: #21c354; font-weight: bold;'
                             elif "SOBREVALORADA" in est: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
                             else: styles[idx] = 'color: #faca2b; font-weight: bold;'
-                        # Colores fijos para las franjas, igual que en los gráficos
                         elif col_name == 'Suelo (Infravalorada)': styles[idx] = 'color: #21c354;'
                         elif col_name == 'Precio Justo (Media)': styles[idx] = 'color: #faca2b;'
                         elif col_name == 'Techo (Sobrevalorada)': styles[idx] = 'color: #ff4b4b;'
-                        # El bloque de Estado con fondo sólido
                         elif col_name == 'Estado':
                             if "COMPRA" in est: styles[idx] = 'background-color: #004d00; color: white;'
                             elif "SOBREVALORADA" in est: styles[idx] = 'background-color: #4d0000; color: white;'
                             else: styles[idx] = 'background-color: #4d4d00; color: white;'
                     return styles
                 
-                # Renderizamos la tabla mostrando TODAS las columnas y aplicando los estilos
                 st.dataframe(df_res.style.apply(color_row, axis=1), use_container_width=True)
                 
                 csv = df_res.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
