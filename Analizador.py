@@ -785,6 +785,11 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         if currency == 'GBp' and forward_dividend > 0:
             if forward_dividend < (precio_actual / 10): forward_dividend *= 100
 
+        # --- FIX AÑADIDO: REEMPLAZAR EL AÑO ACTUAL INCOMPLETO POR EL FORWARD DIVIDEND ---
+        dividendos_barras = divs_por_año.copy()
+        if año_actual in dividendos_barras.index:
+            dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
+
         ha['Year'] = ha.index.year
         ha['Div_Anual'] = ha['Year'].map(divs_por_año)
         ha.loc[ha['Year'] == año_actual, 'Div_Anual'] = forward_dividend
@@ -842,26 +847,26 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         except: pass
 
         dgr_5y = None
-        if len(divs_por_año) >= 6:
-            div_actual = divs_por_año.iloc[-1]
-            div_5y = divs_por_año.iloc[-6]
+        if len(dividendos_barras) >= 6:
+            div_actual = dividendos_barras.iloc[-1]
+            div_5y = dividendos_barras.iloc[-6]
             if div_5y > 0: dgr_5y = ((div_actual / div_5y) ** (1/5) - 1) * 100
 
         dgr_periodo = None
-        if len(divs_por_año) >= (años_analisis + 1):
-            div_actual = divs_por_año.iloc[-1]
-            div_periodo = divs_por_año.iloc[-(años_analisis + 1)]
+        if len(dividendos_barras) >= (años_analisis + 1):
+            div_actual = dividendos_barras.iloc[-1]
+            div_periodo = dividendos_barras.iloc[-(años_analisis + 1)]
             if div_periodo > 0: dgr_periodo = ((div_actual / div_periodo) ** (1/años_analisis) - 1) * 100
 
-        años_pagando = año_actual - divs_por_año.index[0] if not divs_por_año.empty else 0
+        años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
         racha_sin_recortes = 0
-        if len(divs_por_año) > 1:
-            for i in range(1, len(divs_por_año)):
-                if divs_por_año.iloc[-(i)] >= divs_por_año.iloc[-(i+1)] * 0.99:
+        if len(dividendos_barras) > 1:
+            for i in range(1, len(dividendos_barras)):
+                if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.99:
                     racha_sin_recortes += 1
                 else: break
 
-        divs_recientes = divs_por_año.tail(años_analisis + 1)
+        divs_recientes = dividendos_barras.tail(años_analisis + 1)
         incrementos_dividendo = int((divs_recientes.diff().dropna() > 0).sum())
 
         años_crecimiento_bpa = 0
@@ -1124,13 +1129,13 @@ with tab_masiva:
                             else: styles[idx] = 'background-color: #4d4d00; color: white;'
                     return styles
                 
-                # Renderizamos la tabla mostrando SOLO las columnas legibles (ocultando las de lógica)
+                # Ocultar las variables lógicas para que la tabla sea legible
                 columnas_visibles = [c for c in df_res.columns if not c.startswith('_')]
                 styled_df = df_res.style.apply(color_row, axis=1)
                 
                 st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
                 
-                # Limpiamos el dataframe de exportación para que no lleve las columnas basura
+                # Preparar descarga limpia
                 df_export = df_res[columnas_visibles]
                 csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
                 st.download_button(
