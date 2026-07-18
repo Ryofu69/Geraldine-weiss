@@ -732,7 +732,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 
 # ==========================================
-# 2. FUNCIÓN MEJORADA PARA EL RADAR MÚLTIPLE (CON DECÁLOGO)
+# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE (CON DECÁLOGO Y PUNTUACIONES)
 # ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     try:
@@ -878,20 +878,59 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                             total_años_bpa_datos = len(diffs)
                             break
         except: pass
+        
+        crecimiento_bpa_3y = None
+        try:
+            inc_stmt = ticker.income_stmt
+            if not inc_stmt.empty:
+                if 'Diluted EPS' in inc_stmt.index: eps_data = inc_stmt.loc['Diluted EPS'].dropna()
+                elif 'Basic EPS' in inc_stmt.index: eps_data = inc_stmt.loc['Basic EPS'].dropna()
+                else: eps_data = []
 
-        # Calcular el Score Weiss
+                if len(eps_data) >= 4:
+                    eps_actual = eps_data.iloc[0] 
+                    eps_pasado = eps_data.iloc[3] 
+                    if eps_pasado > 0 and eps_actual > 0:
+                        crecimiento_bpa_3y = (((eps_actual / eps_pasado) ** (1 / 3)) - 1) * 100
+        except: pass
+
+        # --- CÁLCULO DE SCORE CON ETIQUETAS DE PUNTUACIÓN DE CARA AL USUARIO ---
         score = 0.0
-        if payout_fcf != -1 and payout_fcf <= payout_ama_fcf: score += 1.5
-        if p_fcf != -1 and 0 < p_fcf <= 20: score += 1.5
-        if deuda_fcf != -1 and 0 < deuda_fcf <= 5.0: score += 1.5
-        if años_pagando >= 25 and racha_sin_recortes >= 12: score += 1.5
-        if incrementos_dividendo >= min(5, años_analisis): score += 1.0
-        if variacion_acciones is not None and variacion_acciones < 0: score += 1.0
-        if yield_actual >= yield_medio: score += 0.5
-        if 0 < payout_bpa <= payout_ama_bpa: score += 0.5
-        if 0 < per <= 20: score += 0.5
+        
+        cond_fcf = payout_fcf != -1 and payout_fcf <= payout_ama_fcf
+        cond_pfcf = p_fcf != -1 and 0 < p_fcf <= 20
+        cond_deuda = deuda_fcf != -1 and 0 < deuda_fcf <= 5.0
+        cond_historial = años_pagando >= 25 and racha_sin_recortes >= 12
+        cond_aumentos = incrementos_dividendo >= min(5, años_analisis)
+        cond_acciones = variacion_acciones is not None and variacion_acciones < 0
+        cond_yield = yield_actual >= yield_medio
+        cond_bpa = 0 < payout_bpa <= payout_ama_bpa
+        cond_per = 0 < per <= 20
         ratio_bpa_val = (años_crecimiento_bpa / total_años_bpa_datos) if total_años_bpa_datos > 0 else 0
-        if total_años_bpa_datos > 0 and ratio_bpa_val >= 0.65: score += 0.5
+        cond_consistencia = total_años_bpa_datos > 0 and ratio_bpa_val >= 0.65
+
+        if cond_fcf: score += 1.5
+        if cond_pfcf: score += 1.5
+        if cond_deuda: score += 1.5
+        if cond_historial: score += 1.5
+        if cond_aumentos: score += 1.0
+        if cond_acciones: score += 1.0
+        if cond_yield: score += 0.5
+        if cond_bpa: score += 0.5
+        if cond_per: score += 0.5
+        if cond_consistencia: score += 0.5
+
+        # Etiquetas que muestran si ha sumado el punto en la tabla
+        pts_fcf = "(+1.5p)" if cond_fcf else "(0p)"
+        pts_pfcf = "(+1.5p)" if cond_pfcf else "(0p)"
+        pts_deuda = "(+1.5p)" if cond_deuda else "(0p)"
+        pts_hist = "(+1.5p)" if cond_historial else "(0p)"
+        pts_aum = "(+1.0p)" if cond_aumentos else "(0p)"
+        pts_acc = "(+1.0p)" if cond_acciones else "(0p)"
+        pts_yield = "(+0.5p)" if cond_yield else "(0p)"
+        pts_bpa = "(+0.5p)" if cond_bpa else "(0p)"
+        pts_per = "(+0.5p)" if cond_per else "(0p)"
+        pts_cons = "(+0.5p)" if cond_consistencia else "(0p)"
 
         # Distancias visuales y estado
         dist_real_suelo = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 999.0
@@ -913,31 +952,37 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Precio Justo": f"{precio_justo / divisor_uk:.2f}{sym_m}",
             "Techo (Sobre)": f"{precio_venta / divisor_uk:.2f}{sym_m} ({pct_sobre_vs_media:+.2f}%)" if precio_venta > 0 else "N/D",
             "Div. Neto": f"{div_neto_absoluto / divisor_uk:.2f}{sym_m}",
-            "Yield Bruto": f"{yield_actual:.2f}%",
+            "Yield Bruto": f"{yield_actual:.2f}% {pts_yield}",
             "Yield Neto": f"{yield_neto:.2f}%",
-            "PER": f"{per:.2f}" if per > 0 else "N/D",
-            "P/FCF": f"{p_fcf:.2f}" if p_fcf != -1 else "N/D",
+            "PER": f"{per:.2f} {pts_per}" if per > 0 else f"N/D {pts_per}",
+            "P/FCF": f"{p_fcf:.2f} {pts_pfcf}" if p_fcf != -1 else f"N/D {pts_pfcf}",
             "P/B": f"{pb:.2f}x" if pb > 0 else "N/D",
-            "Payout BPA": f"{payout_bpa:.2f}%",
-            "Payout FCF": f"{payout_fcf:.2f}%" if payout_fcf != -1 else "N/D",
-            "Deuda/FCF": f"{deuda_fcf:.2f}A" if deuda_fcf != -1 else ("Quema Caja" if total_debt > 0 else "0.00A"),
-            "Acciones": f"{variacion_acciones:+.2f}%" if variacion_acciones is not None else "N/D",
+            "Payout BPA": f"{payout_bpa:.2f}% {pts_bpa}",
+            "Payout FCF": f"{payout_fcf:.2f}% {pts_fcf}" if payout_fcf != -1 else f"N/D {pts_fcf}",
+            "Deuda/FCF": f"{deuda_fcf:.2f}A {pts_deuda}" if deuda_fcf != -1 else (f"Quema Caja {pts_deuda}" if total_debt > 0 else f"0.00A {pts_deuda}"),
+            "Acciones": f"{variacion_acciones:+.2f}% {pts_acc}" if variacion_acciones is not None else f"N/D {pts_acc}",
+            "Crec. BPA 3Y": f"{crecimiento_bpa_3y:+.2f}%" if crecimiento_bpa_3y is not None else "N/D",
+            "Consist. BPA": f"{años_crecimiento_bpa}/{total_años_bpa_datos}A {pts_cons}",
             "DGR 5A": f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D",
             f"DGR {años_analisis}A": f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D",
-            "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A)",
+            "Aumentos": f"{incrementos_dividendo} {pts_aum}",
+            "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
             # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
             "_sec": 1 if es_fin_ind else (2 if es_tech else 3),
-            "_pay_bpa": payout_bpa, "_l_bpa": payout_lim_bpa, "_a_bpa": payout_ama_bpa,
-            "_pay_fcf": payout_fcf, "_l_fcf": payout_lim_fcf, "_a_fcf": payout_ama_fcf,
+            "_pay_bpa": payout_bpa, "_l_bpa": payout_lim_bpa, "_a_bpa": payout_amarillo_bpa,
+            "_pay_fcf": payout_fcf, "_l_fcf": payout_lim_fcf, "_a_fcf": payout_amarillo_fcf,
             "_deuda": deuda_fcf,
             "_acc": variacion_acciones if variacion_acciones is not None else 999,
             "_dgr": dgr_5y if dgr_5y is not None else -999,
             "_dgr_per": dgr_periodo if dgr_periodo is not None else -999,
             "_hist": 1 if (años_pagando >= 25 and racha_sin_recortes >= 12) else 0,
+            "_aum": incrementos_dividendo,
+            "_cbpa3": crecimiento_bpa_3y if crecimiento_bpa_3y is not None else -999,
+            "_cons": 1 if cond_consistencia else 0,
             "_score": score
         }
     except:
@@ -966,7 +1011,7 @@ with tab_individual:
 with tab_masiva:
     st.markdown("### 📡 Radar Fundamental Completo por Lotes")
     st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** respecto al Suelo Fundamental.")
-    st.markdown("> *Nota: El porcentaje de la 'Cotización Actual' indica a qué distancia exacta se encuentra de su **Suelo de Compra**. Los porcentajes de las franjas están medidos respecto a la **Media**.*")
+    st.markdown("> *Nota: El porcentaje de la 'Cotización Actual' indica a qué distancia exacta se encuentra de su **Suelo de Compra**. Las métricas de puntuación indican explícitamente cuánto aportan al Score global.*")
     
     tickers_masivos = st.text_area("Lista de Tickers (separados por comas):", "NVO, LOW, ACN, MSFT, JNJ, PG, PEP, HD")
     
@@ -991,10 +1036,10 @@ with tab_masiva:
             texto_estado.text("¡Escaneo masivo completado!")
             
             if resultados:
-                # Ordenamos matemáticamente por la columna oculta
+                # Ordenamos matemáticamente por la columna oculta y luego la eliminamos
                 df_res = pd.DataFrame(resultados).sort_values(by="_Dist_Suelo")
                 
-                # Función avanzada de colorimetría para cada celda según el decálogo
+                # Función avanzada de colorimetría para celdas
                 def color_row(row):
                     styles = [''] * len(row)
                     est = row['Estado']
@@ -1050,6 +1095,13 @@ with tab_masiva:
                             if a < -0.5: styles[idx] = 'color: #21c354;'
                             elif a <= 1.0: styles[idx] = 'color: #faca2b;'
                             else: styles[idx] = 'color: #ff4b4b;'
+                        elif col_name == 'Crec. BPA 3Y':
+                            c = row['_cbpa3']
+                            if c != -999 and c > 0: styles[idx] = 'color: #21c354;'
+                            else: styles[idx] = 'color: #ff4b4b;'
+                        elif col_name == 'Consist. BPA':
+                            if row['_cons'] == 1: styles[idx] = 'color: #21c354;'
+                            else: styles[idx] = 'color: #ff4b4b;'
                         elif col_name == 'DGR 5A':
                             d = row['_dgr']
                             if d >= 10: styles[idx] = 'color: #21c354;'
@@ -1060,6 +1112,9 @@ with tab_masiva:
                             if d >= 10: styles[idx] = 'color: #21c354;'
                             elif d > 0: styles[idx] = 'color: #faca2b;'
                             else: styles[idx] = 'color: #ff4b4b;'
+                        elif col_name == 'Aumentos':
+                            if row['_aum'] >= min(5, años_masivos): styles[idx] = 'color: #21c354;'
+                            else: styles[idx] = 'color: #ff4b4b;'
                         elif col_name == 'Años Pag.':
                             if row['_hist'] == 1: styles[idx] = 'color: #21c354;'
                             else: styles[idx] = 'color: #faca2b;'
@@ -1069,13 +1124,13 @@ with tab_masiva:
                             else: styles[idx] = 'background-color: #4d4d00; color: white;'
                     return styles
                 
-                # Renderizamos la tabla mostrando SOLO las columnas legibles (ocultando las de lógica)
+                # Ocultar las variables lógicas para que la tabla sea legible
                 columnas_visibles = [c for c in df_res.columns if not c.startswith('_')]
                 styled_df = df_res.style.apply(color_row, axis=1)
                 
                 st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
                 
-                # Limpiamos el dataframe de exportación para que no lleve las columnas basura
+                # Preparar descarga limpia
                 df_export = df_res[columnas_visibles]
                 csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
                 st.download_button(
