@@ -804,6 +804,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
 
         yield_actual = (forward_dividend / precio_actual) * 100
         yield_neto = yield_actual * (1 - (impuesto_pct / 100))
+        div_neto_absoluto = forward_dividend * (1 - (impuesto_pct / 100))
 
         # Extracción de métricas de calidad
         payout_bpa = info.get('payoutRatio', 0) * 100 if info.get('payoutRatio') else 0.0
@@ -846,6 +847,12 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             div_5y = divs_por_año.iloc[-6]
             if div_5y > 0: dgr_5y = ((div_actual / div_5y) ** (1/5) - 1) * 100
 
+        dgr_periodo = None
+        if len(divs_por_año) >= (años_analisis + 1):
+            div_actual = divs_por_año.iloc[-1]
+            div_periodo = divs_por_año.iloc[-(años_analisis + 1)]
+            if div_periodo > 0: dgr_periodo = ((div_actual / div_periodo) ** (1/años_analisis) - 1) * 100
+
         años_pagando = año_actual - divs_por_año.index[0] if not divs_por_año.empty else 0
         racha_sin_recortes = 0
         if len(divs_por_año) > 1:
@@ -872,7 +879,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                             break
         except: pass
 
-        # Calcular el Score Weiss (Misma lógica exacta que el individual)
+        # Calcular el Score Weiss
         score = 0.0
         if payout_fcf != -1 and payout_fcf <= payout_ama_fcf: score += 1.5
         if p_fcf != -1 and 0 < p_fcf <= 20: score += 1.5
@@ -898,13 +905,16 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         sym_m = "€" if currency == "EUR" else ("£" if currency in ["GBP", "GBp"] else "$")
 
         return {
+            "Estado": estado,
             "Ticker": ticker_symbol.strip().upper(),
             "Score Weiss": f"{score:.1f}/10",
             "Cotización Actual": f"{precio_actual / divisor_uk:.2f}{sym_m} ({dist_real_suelo:+.2f}%)",
             "Suelo (Infra)": f"{precio_compra / divisor_uk:.2f}{sym_m} ({pct_infra_vs_media:+.2f}%)" if precio_compra > 0 else "N/D",
             "Precio Justo": f"{precio_justo / divisor_uk:.2f}{sym_m}",
             "Techo (Sobre)": f"{precio_venta / divisor_uk:.2f}{sym_m} ({pct_sobre_vs_media:+.2f}%)" if precio_venta > 0 else "N/D",
+            "Div. Neto": f"{div_neto_absoluto / divisor_uk:.2f}{sym_m}",
             "Yield Bruto": f"{yield_actual:.2f}%",
+            "Yield Neto": f"{yield_neto:.2f}%",
             "PER": f"{per:.2f}" if per > 0 else "N/D",
             "P/FCF": f"{p_fcf:.2f}" if p_fcf != -1 else "N/D",
             "P/B": f"{pb:.2f}x" if pb > 0 else "N/D",
@@ -913,19 +923,20 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Deuda/FCF": f"{deuda_fcf:.2f}A" if deuda_fcf != -1 else ("Quema Caja" if total_debt > 0 else "0.00A"),
             "Acciones": f"{variacion_acciones:+.2f}%" if variacion_acciones is not None else "N/D",
             "DGR 5A": f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D",
+            f"DGR {años_analisis}A": f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A)",
-            "Estado": estado,
             
             # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
             "_sec": 1 if es_fin_ind else (2 if es_tech else 3),
-            "_pay_bpa": payout_bpa, "_l_bpa": payout_lim_bpa, "_a_bpa": payout_ama_bpa,
-            "_pay_fcf": payout_fcf, "_l_fcf": payout_lim_fcf, "_a_fcf": payout_ama_fcf,
+            "_pay_bpa": payout_bpa, "_l_bpa": payout_lim_bpa, "_a_bpa": payout_amarillo_bpa,
+            "_pay_fcf": payout_fcf, "_l_fcf": payout_lim_fcf, "_a_fcf": payout_amarillo_fcf,
             "_deuda": deuda_fcf,
             "_acc": variacion_acciones if variacion_acciones is not None else 999,
             "_dgr": dgr_5y if dgr_5y is not None else -999,
+            "_dgr_per": dgr_periodo if dgr_periodo is not None else -999,
             "_hist": 1 if (años_pagando >= 25 and racha_sin_recortes >= 12) else 0,
             "_score": score
         }
@@ -1041,6 +1052,11 @@ with tab_masiva:
                             else: styles[idx] = 'color: #ff4b4b;'
                         elif col_name == 'DGR 5A':
                             d = row['_dgr']
+                            if d >= 10: styles[idx] = 'color: #21c354;'
+                            elif d > 0: styles[idx] = 'color: #faca2b;'
+                            else: styles[idx] = 'color: #ff4b4b;'
+                        elif col_name == f'DGR {años_masivos}A':
+                            d = row['_dgr_per']
                             if d >= 10: styles[idx] = 'color: #21c354;'
                             elif d > 0: styles[idx] = 'color: #faca2b;'
                             else: styles[idx] = 'color: #ff4b4b;'
