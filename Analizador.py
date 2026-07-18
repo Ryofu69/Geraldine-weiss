@@ -20,7 +20,7 @@ TRADUCCION = {
 }
 
 # ==========================================
-# 1. FUNCIÓN DE ANÁLISIS INDIVIDUAL (INTACTA)
+# 1. FUNCIÓN DE ANÁLISIS INDIVIDUAL (INTACTA CON EL SCORE RESTAURADO)
 # ==========================================
 def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     ticker = yf.Ticker(ticker_symbol)
@@ -581,6 +581,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     t_cons = "[🎯 +0.5 / 0.5 pts]" if cond_consistencia else "[❌ 0.0 / 0.5 pts]"
     t_info = "[ℹ️ Info]"
 
+    st.markdown("<br>", unsafe_allow_html=True)
+    if score >= 8.0: st.success(f"🏆 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Sobresaliente. Fuerte generación de caja y altísima seguridad.")
+    elif score >= 5.0: st.warning(f"⚖️ **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Aceptable. Tiene solidez pero presenta debilidades en su flujo de efectivo o valoración.")
+    else: st.error(f"🚨 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Calidad Insuficiente. No supera los filtros de caja real y seguridad.")
+
     st.markdown("#### 💰 1. Valoración y Rentabilidad")
     if yield_actual >= yield_infravalorado: st.success(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Excelente, supera el {yield_infravalorado:.2f}%)")
     elif yield_actual >= yield_medio: st.warning(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Aceptable, superior a media de {yield_medio:.2f}%)")
@@ -1061,7 +1066,7 @@ with tab_masiva:
                         elif col_name == 'Suelo (Infra)': styles[idx] = 'color: #21c354;'
                         elif col_name == 'Precio Justo': styles[idx] = 'color: #faca2b;'
                         elif col_name == 'Techo (Sobre)': styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Yield Bruto':
+                        elif col_name in ['Yield Bruto', 'Yield Neto', 'Div. Neto']:
                             if row['_y_act'] >= row['_y_inf']: styles[idx] = 'color: #21c354;'
                             elif row['_y_act'] >= row['_y_med']: styles[idx] = 'color: #faca2b;'
                             else: styles[idx] = 'color: #ff4b4b;'
@@ -1129,13 +1134,13 @@ with tab_masiva:
                             else: styles[idx] = 'background-color: #4d4d00; color: white;'
                     return styles
                 
-                # Ocultar las variables lógicas para que la tabla sea legible
+                # Renderizamos la tabla mostrando SOLO las columnas legibles (ocultando las de lógica)
                 columnas_visibles = [c for c in df_res.columns if not c.startswith('_')]
                 styled_df = df_res.style.apply(color_row, axis=1)
                 
                 st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
                 
-                # Preparar descarga limpia
+                # Limpiamos el dataframe de exportación para que no lleve las columnas basura
                 df_export = df_res[columnas_visibles]
                 csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
                 st.download_button(
