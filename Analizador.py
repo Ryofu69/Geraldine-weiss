@@ -363,7 +363,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dash')))
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Compra'], name='Franja Infravalorada (Compra)', line=dict(color='#21c354', width=2)))
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Close'], name='Cotización Real', line=dict(color='#00d4ff', width=3)))
-        fig.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        fig.update_layout(
+            template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), 
+            legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5), 
+            hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+        )
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
 
@@ -445,7 +449,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 showlegend=False
             ), row=1, col=1)
 
-            # Restaurada exclusivamente la fecha Ex-Div (morada) en el gráfico MACD
             ex_div_ts = info.get('exDividendDate')
             if pd.notna(ex_div_ts) and ex_div_ts is not None:
                 try:
@@ -465,7 +468,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['MACD'], name='MACD', line=dict(color='#00d4ff', width=1.5), showlegend=False), row=3, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Signal'], name='Señal', line=dict(color='#ff9900', width=1.5), showlegend=False), row=3, col=1)
 
-            fig_tech.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=800, showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False)
+            fig_tech.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=800, showlegend=True, 
+                legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="center", x=0.5), 
+                hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False
+            )
             fig_tech.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
             st.plotly_chart(fig_tech, use_container_width=True)
         else: st.info("No hay suficientes datos recientes en Yahoo Finance para dibujar el panel de 2 meses.")
@@ -567,7 +574,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_divs = go.Figure()
             fig_divs.add_trace(go.Bar(x=x_labels_enriquecidos, y=divs_analisis.values, name=f"Dividendo ({sym})", marker_color='#00d4ff', yaxis='y1', text=[f"{val:.2f}{sym}" for val in divs_analisis.values], textposition='auto'))
             fig_divs.add_trace(go.Scatter(x=x_labels_enriquecidos, y=crecimiento_yoy_analisis.values, name="Crecimiento YoY", mode='lines+markers', line=dict(color='#21c354', width=3), marker=dict(size=8), yaxis='y2'))
-            fig_divs.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=300, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")), yaxis2=dict(title=dict(text="Crecimiento (%)", font=dict(color="#21c354")), tickfont=dict(color="#21c354"), overlaying='y', side='right', showgrid=False), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            fig_divs.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=30, b=40), height=300, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color="#00d4ff")), tickfont=dict(color="#00d4ff")), yaxis2=dict(title=dict(text="Crecimiento (%)", font=dict(color="#21c354")), tickfont=dict(color="#21c354"), overlaying='y', side='right', showgrid=False), legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5))
             st.plotly_chart(fig_divs, use_container_width=True)
 
     st.divider()
@@ -681,7 +688,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.divider()
 
     # ==========================================
-    # NUEVO PANEL: ANÁLISIS FUNDAMENTAL VISUAL (TÍTULOS FUERA DE LOS GRÁFICOS)
+    # NUEVO PANEL: ANÁLISIS FUNDAMENTAL VISUAL (TÍTULOS FUERA DE LOS GRÁFICOS Y EXPLICACIONES)
     # ==========================================
     st.markdown("### 📉 Análisis Fundamental Visual")
     
@@ -707,6 +714,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         debt_s = get_annual_series(df_balance, ['Total Debt'])
         cash_s = get_annual_series(df_balance, ['Cash And Cash Equivalents', 'Cash'])
         shares_s = get_annual_series(df_financials, ['Diluted Average Shares', 'Basic Average Shares'])
+        ebitda_s = get_annual_series(df_financials, ['EBITDA', 'Normalized EBITDA'])
         
         yearly_closes = historial_completo['Close'].resample('YE').last()
         yearly_closes.index = yearly_closes.index.year
@@ -724,9 +732,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             ))
             
             # Líneas Weiss (SIN TEXTO para no ensuciar en móvil)
-            fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b")
-            fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354")
-            fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b")
+            fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", name="Media")
+            fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", name="Suelo (Compra)")
+            fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", name="Techo (Venta)")
 
             fig_yield.add_trace(go.Scatter(
                 x=[df_yield_chart.index[-1]], y=[df_yield_chart.iloc[-1]], mode='markers+text',
@@ -741,6 +749,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             )
             fig_yield.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
             st.plotly_chart(fig_yield, use_container_width=True)
+            st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Muestra la rentabilidad por dividendo a lo largo del tiempo. Las caídas bruscas del precio provocan picos en el Yield (tocando la línea verde inferior), señalando las mejores oportunidades históricas de compra.</p>", unsafe_allow_html=True)
 
         # 2. Drawdown Histórico
         with col_graf2:
@@ -760,6 +769,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
             st.plotly_chart(fig_dd, use_container_width=True)
+            st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Mide la caída porcentual de la acción desde su último máximo histórico. Es la mejor forma de evaluar la volatilidad real de la empresa y detectar correcciones de mercado severas.</p>", unsafe_allow_html=True)
 
         col_graf3, col_graf4 = st.columns(2)
 
@@ -776,15 +786,16 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_sost = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_sost.add_trace(go.Bar(x=x_years, y=fcf_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
                 fig_sost.add_trace(go.Bar(x=x_years, y=div_vals, name='Dividendos', marker_color='#ff9800'), secondary_y=False)
-                fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout FCF %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in payout_vals], textposition="top center", textfont=dict(color="#ff4b4b", size=10), line=dict(color='#ff4b4b', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout FCF %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in payout_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#ff4b4b', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_sost.update_layout(
-                    template='plotly_dark', margin=dict(l=0, r=0, t=25, b=0),
+                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
                 )
                 fig_sost.update_yaxes(title_text="Absoluto", secondary_y=False)
-                fig_sost.update_yaxes(title_text="Payout %", secondary_y=True, showgrid=False)
+                fig_sost.update_yaxes(title_text="Payout %", secondary_y=True, showgrid=False, range=[0, max(payout_vals)*1.2 if payout_vals else 100])
                 st.plotly_chart(fig_sost, use_container_width=True)
+                st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Compara el dinero real contante y sonante que entra en la caja (FCF, azul) frente al dinero que sale para pagar los dividendos (Naranja). La línea roja debe mantenerse por debajo del 60-70% para garantizar que el dividendo es seguro a futuro.</p>", unsafe_allow_html=True)
             else: st.info("Datos anuales insuficientes para el gráfico de Sostenibilidad.")
 
         # 4. Ingresos y Rentabilidad
@@ -800,45 +811,113 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_ing = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_ing.add_trace(go.Bar(x=x_years_rev, y=rev_vals, name='Ingresos', marker_color='#21c354'), secondary_y=False)
                 fig_ing.add_trace(go.Bar(x=x_years_rev, y=net_vals, name='B. Neto', marker_color='#faca2b'), secondary_y=False)
-                fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in margin_vals], textposition="top center", textfont=dict(color="#00d4ff", size=10), line=dict(color='#00d4ff', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in margin_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#00d4ff', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_ing.update_layout(
-                    template='plotly_dark', margin=dict(l=0, r=0, t=25, b=0),
+                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
                 )
                 fig_ing.update_yaxes(title_text="Absoluto", secondary_y=False)
-                fig_ing.update_yaxes(title_text="Margen %", secondary_y=True, showgrid=False)
+                fig_ing.update_yaxes(title_text="Margen %", secondary_y=True, showgrid=False, range=[0, max(margin_vals)*1.2 if margin_vals else 100])
                 st.plotly_chart(fig_ing, use_container_width=True)
+                st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Evalúa el crecimiento del negocio. Barras verdes indican que la empresa vende más. La línea azul mide el Margen Neto: qué porcentaje de esas ventas se convierte en ganancias puras. Crecimiento de ingresos con márgenes estables o al alza indica una ventaja competitiva fuerte.</p>", unsafe_allow_html=True)
             else: st.info("Datos anuales insuficientes para el gráfico de Ingresos.")
 
+        col_graf5, col_graf6 = st.columns(2)
+
         # 5. Evolución EV / FCF
-        st.markdown("#### ⚖️ Valoración Múltiplo: EV / FCF")
-        years_ev = sorted(list(set(fcf_s.index) & set(shares_s.index) & set(yearly_closes.index)))
-        if years_ev:
-            x_years_ev = [str(y) for y in years_ev]
-            fcf_ev_vals = [fcf_s[y] for y in years_ev]
-            ev_vals = []
-            for y in years_ev:
-                mcap = yearly_closes[y] * shares_s[y]
-                debt = debt_s.get(y, 0)
-                cash = cash_s.get(y, 0)
-                ev = mcap + debt - cash
-                ev_vals.append(ev)
+        with col_graf5:
+            st.markdown("#### ⚖️ Valoración Múltiplo: EV / FCF")
+            years_ev = sorted(list(set(fcf_s.index) & set(shares_s.index) & set(yearly_closes.index)))
+            if years_ev:
+                x_years_ev = [str(y) for y in years_ev]
+                fcf_ev_vals = [fcf_s[y] for y in years_ev]
+                ev_vals = []
+                for y in years_ev:
+                    mcap = yearly_closes[y] * shares_s[y]
+                    debt = debt_s.get(y, 0)
+                    cash = cash_s.get(y, 0)
+                    ev = mcap + debt - cash
+                    ev_vals.append(ev)
+                
+                ratio_vals = [(ev/fcf) if fcf > 0 else 0 for ev, fcf in zip(ev_vals, fcf_ev_vals)]
+                
+                fig_ev = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_ev.add_trace(go.Bar(x=x_years_ev, y=ev_vals, name='Enterprise Value (EV)', marker_color='#9c27b0'), secondary_y=False)
+                fig_ev.add_trace(go.Bar(x=x_years_ev, y=fcf_ev_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
+                fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/FCF', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#21c354', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_ev.update_layout(
+                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
+                    height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+                )
+                fig_ev.update_yaxes(title_text="Absoluto", secondary_y=False)
+                fig_ev.update_yaxes(title_text="Ratio (Múltiplo)", secondary_y=True, showgrid=False, range=[0, max(ratio_vals)*1.2 if ratio_vals else 30])
+                st.plotly_chart(fig_ev, use_container_width=True)
+                st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Calcula cuántas veces está valorada la empresa (sumando su deuda y restando su liquidez) respecto a su Flujo de Caja. Es mucho más preciso que el PER porque incluye la deuda real. Un ratio por debajo de 15x-20x suele indicar infravaloración.</p>", unsafe_allow_html=True)
+            else: st.info("Datos insuficientes para el gráfico EV/FCF.")
+
+        # 6. Evolución EV / EBITDA
+        with col_graf6:
+            st.markdown("#### 🏢 Múltiplo Operativo: EV / EBITDA")
+            years_ebitda = sorted(list(set(ebitda_s.index) & set(shares_s.index) & set(yearly_closes.index)))
+            if years_ebitda:
+                x_years_eb = [str(y) for y in years_ebitda]
+                ebitda_vals = [ebitda_s[y] for y in years_ebitda]
+                ev_eb_vals = []
+                for y in years_ebitda:
+                    mcap = yearly_closes[y] * shares_s[y]
+                    debt = debt_s.get(y, 0)
+                    cash = cash_s.get(y, 0)
+                    ev = mcap + debt - cash
+                    ev_eb_vals.append(ev)
+                
+                ratio_eb_vals = [(ev/eb) if eb > 0 else 0 for ev, eb in zip(ev_eb_vals, ebitda_vals)]
+                
+                fig_ebitda = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_ebitda.add_trace(go.Bar(x=x_years_eb, y=ebitda_vals, name='EBITDA', marker_color='#0288d1'), secondary_y=False)
+                fig_ebitda.add_trace(go.Bar(x=x_years_eb, y=ev_eb_vals, name='Enterprise Value (EV)', marker_color='#ff9800'), secondary_y=False)
+                fig_ebitda.add_trace(go.Scatter(x=x_years_eb, y=ratio_eb_vals, name='Ratio EV/EBITDA', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_eb_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#ff1744', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_ebitda.update_layout(
+                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
+                    height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+                )
+                fig_ebitda.update_yaxes(title_text="Absoluto", secondary_y=False)
+                fig_ebitda.update_yaxes(title_text="Ratio (Múltiplo)", secondary_y=True, showgrid=False, range=[0, max(ratio_eb_vals)*1.2 if ratio_eb_vals else 30])
+                st.plotly_chart(fig_ebitda, use_container_width=True)
+                st.markdown("<p style='font-size:0.85rem; color:#aaa;'>El múltiplo clásico de las adquisiciones corporativas. Compara el Valor de la Empresa con sus beneficios antes de intereses, impuestos, depreciaciones y amortizaciones. Permite medir si la empresa cotiza cara o barata ignorando temporalmente su estructura fiscal y contable.</p>", unsafe_allow_html=True)
+            else: st.info("Datos insuficientes para el gráfico EV/EBITDA.")
+
+        # 7. DEUDA NETA / FCF
+        st.markdown("#### 🛡️ Solvencia: Deuda Neta vs FCF")
+        years_debt = sorted(list(set(fcf_s.index) & set(debt_s.index)))
+        if years_debt:
+            x_years_d = [str(y) for y in years_debt]
+            fcf_d_vals = [fcf_s[y] for y in years_debt]
+            net_debt_vals = []
+            for y in years_debt:
+                d = debt_s.get(y, 0)
+                c = cash_s.get(y, 0)
+                nd = max(0, d - c) # Evitamos deudas negativas visualmente
+                net_debt_vals.append(nd)
             
-            ratio_vals = [(ev/fcf) if fcf > 0 else 0 for ev, fcf in zip(ev_vals, fcf_ev_vals)]
+            ratio_d_vals = [(nd/fcf) if fcf > 0 else 0 for nd, fcf in zip(net_debt_vals, fcf_d_vals)]
             
-            fig_ev = make_subplots(specs=[[{"secondary_y": True}]])
-            fig_ev.add_trace(go.Bar(x=x_years_ev, y=ev_vals, name='Enterprise Value (EV)', marker_color='#9c27b0'), secondary_y=False)
-            fig_ev.add_trace(go.Bar(x=x_years_ev, y=fcf_ev_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
-            fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/FCF', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_vals], textposition="top center", textfont=dict(color="#21c354", size=10), line=dict(color='#21c354', width=2), marker=dict(size=8)), secondary_y=True)
-            fig_ev.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=25, b=0),
+            fig_deuda = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_deuda.add_trace(go.Bar(x=x_years_d, y=fcf_d_vals, name='Flujo Caja Libre (FCF)', marker_color='#0288d1'), secondary_y=False)
+            fig_deuda.add_trace(go.Bar(x=x_years_d, y=net_debt_vals, name='Deuda Neta', marker_color='#ff9800'), secondary_y=False)
+            fig_deuda.add_trace(go.Scatter(x=x_years_d, y=ratio_d_vals, name='Deuda Neta / FCF', mode='lines+markers+text', text=[f"{val:.2f}x" for val in ratio_d_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#ff1744', width=2), marker=dict(size=8)), secondary_y=True)
+            fig_deuda.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                 height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
             )
-            fig_ev.update_yaxes(title_text="Absoluto", secondary_y=False)
-            fig_ev.update_yaxes(title_text="Ratio (Múltiplo)", secondary_y=True, showgrid=False)
-            st.plotly_chart(fig_ev, use_container_width=True)
+            fig_deuda.update_yaxes(title_text="Absoluto", secondary_y=False)
+            fig_deuda.update_yaxes(title_text="Años para Pagar", secondary_y=True, showgrid=False, range=[0, max(ratio_d_vals)*1.2 if ratio_d_vals else 5])
+            st.plotly_chart(fig_deuda, use_container_width=True)
+            st.markdown("<p style='font-size:0.85rem; color:#aaa;'>La métrica definitiva de tranquilidad. Muestra cuántos años completos necesitaría la empresa, usando todo el efectivo libre anual que genera, para dejar su Deuda Neta a cero. Un valor inferior a 3.0 años demuestra un balance blindado frente a crisis económicas.</p>", unsafe_allow_html=True)
+        else: st.info("Datos insuficientes para el gráfico de Deuda.")
 
     except Exception as e:
         st.warning(f"No se han podido cargar los gráficos financieros anuales completos de Yahoo Finance. Error: {e}")
@@ -896,15 +975,13 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
         yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color=color_barras)), tickfont=dict(color=color_barras)), 
         yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), 
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
 
 
-
-
 # ==========================================
-# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE (INTACTO)
+# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
 # ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     try:
@@ -960,6 +1037,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         if currency == 'GBp' and forward_dividend > 0:
             if forward_dividend < (precio_actual / 10): forward_dividend *= 100
 
+        # FIX AÑADIDO: REEMPLAZAR EL AÑO ACTUAL INCOMPLETO POR EL FORWARD DIVIDEND
         dividendos_barras = divs_por_año.copy()
         if año_actual in dividendos_barras.index:
             dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
@@ -1311,3 +1389,4 @@ with tab_masiva:
                 )
             else:
                 st.warning("No se pudieron recopilar canales históricos válidos para los tickers introducidos.")
+
