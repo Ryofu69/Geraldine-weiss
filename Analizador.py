@@ -445,6 +445,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 showlegend=False
             ), row=1, col=1)
 
+            # Restaurada exclusivamente la fecha Ex-Div (morada) en el gráfico MACD
             ex_div_ts = info.get('exDividendDate')
             if pd.notna(ex_div_ts) and ex_div_ts is not None:
                 try:
@@ -680,7 +681,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.divider()
 
     # ==========================================
-    # NUEVO PANEL: ANÁLISIS FUNDAMENTAL VISUAL
+    # NUEVO PANEL: ANÁLISIS FUNDAMENTAL VISUAL (TÍTULOS FUERA DE LOS GRÁFICOS)
     # ==========================================
     st.markdown("### 📉 Análisis Fundamental Visual")
     
@@ -714,12 +715,19 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
         # 1. Gráfico de Yield Limpio
         with col_graf1:
+            st.markdown("#### 📈 Evolución del Yield Histórico")
             df_yield_chart = yields_validos.copy()
             fig_yield = go.Figure()
             fig_yield.add_trace(go.Scatter(
                 x=df_yield_chart.index, y=df_yield_chart.values, mode='lines',
                 line=dict(color='#00d4ff', width=2), name='Yield %'
             ))
+            
+            # Líneas Weiss (SIN TEXTO para no ensuciar en móvil)
+            fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b")
+            fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354")
+            fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b")
+
             fig_yield.add_trace(go.Scatter(
                 x=[df_yield_chart.index[-1]], y=[df_yield_chart.iloc[-1]], mode='markers+text',
                 marker=dict(color='#00d4ff', size=10, symbol='diamond'),
@@ -727,7 +735,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 textfont=dict(color="#00d4ff", size=13, weight="bold"), name="Yield Actual"
             ))
             fig_yield.update_layout(
-                title="Evolución del Yield Histórico", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                 height=300, yaxis=dict(title="Rentabilidad (Yield %)", tickformat=".2f"), hovermode="x unified",
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False
             )
@@ -736,6 +744,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
         # 2. Drawdown Histórico
         with col_graf2:
+            st.markdown("#### 📉 Drawdown Histórico")
             df_dd = historial_analisis[['Close']].copy()
             df_dd['Max'] = df_dd['Close'].cummax()
             df_dd['Drawdown'] = (df_dd['Close'] - df_dd['Max']) / df_dd['Max'] * 100
@@ -746,7 +755,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 line=dict(color='#ff4b4b', width=1.5), fillcolor='rgba(255, 75, 75, 0.2)', name='Drawdown %'
             ))
             fig_dd.update_layout(
-                title="Drawdown Histórico", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                 height=300, yaxis=dict(title="Caída desde Máximos (%)", tickformat=".1f", ticksuffix="%"), hovermode="x unified",
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
@@ -756,6 +765,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
         # 3. Sostenibilidad del Dividendo
         with col_graf3:
+            st.markdown("#### 💵 Sostenibilidad: FCF vs Dividendos")
             years_sost = sorted(list(set(fcf_s.index) & set(div_s.index)))
             if years_sost:
                 x_years = [str(y) for y in years_sost]
@@ -768,7 +778,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_sost.add_trace(go.Bar(x=x_years, y=div_vals, name='Dividendos', marker_color='#ff9800'), secondary_y=False)
                 fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout FCF %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in payout_vals], textposition="top center", textfont=dict(color="#ff4b4b", size=10), line=dict(color='#ff4b4b', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_sost.update_layout(
-                    title="Sostenibilidad: FCF vs Dividendos", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                    template='plotly_dark', margin=dict(l=0, r=0, t=25, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
@@ -779,6 +789,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
         # 4. Ingresos y Rentabilidad
         with col_graf4:
+            st.markdown("#### 📊 Ingresos vs Beneficio Neto")
             years_rev = sorted(list(set(rev_s.index) & set(net_s.index)))
             if years_rev:
                 x_years_rev = [str(y) for y in years_rev]
@@ -791,7 +802,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_ing.add_trace(go.Bar(x=x_years_rev, y=net_vals, name='B. Neto', marker_color='#faca2b'), secondary_y=False)
                 fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in margin_vals], textposition="top center", textfont=dict(color="#00d4ff", size=10), line=dict(color='#00d4ff', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_ing.update_layout(
-                    title="Ingresos vs Beneficio Neto", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                    template='plotly_dark', margin=dict(l=0, r=0, t=25, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
@@ -801,6 +812,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             else: st.info("Datos anuales insuficientes para el gráfico de Ingresos.")
 
         # 5. Evolución EV / FCF
+        st.markdown("#### ⚖️ Valoración Múltiplo: EV / FCF")
         years_ev = sorted(list(set(fcf_s.index) & set(shares_s.index) & set(yearly_closes.index)))
         if years_ev:
             x_years_ev = [str(y) for y in years_ev]
@@ -820,7 +832,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_ev.add_trace(go.Bar(x=x_years_ev, y=fcf_ev_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
             fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/FCF', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_vals], textposition="top center", textfont=dict(color="#21c354", size=10), line=dict(color='#21c354', width=2), marker=dict(size=8)), secondary_y=True)
             fig_ev.update_layout(
-                title="Valoración: EV vs FCF", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                template='plotly_dark', margin=dict(l=0, r=0, t=25, b=0),
                 height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
@@ -887,6 +899,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
+
+
 
 
 # ==========================================
@@ -1297,4 +1311,3 @@ with tab_masiva:
                 )
             else:
                 st.warning("No se pudieron recopilar canales históricos válidos para los tickers introducidos.")
-
