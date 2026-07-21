@@ -20,7 +20,7 @@ TRADUCCION = {
 }
 
 # ==========================================
-# 1. FUNCIÓN DE ANÁLISIS INDIVIDUAL (INTACTA)
+# 1. FUNCIÓN DE ANÁLISIS INDIVIDUAL
 # ==========================================
 def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     ticker = yf.Ticker(ticker_symbol)
@@ -457,8 +457,19 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                     if ex_div_date_future >= pd.Timestamp.now().normalize():
                         if ex_div_date_future not in divs_chart.index:
                             fig_tech.add_vline(x=ex_div_date_future, line_width=1.5, line_dash="dot", line_color="#e040fb", 
-                                               annotation_text=" Ⓓ Próximo", annotation_position="bottom right", 
+                                               annotation_text=" Ⓓ Ex-Div", annotation_position="bottom right", 
                                                annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
+                except: pass
+
+            # --- NUEVO: MARCADOR DE FECHA DE PAGO ---
+            pay_div_ts = info.get('dividendDate')
+            if pd.notna(pay_div_ts) and pay_div_ts is not None:
+                try:
+                    pay_div_date_future = pd.to_datetime(pay_div_ts, unit='s').tz_localize(None).normalize()
+                    if pay_div_date_future >= pd.Timestamp.now().normalize():
+                        fig_tech.add_vline(x=pay_div_date_future, line_width=1.5, line_dash="dash", line_color="#faca2b", 
+                                           annotation_text=" 💰 Pago", annotation_position="top right", 
+                                           annotation_font=dict(color="#faca2b", size=11, family="Arial", weight="bold"), row=1, col=1)
                 except: pass
 
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
@@ -1054,16 +1065,17 @@ with tab_masiva:
                 # Ordenamos matemáticamente por la columna oculta
                 df_res = pd.DataFrame(resultados).sort_values(by="_Dist_Suelo")
                 
-                # FIJAR COLUMNAS CONVIRTIÉNDOLAS EN EL ÍNDICE
-                df_res.set_index(['Estado', 'Ticker', 'Score Weiss'], inplace=True)
-                
                 # Función avanzada de colorimetría para celdas
                 def color_row(row):
                     styles = [''] * len(row)
-                    est = row.name[0] # Al ser índice, extraemos el 'Estado' desde ahí
+                    est = row['Estado']
                     
                     for idx, col_name in enumerate(row.index):
-                        if col_name == 'Cotización Actual':
+                        if col_name == 'Score Weiss':
+                            if row['_score'] >= 8: styles[idx] = 'color: #21c354; font-weight: bold;'
+                            elif row['_score'] >= 5: styles[idx] = 'color: #faca2b; font-weight: bold;'
+                            else: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
+                        elif col_name == 'Cotización Actual':
                             if "COMPRA" in est: styles[idx] = 'color: #21c354; font-weight: bold;'
                             elif "SOBREVALORADA" in est: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
                             else: styles[idx] = 'color: #faca2b; font-weight: bold;'
@@ -1136,6 +1148,10 @@ with tab_masiva:
                         elif col_name == 'Años Pag.':
                             if row['_hist'] == 1: styles[idx] = 'color: #21c354;'
                             else: styles[idx] = 'color: #faca2b;'
+                        elif col_name == 'Estado':
+                            if "COMPRA" in est: styles[idx] = 'background-color: #004d00; color: white;'
+                            elif "SOBREVALORADA" in est: styles[idx] = 'background-color: #4d0000; color: white;'
+                            else: styles[idx] = 'background-color: #4d4d00; color: white;'
                     return styles
                 
                 # Ocultar las variables lógicas para que la tabla sea legible
@@ -1144,9 +1160,9 @@ with tab_masiva:
                 
                 st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
                 
-                # Preparar descarga limpia (incluyendo el índice true para guardar Ticker y Estado)
+                # Preparar descarga limpia
                 df_export = df_res[columnas_visibles]
-                csv = df_export.to_csv(index=True, sep=';', decimal=',').encode('utf-8')
+                csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
                 st.download_button(
                     label="💾 Descargar CSV para Google Sheets",
                     data=csv,
@@ -1155,3 +1171,4 @@ with tab_masiva:
                 )
             else:
                 st.warning("No se pudieron recopilar canales históricos válidos para los tickers introducidos.")
+
