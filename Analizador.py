@@ -678,6 +678,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
     else: st.error(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
 
+    if respaldo_institucional > 0:
+        if respaldo_institucional >= 50.0: st.success(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
+        else: st.warning(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
+    else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
+
     st.divider()
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
     
@@ -733,7 +738,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
-
 
 
 # ==========================================
@@ -1047,20 +1051,19 @@ with tab_masiva:
             texto_estado.text("¡Escaneo masivo completado!")
             
             if resultados:
-                # Ordenamos matemáticamente por la columna oculta y luego la eliminamos
+                # Ordenamos matemáticamente por la columna oculta
                 df_res = pd.DataFrame(resultados).sort_values(by="_Dist_Suelo")
+                
+                # FIJAR COLUMNAS CONVIRTIÉNDOLAS EN EL ÍNDICE
+                df_res.set_index(['Estado', 'Ticker', 'Score Weiss'], inplace=True)
                 
                 # Función avanzada de colorimetría para celdas
                 def color_row(row):
                     styles = [''] * len(row)
-                    est = row['Estado']
+                    est = row.name[0] # Al ser índice, extraemos el 'Estado' desde ahí
                     
                     for idx, col_name in enumerate(row.index):
-                        if col_name == 'Score Weiss':
-                            if row['_score'] >= 8: styles[idx] = 'color: #21c354; font-weight: bold;'
-                            elif row['_score'] >= 5: styles[idx] = 'color: #faca2b; font-weight: bold;'
-                            else: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
-                        elif col_name == 'Cotización Actual':
+                        if col_name == 'Cotización Actual':
                             if "COMPRA" in est: styles[idx] = 'color: #21c354; font-weight: bold;'
                             elif "SOBREVALORADA" in est: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
                             else: styles[idx] = 'color: #faca2b; font-weight: bold;'
@@ -1133,10 +1136,6 @@ with tab_masiva:
                         elif col_name == 'Años Pag.':
                             if row['_hist'] == 1: styles[idx] = 'color: #21c354;'
                             else: styles[idx] = 'color: #faca2b;'
-                        elif col_name == 'Estado':
-                            if "COMPRA" in est: styles[idx] = 'background-color: #004d00; color: white;'
-                            elif "SOBREVALORADA" in est: styles[idx] = 'background-color: #4d0000; color: white;'
-                            else: styles[idx] = 'background-color: #4d4d00; color: white;'
                     return styles
                 
                 # Ocultar las variables lógicas para que la tabla sea legible
@@ -1145,9 +1144,9 @@ with tab_masiva:
                 
                 st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
                 
-                # Preparar descarga limpia
+                # Preparar descarga limpia (incluyendo el índice true para guardar Ticker y Estado)
                 df_export = df_res[columnas_visibles]
-                csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+                csv = df_export.to_csv(index=True, sep=';', decimal=',').encode('utf-8')
                 st.download_button(
                     label="💾 Descargar CSV para Google Sheets",
                     data=csv,
