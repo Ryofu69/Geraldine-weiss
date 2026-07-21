@@ -444,6 +444,23 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 showlegend=False
             ), row=1, col=1)
 
+            divs_chart = dividendos[dividendos.index >= fecha_display]
+            for div_date, div_amount in divs_chart.items():
+                fig_tech.add_vline(x=div_date, line_width=1.5, line_dash="dot", line_color="#e040fb", 
+                                   annotation_text=f" Ⓓ {div_amount:.2f}{sym}", annotation_position="bottom right", 
+                                   annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
+                
+            ex_div_ts = info.get('exDividendDate')
+            if pd.notna(ex_div_ts) and ex_div_ts is not None:
+                try:
+                    ex_div_date_future = pd.to_datetime(ex_div_ts, unit='s').tz_localize(None).normalize()
+                    if ex_div_date_future >= pd.Timestamp.now().normalize():
+                        if ex_div_date_future not in divs_chart.index:
+                            fig_tech.add_vline(x=ex_div_date_future, line_width=1.5, line_dash="dot", line_color="#e040fb", 
+                                               annotation_text=" Ⓓ Próximo", annotation_position="bottom right", 
+                                               annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
+                except: pass
+
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
@@ -668,21 +685,19 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
-    # --- NUEVO GRÁFICO: EVOLUCIÓN DEL YIELD HISTÓRICO ---
+    # --- NUEVO GRÁFICO: EVOLUCIÓN DEL YIELD HISTÓRICO LÍNEA LIMPIA ---
     st.subheader("📊 Evolución del Yield Histórico")
     st.markdown("> Visualización de la rentabilidad por dividendo en el tiempo. Según Geraldine Weiss, los picos de yield marcan los momentos de máxima infravaloración (zonas de compra clara).")
 
     df_yield_chart = yields_validos.copy()
     fig_yield = go.Figure()
 
-    # Área sombreada verde elegante
+    # Línea Verde Limpia (Sin relleno)
     fig_yield.add_trace(go.Scatter(
         x=df_yield_chart.index, 
         y=df_yield_chart.values,
-        fill='tozeroy',
         mode='lines',
-        line=dict(color='#00d4ff', width=1.5), 
-        fillcolor='rgba(0, 212, 255, 0.15)',
+        line=dict(color='#21c354', width=2), 
         name='Yield %'
     ))
 
@@ -773,8 +788,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.plotly_chart(fig_yoc, use_container_width=True)
 
 
+
 # ==========================================
-# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE (MEJORADA Y CORREGIDA)
+# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
 # ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     try:
