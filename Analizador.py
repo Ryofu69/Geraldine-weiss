@@ -1,6 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
 from datetime import datetime
 import warnings
 import plotly.graph_objects as go
@@ -444,21 +445,14 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 showlegend=False
             ), row=1, col=1)
 
-            divs_chart = dividendos[dividendos.index >= fecha_display]
-            for div_date, div_amount in divs_chart.items():
-                fig_tech.add_vline(x=div_date, line_width=1.5, line_dash="dot", line_color="#e040fb", 
-                                   annotation_text=f" Ⓓ {div_amount:.2f}{sym}", annotation_position="bottom right", 
-                                   annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
-                
             ex_div_ts = info.get('exDividendDate')
             if pd.notna(ex_div_ts) and ex_div_ts is not None:
                 try:
                     ex_div_date_future = pd.to_datetime(ex_div_ts, unit='s').tz_localize(None).normalize()
                     if ex_div_date_future >= pd.Timestamp.now().normalize():
-                        if ex_div_date_future not in divs_chart.index:
-                            fig_tech.add_vline(x=ex_div_date_future, line_width=1.5, line_dash="dot", line_color="#e040fb", 
-                                               annotation_text=" Ⓓ Próximo", annotation_position="bottom right", 
-                                               annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
+                        fig_tech.add_vline(x=ex_div_date_future, line_width=1.5, line_dash="dot", line_color="#e040fb", 
+                                           annotation_text=" Ⓓ Ex-Div", annotation_position="bottom right", 
+                                           annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
                 except: pass
 
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
@@ -685,53 +679,160 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
-    # --- NUEVO GRÁFICO: EVOLUCIÓN DEL YIELD HISTÓRICO LÍNEA LIMPIA ---
-    st.subheader("📊 Evolución del Yield Histórico")
-    st.markdown("> Visualización de la rentabilidad por dividendo en el tiempo. Según Geraldine Weiss, los picos de yield marcan los momentos de máxima infravaloración (zonas de compra clara).")
+    # ==========================================
+    # NUEVO PANEL: ANÁLISIS FUNDAMENTAL VISUAL
+    # ==========================================
+    st.markdown("### 📉 Análisis Fundamental Visual")
+    
+    try:
+        df_cashflow = ticker.cashflow
+        df_financials = ticker.financials
+        df_balance = ticker.balance_sheet
+        
+        def get_annual_series(df, col_names):
+            if df is not None and not df.empty:
+                for col in col_names:
+                    if col in df.index:
+                        s = df.loc[col].dropna()
+                        if not s.empty:
+                            s.index = pd.to_datetime(s.index).year
+                            return s.sort_index()
+            return pd.Series(dtype=float)
 
-    df_yield_chart = yields_validos.copy()
-    fig_yield = go.Figure()
+        fcf_s = get_annual_series(df_cashflow, ['Free Cash Flow'])
+        div_s = abs(get_annual_series(df_cashflow, ['Cash Dividends Paid', 'Dividends Paid']))
+        rev_s = get_annual_series(df_financials, ['Total Revenue', 'Operating Revenue'])
+        net_s = get_annual_series(df_financials, ['Net Income', 'Net Income Common Stockholders'])
+        debt_s = get_annual_series(df_balance, ['Total Debt'])
+        cash_s = get_annual_series(df_balance, ['Cash And Cash Equivalents', 'Cash'])
+        shares_s = get_annual_series(df_financials, ['Diluted Average Shares', 'Basic Average Shares'])
+        
+        yearly_closes = historial_completo['Close'].resample('YE').last()
+        yearly_closes.index = yearly_closes.index.year
 
-    # Línea Verde Limpia (Sin relleno)
-    fig_yield.add_trace(go.Scatter(
-        x=df_yield_chart.index, 
-        y=df_yield_chart.values,
-        mode='lines',
-        line=dict(color='#21c354', width=2), 
-        name='Yield %'
-    ))
+        col_graf1, col_graf2 = st.columns(2)
 
-    # Líneas Weiss
-    fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", annotation_text=f"Media: {yield_medio:.2f}%", annotation_position="top left", annotation_font=dict(color="#faca2b", size=12))
-    fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", annotation_text=f"Suelo (Compra): {yield_infravalorado:.2f}%", annotation_position="bottom left", annotation_font=dict(color="#21c354", size=12))
-    fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", annotation_text=f"Techo (Venta): {yield_sobrevalorado:.2f}%", annotation_position="top left", annotation_font=dict(color="#ff4b4b", size=12))
+        # 1. Gráfico de Yield Limpio
+        with col_graf1:
+            df_yield_chart = yields_validos.copy()
+            fig_yield = go.Figure()
+            fig_yield.add_trace(go.Scatter(
+                x=df_yield_chart.index, y=df_yield_chart.values, mode='lines',
+                line=dict(color='#00d4ff', width=2), name='Yield %'
+            ))
+            fig_yield.add_trace(go.Scatter(
+                x=[df_yield_chart.index[-1]], y=[df_yield_chart.iloc[-1]], mode='markers+text',
+                marker=dict(color='#00d4ff', size=10, symbol='diamond'),
+                text=[f"Actual: {yield_actual:.2f}%"], textposition="top center",
+                textfont=dict(color="#00d4ff", size=13, weight="bold"), name="Yield Actual"
+            ))
+            fig_yield.update_layout(
+                title="Evolución del Yield Histórico", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                height=300, yaxis=dict(title="Rentabilidad (Yield %)", tickformat=".2f"), hovermode="x unified",
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False
+            )
+            fig_yield.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+            st.plotly_chart(fig_yield, use_container_width=True)
 
-    # Puntero de situación actual
-    fig_yield.add_trace(go.Scatter(
-        x=[df_yield_chart.index[-1]], 
-        y=[df_yield_chart.iloc[-1]],
-        mode='markers+text',
-        marker=dict(color='#00d4ff', size=10, symbol='diamond'),
-        text=[f"Actual: {yield_actual:.2f}%"],
-        textposition="top center",
-        textfont=dict(color="#00d4ff", size=13, weight="bold"),
-        name="Yield Actual"
-    ))
+        # 2. Drawdown Histórico
+        with col_graf2:
+            df_dd = historial_analisis[['Close']].copy()
+            df_dd['Max'] = df_dd['Close'].cummax()
+            df_dd['Drawdown'] = (df_dd['Close'] - df_dd['Max']) / df_dd['Max'] * 100
+            
+            fig_dd = go.Figure()
+            fig_dd.add_trace(go.Scatter(
+                x=df_dd.index, y=df_dd['Drawdown'], fill='tozeroy', mode='lines',
+                line=dict(color='#ff4b4b', width=1.5), fillcolor='rgba(255, 75, 75, 0.2)', name='Drawdown %'
+            ))
+            fig_dd.update_layout(
+                title="Drawdown Histórico", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                height=300, yaxis=dict(title="Caída desde Máximos (%)", tickformat=".1f", ticksuffix="%"), hovermode="x unified",
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+            )
+            st.plotly_chart(fig_dd, use_container_width=True)
 
-    fig_yield.update_layout(
-        template='plotly_dark',
-        margin=dict(l=0, r=0, t=30, b=0),
-        height=350,
-        yaxis=dict(title="Rentabilidad (Yield %)", tickformat=".2f"),
-        hovermode="x unified",
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        showlegend=False
-    )
-    fig_yield.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
-    st.plotly_chart(fig_yield, use_container_width=True)
+        col_graf3, col_graf4 = st.columns(2)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        # 3. Sostenibilidad del Dividendo
+        with col_graf3:
+            years_sost = sorted(list(set(fcf_s.index) & set(div_s.index)))
+            if years_sost:
+                x_years = [str(y) for y in years_sost]
+                fcf_vals = [fcf_s[y] for y in years_sost]
+                div_vals = [div_s[y] for y in years_sost]
+                payout_vals = [(div/fcf)*100 if fcf > 0 else 0 for fcf, div in zip(fcf_vals, div_vals)]
+                
+                fig_sost = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_sost.add_trace(go.Bar(x=x_years, y=fcf_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
+                fig_sost.add_trace(go.Bar(x=x_years, y=div_vals, name='Dividendos', marker_color='#ff9800'), secondary_y=False)
+                fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout FCF %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in payout_vals], textposition="top center", textfont=dict(color="#ff4b4b", size=10), line=dict(color='#ff4b4b', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_sost.update_layout(
+                    title="Sostenibilidad: FCF vs Dividendos", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                    height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                fig_sost.update_yaxes(title_text="Absoluto", secondary_y=False)
+                fig_sost.update_yaxes(title_text="Payout %", secondary_y=True, showgrid=False)
+                st.plotly_chart(fig_sost, use_container_width=True)
+            else: st.info("Datos anuales insuficientes para el gráfico de Sostenibilidad.")
+
+        # 4. Ingresos y Rentabilidad
+        with col_graf4:
+            years_rev = sorted(list(set(rev_s.index) & set(net_s.index)))
+            if years_rev:
+                x_years_rev = [str(y) for y in years_rev]
+                rev_vals = [rev_s[y] for y in years_rev]
+                net_vals = [net_s[y] for y in years_rev]
+                margin_vals = [(n/r)*100 if r > 0 else 0 for r, n in zip(rev_vals, net_vals)]
+                
+                fig_ing = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_ing.add_trace(go.Bar(x=x_years_rev, y=rev_vals, name='Ingresos', marker_color='#21c354'), secondary_y=False)
+                fig_ing.add_trace(go.Bar(x=x_years_rev, y=net_vals, name='B. Neto', marker_color='#faca2b'), secondary_y=False)
+                fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in margin_vals], textposition="top center", textfont=dict(color="#00d4ff", size=10), line=dict(color='#00d4ff', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_ing.update_layout(
+                    title="Ingresos vs Beneficio Neto", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                    height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                fig_ing.update_yaxes(title_text="Absoluto", secondary_y=False)
+                fig_ing.update_yaxes(title_text="Margen %", secondary_y=True, showgrid=False)
+                st.plotly_chart(fig_ing, use_container_width=True)
+            else: st.info("Datos anuales insuficientes para el gráfico de Ingresos.")
+
+        # 5. Evolución EV / FCF
+        years_ev = sorted(list(set(fcf_s.index) & set(shares_s.index) & set(yearly_closes.index)))
+        if years_ev:
+            x_years_ev = [str(y) for y in years_ev]
+            fcf_ev_vals = [fcf_s[y] for y in years_ev]
+            ev_vals = []
+            for y in years_ev:
+                mcap = yearly_closes[y] * shares_s[y]
+                debt = debt_s.get(y, 0)
+                cash = cash_s.get(y, 0)
+                ev = mcap + debt - cash
+                ev_vals.append(ev)
+            
+            ratio_vals = [(ev/fcf) if fcf > 0 else 0 for ev, fcf in zip(ev_vals, fcf_ev_vals)]
+            
+            fig_ev = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_ev.add_trace(go.Bar(x=x_years_ev, y=ev_vals, name='Enterprise Value (EV)', marker_color='#9c27b0'), secondary_y=False)
+            fig_ev.add_trace(go.Bar(x=x_years_ev, y=fcf_ev_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
+            fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/FCF', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_vals], textposition="top center", textfont=dict(color="#21c354", size=10), line=dict(color='#21c354', width=2), marker=dict(size=8)), secondary_y=True)
+            fig_ev.update_layout(
+                title="Valoración: EV vs FCF", template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0),
+                height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            fig_ev.update_yaxes(title_text="Absoluto", secondary_y=False)
+            fig_ev.update_yaxes(title_text="Ratio (Múltiplo)", secondary_y=True, showgrid=False)
+            st.plotly_chart(fig_ev, use_container_width=True)
+
+    except Exception as e:
+        st.warning(f"No se han podido cargar los gráficos financieros anuales completos de Yahoo Finance. Error: {e}")
+
+    st.divider()
+
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
     
     val_5y = dgr_5y if dgr_5y is not None else None
@@ -788,9 +889,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.plotly_chart(fig_yoc, use_container_width=True)
 
 
-
 # ==========================================
-# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
+# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE (INTACTO)
 # ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     try:
@@ -846,7 +946,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         if currency == 'GBp' and forward_dividend > 0:
             if forward_dividend < (precio_actual / 10): forward_dividend *= 100
 
-        # FIX AÑADIDO: REEMPLAZAR EL AÑO ACTUAL INCOMPLETO POR EL FORWARD DIVIDEND
         dividendos_barras = divs_por_año.copy()
         if año_actual in dividendos_barras.index:
             dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
@@ -984,7 +1083,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         if cond_per: score += 0.5
         if cond_consistencia: score += 0.5
 
-        # Etiquetas que muestran si ha sumado el punto en la tabla
         pts_fcf = "(+1.5p)" if cond_fcf else "(0p)"
         pts_pfcf = "(+1.5p)" if cond_pfcf else "(0p)"
         pts_deuda = "(+1.5p)" if cond_deuda else "(0p)"
@@ -996,7 +1094,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         pts_per = "(+0.5p)" if cond_per else "(0p)"
         pts_cons = "(+0.5p)" if cond_consistencia else "(0p)"
 
-        # Distancias visuales y estado
         dist_real_suelo = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 999.0
         pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
         pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
@@ -1032,7 +1129,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Aumentos": f"{incrementos_dividendo} {pts_aum}",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
-            # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
@@ -1059,7 +1155,6 @@ st.title("Sistema Fundamental - Método Geraldine Weiss")
 
 tab_individual, tab_masiva = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Múltiple (Radar)"])
 
-# --- PESTAÑA 1: ANALIZADOR INDIVIDUAL (INTACTO) ---
 with tab_individual:
     col_input1, col_input2, col_input3 = st.columns(3)
     with col_input1: ticker_input = st.text_input("Ticker individual:", "NVO").upper()
@@ -1071,7 +1166,6 @@ with tab_individual:
             try: screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
             except Exception as e: st.error(f"Se ha producido un error: {e}")
 
-# --- PESTAÑA 2: RADAR DE EMPRESAS MÚLTIPLES CON FILTROS DE CALIDAD ---
 with tab_masiva:
     st.markdown("### 📡 Radar Fundamental Completo por Lotes")
     st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** respecto al Suelo Fundamental.")
@@ -1100,14 +1194,11 @@ with tab_masiva:
             texto_estado.text("¡Escaneo masivo completado!")
             
             if resultados:
-                # Ordenamos matemáticamente por la columna oculta
                 df_res = pd.DataFrame(resultados).sort_values(by="_Dist_Suelo")
                 
-                # Función avanzada de colorimetría para celdas
                 def color_row(row):
                     styles = [''] * len(row)
                     est = row['Estado']
-                    
                     for idx, col_name in enumerate(row.index):
                         if col_name == 'Score Weiss':
                             if row['_score'] >= 8: styles[idx] = 'color: #21c354; font-weight: bold;'
@@ -1192,13 +1283,10 @@ with tab_masiva:
                             else: styles[idx] = 'background-color: #4d4d00; color: white;'
                     return styles
                 
-                # Ocultar las variables lógicas para que la tabla sea legible
                 columnas_visibles = [c for c in df_res.columns if not c.startswith('_')]
                 styled_df = df_res.style.apply(color_row, axis=1)
-                
                 st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
                 
-                # Preparar descarga limpia
                 df_export = df_res[columnas_visibles]
                 csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
                 st.download_button(
@@ -1209,3 +1297,4 @@ with tab_masiva:
                 )
             else:
                 st.warning("No se pudieron recopilar canales históricos válidos para los tickers introducidos.")
+
