@@ -444,34 +444,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 showlegend=False
             ), row=1, col=1)
 
-            divs_chart = dividendos[dividendos.index >= fecha_display]
-            for div_date, div_amount in divs_chart.items():
-                fig_tech.add_vline(x=div_date, line_width=1.5, line_dash="dot", line_color="#e040fb", 
-                                   annotation_text=f" Ⓓ {div_amount:.2f}{sym}", annotation_position="bottom right", 
-                                   annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
-                
-            ex_div_ts = info.get('exDividendDate')
-            if pd.notna(ex_div_ts) and ex_div_ts is not None:
-                try:
-                    ex_div_date_future = pd.to_datetime(ex_div_ts, unit='s').tz_localize(None).normalize()
-                    if ex_div_date_future >= pd.Timestamp.now().normalize():
-                        if ex_div_date_future not in divs_chart.index:
-                            fig_tech.add_vline(x=ex_div_date_future, line_width=1.5, line_dash="dot", line_color="#e040fb", 
-                                               annotation_text=" Ⓓ Ex-Div", annotation_position="bottom right", 
-                                               annotation_font=dict(color="#e040fb", size=11, family="Arial", weight="bold"), row=1, col=1)
-                except: pass
-
-            # --- NUEVO: MARCADOR DE FECHA DE PAGO ---
-            pay_div_ts = info.get('dividendDate')
-            if pd.notna(pay_div_ts) and pay_div_ts is not None:
-                try:
-                    pay_div_date_future = pd.to_datetime(pay_div_ts, unit='s').tz_localize(None).normalize()
-                    if pay_div_date_future >= pd.Timestamp.now().normalize():
-                        fig_tech.add_vline(x=pay_div_date_future, line_width=1.5, line_dash="dash", line_color="#faca2b", 
-                                           annotation_text=" 💰 Pago", annotation_position="top right", 
-                                           annotation_font=dict(color="#faca2b", size=11, family="Arial", weight="bold"), row=1, col=1)
-                except: pass
-
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
@@ -695,6 +667,56 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
 
     st.divider()
+
+    # --- NUEVO GRÁFICO: EVOLUCIÓN DEL YIELD HISTÓRICO ---
+    st.subheader("📊 Evolución del Yield Histórico")
+    st.markdown("> Visualización de la rentabilidad por dividendo en el tiempo. Según Geraldine Weiss, los picos de yield marcan los momentos de máxima infravaloración (zonas de compra clara).")
+
+    df_yield_chart = yields_validos.copy()
+    fig_yield = go.Figure()
+
+    # Área sombreada verde elegante
+    fig_yield.add_trace(go.Scatter(
+        x=df_yield_chart.index, 
+        y=df_yield_chart.values,
+        fill='tozeroy',
+        mode='lines',
+        line=dict(color='#00d4ff', width=1.5), 
+        fillcolor='rgba(0, 212, 255, 0.15)',
+        name='Yield %'
+    ))
+
+    # Líneas Weiss
+    fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", annotation_text=f"Media: {yield_medio:.2f}%", annotation_position="top left", annotation_font=dict(color="#faca2b", size=12))
+    fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", annotation_text=f"Suelo (Compra): {yield_infravalorado:.2f}%", annotation_position="bottom left", annotation_font=dict(color="#21c354", size=12))
+    fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", annotation_text=f"Techo (Venta): {yield_sobrevalorado:.2f}%", annotation_position="top left", annotation_font=dict(color="#ff4b4b", size=12))
+
+    # Puntero de situación actual
+    fig_yield.add_trace(go.Scatter(
+        x=[df_yield_chart.index[-1]], 
+        y=[df_yield_chart.iloc[-1]],
+        mode='markers+text',
+        marker=dict(color='#00d4ff', size=10, symbol='diamond'),
+        text=[f"Actual: {yield_actual:.2f}%"],
+        textposition="top center",
+        textfont=dict(color="#00d4ff", size=13, weight="bold"),
+        name="Yield Actual"
+    ))
+
+    fig_yield.update_layout(
+        template='plotly_dark',
+        margin=dict(l=0, r=0, t=30, b=0),
+        height=350,
+        yaxis=dict(title="Rentabilidad (Yield %)", tickformat=".2f"),
+        hovermode="x unified",
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        showlegend=False
+    )
+    fig_yield.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+    st.plotly_chart(fig_yield, use_container_width=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
     
     val_5y = dgr_5y if dgr_5y is not None else None
@@ -1171,4 +1193,3 @@ with tab_masiva:
                 )
             else:
                 st.warning("No se pudieron recopilar canales históricos válidos para los tickers introducidos.")
-
