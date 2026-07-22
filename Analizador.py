@@ -282,7 +282,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if cond_per: score += 0.5
     if cond_consistencia: score += 0.5
 
-    # --- CÁLCULO DE LA REGLA DE CHOWDER ---
+    # --- CÁLCULO DE LA REGLA DE CHOWDER Y PRECIO OBJETIVO CHOWDER ---
     if (es_utility_pura or es_telecom) and yield_actual > 4.0:
         chowder_target = 8.0
     elif yield_actual >= 3.0:
@@ -290,9 +290,14 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else:
         chowder_target = 15.0
 
+    precio_obj_chowder = None
+    yield_req_chowder = None
     if dgr_5y is not None:
         chowder_number = yield_actual + dgr_5y
         chowder_pass = chowder_number >= chowder_target
+        yield_req_chowder = chowder_target - dgr_5y
+        if yield_req_chowder > 0:
+            precio_obj_chowder = (forward_dividend / yield_req_chowder) * 100
     else:
         chowder_number = None
         chowder_pass = False
@@ -361,9 +366,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     # --- AVISO CHOWDER ---
     if chowder_number is not None:
         if chowder_pass:
-            st.success(f"🥣 **REGLA DE CHOWDER: APROBADA ({chowder_number:.1f})** — Supera el objetivo exigido de {chowder_target:.0f}[span_3](start_span)[span_3](end_span).")
+            st.success(f"🥣 **REGLA DE CHOWDER: APROBADA ({chowder_number:.1f})** — Supera el objetivo exigido de {chowder_target:.0f}[span_0](start_span)[span_0](end_span).")
         else:
-            st.error(f"🥣 **REGLA DE CHOWDER: SUSPENSA ({chowder_number:.1f})** — No alcanza el objetivo exigido de {chowder_target:.0f}[span_4](start_span)[span_4](end_span).")
+            txt_precio_c = f" Cotiza a {precio_actual / divisor_uk:.2f}{sym} y debería cotizar a {precio_obj_chowder / divisor_uk:.2f}{sym} para cumplir." if (precio_obj_chowder is not None and yield_req_chowder > 0) else ""
+            st.error(f"🥣 **REGLA DE CHOWDER: SUSPENSA ({chowder_number:.1f})** — No alcanza el objetivo exigido de {chowder_target:.0f}[span_1](start_span)[span_1](end_span).{txt_precio_c}")
     else:
         st.info("🥣 **REGLA DE CHOWDER: N/D** — No hay datos de crecimiento a 5 años suficientes para su cálculo.")
 
@@ -410,9 +416,14 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
         df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
 
+        if yield_req_chowder is not None and yield_req_chowder > 0:
+            df_tech_full['Precio_Chowder'] = (df_tech_full['Div_Anual'] / yield_req_chowder) * 100
+
         if currency == 'GBp':
             for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
                 df_tech_full[col] = df_tech_full[col] / divisor_uk
+            if 'Precio_Chowder' in df_tech_full.columns:
+                df_tech_full['Precio_Chowder'] = df_tech_full['Precio_Chowder'] / divisor_uk
 
         ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
@@ -489,6 +500,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
+
+            # LÍNEA OCULTA POR DEFECTO PARA PRECIO OBJETIVO CHOWDER
+            if 'Precio_Chowder' in df_tech.columns:
+                fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
 
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False), row=2, col=1)
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False), row=3, col=1)
@@ -714,32 +729,39 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
     st.subheader("🥣 La Regla de Chowder")
-    st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo[span_5](start_span)[span_5](end_span). La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo[span_6](start_span)[span_6](end_span).")
+    st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo[span_2](start_span)[span_2](end_span). La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo[span_3](start_span)[span_3](end_span).")
     
-    col_c1, col_c2, col_c3 = st.columns(3)
+    col_c1, col_c2, col_c3, col_c4 = st.columns(4)
     col_c1.metric("Yield Actual", f"{yield_actual:.2f}%")
     col_c2.metric("Crecimiento (DGR 5A)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
     
     if dgr_5y is not None:
         c_color = "normal" if chowder_pass else "inverse"
         col_c3.metric("Número Chowder", f"{chowder_number:.2f}", delta=f"Objetivo mínimo: {chowder_target:.0f}", delta_color=c_color)
+        
+        if yield_req_chowder <= 0:
+            col_c4.metric("Precio Obj. Chowder", "Ya lo cumple", help="El crecimiento del dividendo a 5 años ya supera por sí solo el objetivo de Chowder.")
+        else:
+            dist_chowder = ((precio_actual - precio_obj_chowder) / precio_obj_chowder) * 100
+            col_c4.metric("Precio Obj. Chowder", f"{precio_obj_chowder / divisor_uk:.2f}{sym}", delta=f"{dist_chowder:+.1f}% vs Actual", delta_color="inverse")
     else:
         col_c3.metric("Número Chowder", "N/D")
+        col_c4.metric("Precio Obj. Chowder", "N/D")
     
     st.markdown("#### 📐 Criterios de Aprobación de esta empresa")
     if (es_utility_pura or es_telecom) and yield_actual > 4.0:
-        st.info("Al pertenecer a un sector hiper-estable regulado (Utilities/Telecom) y tener un Yield inicial > 4%, se le aplica la **excepción de Chowder**, bajando el objetivo de puntuación a **≥ 8**[span_7](start_span)[span_7](end_span).")
+        st.info("Al pertenecer a un sector hiper-estable regulado (Utilities/Telecom) y tener un Yield inicial > 4%, se le aplica la **excepción de Chowder**, bajando el objetivo de puntuación a **≥ 8**[span_4](start_span)[span_4](end_span).")
     elif yield_actual >= 3.0:
-        st.info("Al ofrecer un Yield inicial atractivo (≥ 3.0%), se le exige un objetivo Chowder estándar de **≥ 12**[span_8](start_span)[span_8](end_span).")
+        st.info("Al ofrecer un Yield inicial atractivo (≥ 3.0%), se le exige un objetivo Chowder estándar de **≥ 12**[span_5](start_span)[span_5](end_span).")
     else:
-        st.info("Al ofrecer un Yield inicial bajo (< 3.0%), se le exige mayor crecimiento para compensar, con un objetivo Chowder estricto de **≥ 15**[span_9](start_span)[span_9](end_span).")
+        st.info("Al ofrecer un Yield inicial bajo (< 3.0%), se le exige mayor crecimiento para compensar, con un objetivo Chowder estricto de **≥ 15**[span_6](start_span)[span_6](end_span).")
     
-    st.markdown("*Nota: Los números mágicos de 12 y 15 buscan emular o superar la media histórica del S&P 500 (8%), permitiendo que la rentabilidad sobre coste (YoC) de tu cartera se duplique cíclicamente[span_10](start_span)[span_10](end_span).*")
+    st.markdown("*Nota: Los números mágicos de 12 y 15 buscan emular o superar la media histórica del S&P 500 (8%), permitiendo que la rentabilidad sobre coste (YoC) de tu cartera se duplique cíclicamente[span_7](start_span)[span_7](end_span).*")
 
     st.divider()
 
     # ==========================================
-    # NUEVO PANEL: ANÁLISIS FUNDAMENTAL VISUAL
+    # PANEL: ANÁLISIS FUNDAMENTAL VISUAL
     # ==========================================
     st.markdown("### 📉 Análisis Fundamental Visual")
     
@@ -782,7 +804,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 line=dict(color='#00d4ff', width=2), name='Yield %'
             ))
             
-            # Líneas Weiss (SIN TEXTO para no ensuciar en móvil)
             fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", name="Media")
             fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", name="Suelo (Compra)")
             fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", name="Techo (Venta)")
@@ -837,7 +858,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_sost = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_sost.add_trace(go.Bar(x=x_years, y=fcf_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
                 fig_sost.add_trace(go.Bar(x=x_years, y=div_vals, name='Dividendos', marker_color='#ff9800'), secondary_y=False)
-                fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout FCF %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in payout_vals], textposition="top center", textfont=dict(color="#ff4b4b", size=11, weight="bold"), line=dict(color='#ff4b4b', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout FCF %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in payout_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#ff4b4b', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_sost.update_layout(
                     template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -862,7 +883,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_ing = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_ing.add_trace(go.Bar(x=x_years_rev, y=rev_vals, name='Ingresos', marker_color='#21c354'), secondary_y=False)
                 fig_ing.add_trace(go.Bar(x=x_years_rev, y=net_vals, name='B. Neto', marker_color='#faca2b'), secondary_y=False)
-                fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in margin_vals], textposition="top center", textfont=dict(color="#00d4ff", size=11, weight="bold"), line=dict(color='#00d4ff', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in margin_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#00d4ff', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_ing.update_layout(
                     template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -896,7 +917,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_ev = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_ev.add_trace(go.Bar(x=x_years_ev, y=ev_vals, name='Enterprise Value (EV)', marker_color='#9c27b0'), secondary_y=False)
                 fig_ev.add_trace(go.Bar(x=x_years_ev, y=fcf_ev_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
-                fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/FCF', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_vals], textposition="top center", textfont=dict(color="#21c354", size=11, weight="bold"), line=dict(color='#21c354', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/FCF', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#21c354', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_ev.update_layout(
                     template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -1029,6 +1050,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
+
 
 
 
@@ -1283,7 +1305,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Aumentos": f"{incrementos_dividendo} {pts_aum}",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
-            # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
@@ -1460,4 +1481,3 @@ with tab_masiva:
                 )
             else:
                 st.warning("No se pudieron recopilar canales históricos válidos para los tickers introducidos.")
-
