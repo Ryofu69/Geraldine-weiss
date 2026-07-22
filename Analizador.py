@@ -418,9 +418,14 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
         df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
 
+        if yield_req_chowder is not None and yield_req_chowder > 0:
+            df_tech_full['Precio_Chowder'] = (df_tech_full['Div_Anual'] / yield_req_chowder) * 100
+
         if currency == 'GBp':
             for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
                 df_tech_full[col] = df_tech_full[col] / divisor_uk
+            if 'Precio_Chowder' in df_tech_full.columns:
+                df_tech_full['Precio_Chowder'] = df_tech_full['Precio_Chowder'] / divisor_uk
 
         ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
@@ -655,7 +660,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.markdown("#### 🛡️ 2. Seguridad del Dividendo (Cobertura)")
     if 0 < payout_ratio <= payout_limite_bpa: st.success(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
     elif payout_limite_bpa < payout_ratio <= payout_amarillo_bpa: st.warning(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Atención: Excede el límite óptimo de {payout_limite_bpa:.0f}%, pero se mantiene cubierto bajo el {payout_amarillo_bpa:.0f}%)")
-    else: st.error(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y dangerous: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
+    else: st.error(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y peligroso: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
     
     if payout_forward != -1:
         if payout_forward < (payout_ratio - 1): tendencia_fw = "mejorará"
@@ -1051,6 +1056,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 
 
+
 # ==========================================
 # 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
 # ==========================================
@@ -1302,7 +1308,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Aumentos": f"{incrementos_dividendo} {pts_aum}",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
-            # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
@@ -1560,6 +1565,7 @@ with tab_cartera:
                         for t in tickers_unicos:
                             try:
                                 tk = yf.Ticker(t)
+                                # IMPORTANTE: auto_adjust=False extrae el precio puro del mercado
                                 hist = tk.history(start=min_date, auto_adjust=False)
                                 if not hist.empty:
                                     if tk.info.get('currency') == 'GBp':
@@ -1684,13 +1690,8 @@ with tab_cartera:
                             c1, c2, c3, c4 = st.columns(4)
                             c1.metric("Capital Invertido", f"{inversion_final:,.2f}")
                             
-                            # Métrica 2: Ahora con PORCENTAJE de revalorización en bolsa + absoluto
                             c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f}", f"{rent_precio_global_pct:+.2f}% ({b_l_mercado:+,.2f} Abs.)")
-                            
-                            # Métrica 3: Ahora con PORCENTAJE de rendimiento en dividendos sobre capital
                             c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f}", f"{pct_divs_sobre_inversion:+.2f}% del Capital")
-                            
-                            # Métrica 4: Rentabilidad total combinada
                             c4.metric("Rentab. Total (Con Divs)", f"{rent_total_pct:+.2f}%", f"{b_total_global:+,.2f} Abs. Total")
                             
                             divs_per_ticker = (daily_shares_shifted * datos_dividendos).sum(axis=0) * (1 - (impuesto_cart / 100.0))
@@ -1753,15 +1754,57 @@ with tab_cartera:
                                         
                             st.dataframe(styled_df, use_container_width=True, hide_index=True)
                             
-                            csv_export = df_mostrar.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
-                            st.download_button(
-                                label="💾 Descargar Resumen de Cartera (CSV)",
-                                data=csv_export,
-                                file_name=f"Mi_Cartera_Live_{datetime.now().strftime('%Y-%m-%d')}.csv",
-                                mime="text/csv",
-                            )
+                            # --- 8. NUEVO: CALENDARIO DE DIVIDENDOS COBRADOS ---
+                            if divs_cobrados_totales > 0:
+                                st.markdown("---")
+                                st.markdown("#### 🗓️ Calendario Histórico de Dividendos Netos")
+                                
+                                # Extraer la serie diaria donde hubo pago
+                                df_divs_hist = pd.DataFrame({'Fecha': daily_net_divs.index, 'Dividendo': daily_net_divs.values})
+                                df_divs_hist = df_divs_hist[df_divs_hist['Dividendo'] > 0]
+                                
+                                if not df_divs_hist.empty:
+                                    df_divs_hist['Año'] = df_divs_hist['Fecha'].dt.year
+                                    df_divs_hist['Mes'] = df_divs_hist['Fecha'].dt.month
+                                    
+                                    # Crear Matriz (Meses en filas, Años en columnas)
+                                    matriz_divs = df_divs_hist.pivot_table(index='Mes', columns='Año', values='Dividendo', aggfunc='sum', fill_value=0)
+                                    
+                                    # Mapear nombres de meses
+                                    meses_str = {1: 'Ene', 2: 'Feb', 3: 'Mar', 4: 'Abr', 5: 'May', 6: 'Jun', 
+                                                 7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
+                                    matriz_divs.index = matriz_divs.index.map(meses_str)
+                                    
+                                    # Añadir fila de totales
+                                    matriz_divs.loc['TOTAL AÑO'] = matriz_divs.sum()
+                                    
+                                    # Crear tabla anual para YoY
+                                    anual_divs = df_divs_hist.groupby('Año')['Dividendo'].sum().reset_index()
+                                    anual_divs['Crecimiento YoY (%)'] = anual_divs['Dividendo'].pct_change() * 100
+                                    
+                                    col_cal1, col_cal2 = st.columns([2, 1])
+                                    
+                                    with col_cal1:
+                                        st.markdown("##### 📅 Mes a Mes (Evolución por Año)")
+                                        # Coloreamos con gradiente verde solo los meses, sin alterar la fila TOTAL
+                                        meses_idx = matriz_divs.index[:-1]
+                                        styled_matriz = matriz_divs.style.format("{:,.2f}").background_gradient(cmap='Greens', subset=(meses_idx, matriz_divs.columns))
+                                        st.dataframe(styled_matriz, use_container_width=True)
+                                        
+                                    with col_cal2:
+                                        st.markdown("##### 📊 Resumen por Años (YoY)")
+                                        def color_yoy(val):
+                                            if pd.isna(val): return ''
+                                            color = '#21c354' if val > 0 else ('#ff4b4b' if val < 0 else '#aaaaaa')
+                                            return f'color: {color}; font-weight: bold;'
+                                            
+                                        styled_anual = anual_divs.style.format({
+                                            'Dividendo': '{:,.2f}',
+                                            'Crecimiento YoY (%)': '{:+.2f}%'
+                                        }).map(color_yoy, subset=['Crecimiento YoY (%)'])
+                                        st.dataframe(styled_anual, use_container_width=True, hide_index=True)
 
-                            # 7. GRÁFICO AL FINAL: Comparativa Con vs Sin Dividendos por Empresa
+                            # 9. GRÁFICO AL FINAL: Comparativa Con vs Sin Dividendos por Empresa
                             st.markdown("---")
                             st.markdown("#### 📊 Rentabilidad por Empresa (Precio vs Total con Dividendos)")
                             
