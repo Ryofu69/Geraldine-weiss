@@ -1308,6 +1308,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Aumentos": f"{incrementos_dividendo} {pts_aum}",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
+            # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
@@ -1754,12 +1755,11 @@ with tab_cartera:
                                         
                             st.dataframe(styled_df, use_container_width=True, hide_index=True)
                             
-                            # --- 8. NUEVO: CALENDARIO DE DIVIDENDOS COBRADOS ---
+                            # --- 8. CALENDARIO DE DIVIDENDOS (NUEVO FORMATO GRÁFICO BARRAS AGRUPADAS) ---
                             if divs_cobrados_totales > 0:
                                 st.markdown("---")
                                 st.markdown("#### 🗓️ Calendario Histórico de Dividendos Netos")
                                 
-                                # Extraer la serie diaria donde hubo pago
                                 df_divs_hist = pd.DataFrame({'Fecha': daily_net_divs.index, 'Dividendo': daily_net_divs.values})
                                 df_divs_hist = df_divs_hist[df_divs_hist['Dividendo'] > 0]
                                 
@@ -1767,32 +1767,53 @@ with tab_cartera:
                                     df_divs_hist['Año'] = df_divs_hist['Fecha'].dt.year
                                     df_divs_hist['Mes'] = df_divs_hist['Fecha'].dt.month
                                     
-                                    # Crear Matriz (Meses en filas, Años en columnas)
-                                    matriz_divs = df_divs_hist.pivot_table(index='Mes', columns='Año', values='Dividendo', aggfunc='sum', fill_value=0)
-                                    
-                                    # Mapear nombres de meses
                                     meses_str = {1: 'Ene', 2: 'Feb', 3: 'Mar', 4: 'Abr', 5: 'May', 6: 'Jun', 
                                                  7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
-                                    matriz_divs.index = matriz_divs.index.map(meses_str)
                                     
-                                    # Añadir fila de totales
-                                    matriz_divs.loc['TOTAL AÑO'] = matriz_divs.sum()
+                                    agrupado_meses = df_divs_hist.groupby(['Año', 'Mes'])['Dividendo'].sum().reset_index()
                                     
-                                    # Crear tabla anual para YoY
                                     anual_divs = df_divs_hist.groupby('Año')['Dividendo'].sum().reset_index()
                                     anual_divs['Crecimiento YoY (%)'] = anual_divs['Dividendo'].pct_change() * 100
                                     
-                                    col_cal1, col_cal2 = st.columns([2, 1])
+                                    col_cal1, col_cal2 = st.columns([2.5, 1])
                                     
                                     with col_cal1:
-                                        st.markdown("##### 📅 Mes a Mes (Evolución por Año)")
-                                        # Coloreamos con gradiente verde solo los meses, sin alterar la fila TOTAL
-                                        meses_idx = matriz_divs.index[:-1]
-                                        styled_matriz = matriz_divs.style.format("{:,.2f}").background_gradient(cmap='Greens', subset=(meses_idx, matriz_divs.columns))
-                                        st.dataframe(styled_matriz, use_container_width=True)
+                                        st.markdown("##### 📊 Ingresos Mensuales (Comparativa Anual)")
+                                        fig_meses = go.Figure()
+                                        años_presentes = sorted(agrupado_meses['Año'].unique())
+                                        nombres_meses = [meses_str[i] for i in range(1, 13)]
+                                        
+                                        for año in años_presentes:
+                                            datos_año = agrupado_meses[agrupado_meses['Año'] == año]
+                                            y_valores = []
+                                            for m in range(1, 13):
+                                                fila_mes = datos_año[datos_año['Mes'] == m]
+                                                if not fila_mes.empty:
+                                                    y_valores.append(fila_mes['Dividendo'].values[0])
+                                                else:
+                                                    y_valores.append(0.0)
+                                            
+                                            fig_meses.add_trace(go.Bar(
+                                                x=nombres_meses,
+                                                y=y_valores,
+                                                name=str(año)
+                                            ))
+                                            
+                                        fig_meses.update_layout(
+                                            barmode='group',
+                                            template='plotly_dark',
+                                            margin=dict(l=0, r=0, t=10, b=0),
+                                            height=350,
+                                            hovermode="x unified",
+                                            paper_bgcolor='rgba(0,0,0,0)',
+                                            plot_bgcolor='rgba(0,0,0,0)',
+                                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+                                            yaxis=dict(title="Dividendos Netos")
+                                        )
+                                        st.plotly_chart(fig_meses, use_container_width=True)
                                         
                                     with col_cal2:
-                                        st.markdown("##### 📊 Resumen por Años (YoY)")
+                                        st.markdown("##### 📈 Resumen por Años (YoY)")
                                         def color_yoy(val):
                                             if pd.isna(val): return ''
                                             color = '#21c354' if val > 0 else ('#ff4b4b' if val < 0 else '#aaaaaa')
