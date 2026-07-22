@@ -837,6 +837,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", name="Suelo (Compra)")
             fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", name="Techo (Venta)")
 
+            # Anotaciones estáticas a la izquierda (fuera del camino del cursor)
+            fecha_anotacion = df_yield_chart.index[0]
+            fig_yield.add_annotation(x=fecha_anotacion, y=yield_sobrevalorado, text=f"Techo: {yield_sobrevalorado:.2f}%", showarrow=False, yshift=10, font=dict(color="#ff4b4b", size=10), xanchor="left")
+            fig_yield.add_annotation(x=fecha_anotacion, y=yield_medio, text=f"Media: {yield_medio:.2f}%", showarrow=False, yshift=10, font=dict(color="#faca2b", size=10), xanchor="left")
+            fig_yield.add_annotation(x=fecha_anotacion, y=yield_infravalorado, text=f"Suelo: {yield_infravalorado:.2f}%", showarrow=False, yshift=10, font=dict(color="#21c354", size=10), xanchor="left")
+
             fig_yield.add_trace(go.Scatter(
                 x=[df_yield_chart.index[-1]], y=[df_yield_chart.iloc[-1]], mode='markers+text',
                 marker=dict(color='#00d4ff', size=10, symbol='diamond'),
@@ -1024,7 +1030,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         st.markdown("#### ⏳ Estructura de Deuda Actual (Corto vs Largo Plazo)")
         if df_balance is not None and not df_balance.empty:
             bs_cols = df_balance.index.tolist()
-            # Buscar métricas de forma segura
             def get_latest_bs_val(keys):
                 for k in keys:
                     if k in bs_cols:
@@ -1039,21 +1044,18 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             if st_debt > 0 or lt_debt > 0 or caja_actual > 0:
                 fig_venc = go.Figure()
                 
-                # Barra de Caja
                 fig_venc.add_trace(go.Bar(
                     y=['Estructura Actual'], x=[caja_actual], name='Liquidez (Caja y Equivalentes)',
                     orientation='h', marker_color='#21c354',
                     text=f"Caja: {caja_actual/1e9:.2f}B {sym}", textposition='inside'
                 ))
                 
-                # Barra de Deuda Corto Plazo
                 fig_venc.add_trace(go.Bar(
                     y=['Estructura Actual'], x=[st_debt], name='Deuda Corto Plazo (< 1 Año)',
                     orientation='h', marker_color='#ff9800',
                     text=f"Corto: {st_debt/1e9:.2f}B {sym}", textposition='inside'
                 ))
                 
-                # Barra de Deuda Largo Plazo
                 fig_venc.add_trace(go.Bar(
                     y=['Estructura Actual'], x=[lt_debt], name='Deuda Largo Plazo (> 1 Año)',
                     orientation='h', marker_color='#ff4b4b',
@@ -1061,9 +1063,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 ))
                 
                 fig_venc.update_layout(
-                    barmode='stack', template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=200,
+                    barmode='stack', template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=250,
                     hovermode="y unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+                    # Leyenda movida abajo al centro
+                    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
                     xaxis=dict(showticklabels=False, title="")
                 )
                 st.plotly_chart(fig_venc, use_container_width=True)
@@ -1130,8 +1133,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
-
-
 
 
 # ==========================================
@@ -1945,3 +1946,5 @@ with tab_cartera:
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
+
+
