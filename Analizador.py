@@ -828,31 +828,33 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.markdown("#### 📈 Evolución del Yield Histórico")
             df_yield_chart = yields_validos.copy()
             fig_yield = go.Figure()
+            
+            # Trazos reales de la cotización
             fig_yield.add_trace(go.Scatter(
                 x=df_yield_chart.index, y=df_yield_chart.values, mode='lines',
-                line=dict(color='#00d4ff', width=2), name='Yield %'
+                line=dict(color='#00d4ff', width=2), name='Histórico', showlegend=False
             ))
             
-            fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", name="Media")
-            fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", name="Suelo (Compra)")
-            fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", name="Techo (Venta)")
+            # Lineas horizontales (usamos add_hline sin leyenda nativa para evitar bugs visuales)
+            fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b")
+            fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354")
+            fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b")
 
-            # Anotaciones estáticas a la izquierda (fuera del camino del cursor)
-            fecha_anotacion = df_yield_chart.index[0]
-            fig_yield.add_annotation(x=fecha_anotacion, y=yield_sobrevalorado, text=f"Techo: {yield_sobrevalorado:.2f}%", showarrow=False, yshift=10, font=dict(color="#ff4b4b", size=10), xanchor="left")
-            fig_yield.add_annotation(x=fecha_anotacion, y=yield_medio, text=f"Media: {yield_medio:.2f}%", showarrow=False, yshift=10, font=dict(color="#faca2b", size=10), xanchor="left")
-            fig_yield.add_annotation(x=fecha_anotacion, y=yield_infravalorado, text=f"Suelo: {yield_infravalorado:.2f}%", showarrow=False, yshift=10, font=dict(color="#21c354", size=10), xanchor="left")
-
+            # Trazos invisibles exclusivos para forzar una leyenda interactiva limpia
+            fig_yield.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
+            fig_yield.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
+            fig_yield.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
             fig_yield.add_trace(go.Scatter(
-                x=[df_yield_chart.index[-1]], y=[df_yield_chart.iloc[-1]], mode='markers+text',
-                marker=dict(color='#00d4ff', size=10, symbol='diamond'),
-                text=[f"Actual: {yield_actual:.2f}%"], textposition="top center",
-                textfont=dict(color="#00d4ff", size=13, weight="bold"), name="Yield Actual"
+                x=[df_yield_chart.index[-1]], y=[df_yield_chart.iloc[-1]], mode='markers',
+                marker=dict(color='#00d4ff', size=10, symbol='diamond'), name=f"Actual: {yield_actual:.2f}%"
             ))
+
             fig_yield.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
-                height=300, yaxis=dict(title="Rentabilidad (Yield %)", tickformat=".2f"), hovermode="x unified",
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False
+                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50),
+                height=320, yaxis=dict(title="Rentabilidad (Yield %)", tickformat=".2f"), hovermode="x unified",
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
             )
             fig_yield.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
             st.plotly_chart(fig_yield, use_container_width=True)
@@ -871,8 +873,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 line=dict(color='#ff4b4b', width=1.5), fillcolor='rgba(255, 75, 75, 0.2)', name='Drawdown %'
             ))
             fig_dd.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
-                height=300, yaxis=dict(title="Caída desde Máximos (%)", tickformat=".1f", ticksuffix="%"), hovermode="x unified",
+                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50),
+                height=320, yaxis=dict(title="Caída desde Máximos (%)", tickformat=".1f", ticksuffix="%"), hovermode="x unified",
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
             st.plotly_chart(fig_dd, use_container_width=True)
@@ -895,9 +897,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_sost.add_trace(go.Bar(x=x_years, y=div_vals, name='Dividendos', marker_color='#ff9800'), secondary_y=False)
                 fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout FCF %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in payout_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#ff4b4b', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_sost.update_layout(
-                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
+                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+                    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
                 )
                 fig_sost.update_yaxes(title_text="Absoluto", secondary_y=False)
                 fig_sost.update_yaxes(title_text="Payout %", secondary_y=True, showgrid=False, range=[0, max(payout_vals)*1.2 if payout_vals else 100])
@@ -920,9 +922,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_ing.add_trace(go.Bar(x=x_years_rev, y=net_vals, name='B. Neto', marker_color='#faca2b'), secondary_y=False)
                 fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in margin_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#00d4ff', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_ing.update_layout(
-                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
+                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+                    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
                 )
                 fig_ing.update_yaxes(title_text="Absoluto", secondary_y=False)
                 fig_ing.update_yaxes(title_text="Margen %", secondary_y=True, showgrid=False, range=[0, max(margin_vals)*1.2 if margin_vals else 100])
@@ -954,9 +956,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_ev.add_trace(go.Bar(x=x_years_ev, y=fcf_ev_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
                 fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/FCF', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#21c354', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_ev.update_layout(
-                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
+                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+                    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
                 )
                 fig_ev.update_yaxes(title_text="Absoluto", secondary_y=False)
                 fig_ev.update_yaxes(title_text="Ratio (Múltiplo)", secondary_y=True, showgrid=False, range=[0, max(ratio_vals)*1.2 if ratio_vals else 30])
@@ -986,9 +988,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_ebitda.add_trace(go.Bar(x=x_years_eb, y=ev_eb_vals, name='Enterprise Value (EV)', marker_color='#ff9800'), secondary_y=False)
                 fig_ebitda.add_trace(go.Scatter(x=x_years_eb, y=ratio_eb_vals, name='Ratio EV/EBITDA', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_eb_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#ff1744', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_ebitda.update_layout(
-                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
+                    template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+                    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
                 )
                 fig_ebitda.update_yaxes(title_text="Absoluto", secondary_y=False)
                 fig_ebitda.update_yaxes(title_text="Ratio (Múltiplo)", secondary_y=True, showgrid=False, range=[0, max(ratio_eb_vals)*1.2 if ratio_eb_vals else 30])
@@ -1016,9 +1018,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_deuda.add_trace(go.Bar(x=x_years_d, y=net_debt_vals, name='Deuda Neta', marker_color='#ff9800'), secondary_y=False)
             fig_deuda.add_trace(go.Scatter(x=x_years_d, y=ratio_d_vals, name='Deuda Neta / FCF', mode='lines+markers+text', text=[f"{val:.2f}x" for val in ratio_d_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#ff1744', width=2), marker=dict(size=8)), secondary_y=True)
             fig_deuda.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
+                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50),
                 height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
             )
             fig_deuda.update_yaxes(title_text="Absoluto", secondary_y=False)
             fig_deuda.update_yaxes(title_text="Años para Pagar", secondary_y=True, showgrid=False, range=[0, max(ratio_d_vals)*1.2 if ratio_d_vals else 5])
@@ -1047,26 +1049,26 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_venc.add_trace(go.Bar(
                     y=['Estructura Actual'], x=[caja_actual], name='Liquidez (Caja y Equivalentes)',
                     orientation='h', marker_color='#21c354',
-                    text=f"Caja: {caja_actual/1e9:.2f}B {sym}", textposition='inside'
+                    text=f"{caja_actual/1e9:.2f}B {sym}", textposition='inside'
                 ))
                 
                 fig_venc.add_trace(go.Bar(
                     y=['Estructura Actual'], x=[st_debt], name='Deuda Corto Plazo (< 1 Año)',
                     orientation='h', marker_color='#ff9800',
-                    text=f"Corto: {st_debt/1e9:.2f}B {sym}", textposition='inside'
+                    text=f"{st_debt/1e9:.2f}B {sym}", textposition='inside'
                 ))
                 
                 fig_venc.add_trace(go.Bar(
                     y=['Estructura Actual'], x=[lt_debt], name='Deuda Largo Plazo (> 1 Año)',
                     orientation='h', marker_color='#ff4b4b',
-                    text=f"Largo: {lt_debt/1e9:.2f}B {sym}", textposition='inside'
+                    text=f"{lt_debt/1e9:.2f}B {sym}", textposition='inside'
                 ))
                 
                 fig_venc.update_layout(
-                    barmode='stack', template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=250,
+                    barmode='stack', template='plotly_dark', margin=dict(l=0, r=0, t=30, b=80), height=250,
                     hovermode="y unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    # Leyenda movida abajo al centro
-                    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+                    # Leyenda empujada violentamente hacia abajo (-0.5) para que no pise los controles
+                    legend=dict(orientation="h", yanchor="top", y=-0.5, xanchor="center", x=0.5),
                     xaxis=dict(showticklabels=False, title="")
                 )
                 st.plotly_chart(fig_venc, use_container_width=True)
@@ -1126,13 +1128,17 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     ))
     
     fig_yoc.update_layout(
-        template='plotly_dark', margin=dict(l=0, r=0, t=10, b=40), height=350, hovermode="x unified", 
+        template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=350, hovermode="x unified", 
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
         yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color=color_barras)), tickfont=dict(color=color_barras)), 
         yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), 
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
+
+
+
+
 
 
 # ==========================================
@@ -1946,5 +1952,3 @@ with tab_cartera:
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
-
-
