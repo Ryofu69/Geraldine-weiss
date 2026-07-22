@@ -399,10 +399,14 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             
         df_grafico['Req_Yield_Hist'] = df_grafico['Chowder_Target_Hist'] - df_grafico['DGR_5Y']
         
-        # FIX: Si el crecimiento supera por sí solo el objetivo de Chowder, forzamos un mínimo de 0.5% 
-        # para que la línea se dibuje en la parte superior, indicando "Aprobado holgadamente"
-        df_grafico['Req_Yield_Hist'] = df_grafico['Req_Yield_Hist'].clip(lower=0.5) 
-        df_grafico['Precio_Chowder_Hist'] = (df_grafico['Div_Grafico'] / df_grafico['Req_Yield_Hist']) * 100
+        # FIX: Ahora usamos np.where para que si el Yield requerido es <= 0.1%, devuelva NaN.
+        # Esto hace que en épocas de crecimiento absurdo la línea simplemente NO se dibuje (queda invisible)
+        # dejando el gráfico limpio y sin picos verticales molestos.
+        df_grafico['Precio_Chowder_Hist'] = np.where(
+            df_grafico['Req_Yield_Hist'] > 0.1, 
+            (df_grafico['Div_Grafico'] / df_grafico['Req_Yield_Hist']) * 100, 
+            np.nan
+        )
         
         if currency == 'GBp':
             df_grafico['Close'] = df_grafico['Close'] / divisor_uk
@@ -411,8 +415,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             df_grafico['Precio_Venta'] = df_grafico['Precio_Venta'] / divisor_uk
             df_grafico['Precio_Chowder_Hist'] = df_grafico['Precio_Chowder_Hist'] / divisor_uk
             
-        # Recortar picos absurdos visuales de Chowder para no aplastar las demás líneas
-        max_price_chart = df_grafico['Close'].max() * 1.35
+        # Recorte de seguridad superior por si da un pico infinito
+        max_price_chart = df_grafico['Close'].max() * 3
         df_grafico['Precio_Chowder_Hist'] = df_grafico['Precio_Chowder_Hist'].clip(upper=max_price_chart)
 
         fig = go.Figure()
@@ -431,7 +435,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         )
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
-        st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Muestra la evolución del precio real frente a las franjas de valoración de Weiss. <b>💡 CONSEJO CHOWDER:</b> En la leyenda puedes hacer clic para activar la línea oculta 'Precio Obj. Chowder' y ver a qué precio debías haber comprado en el pasado para superar la regla basándote en el crecimiento de los 5 años anteriores de cada época. Si la línea se queda plana arriba, es que aprobaba sobradamente.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Muestra la evolución del precio real frente a las franjas de valoración de Weiss. <b>💡 CONSEJO CHOWDER:</b> En la leyenda puedes hacer clic para activar la línea oculta 'Precio Obj. Chowder' y ver a qué precio debías haber comprado en el pasado para superar la regla basándote en el crecimiento de los 5 años anteriores de cada época. (Si la línea desaparece en ciertos tramos, significa que el crecimiento era tan alto que superaba la regla automáticamente a cualquier precio).</p>", unsafe_allow_html=True)
 
     st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
@@ -445,9 +449,14 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
         df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
 
+        if yield_req_chowder is not None and yield_req_chowder > 0:
+            df_tech_full['Precio_Chowder'] = (df_tech_full['Div_Anual'] / yield_req_chowder) * 100
+
         if currency == 'GBp':
             for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
                 df_tech_full[col] = df_tech_full[col] / divisor_uk
+            if 'Precio_Chowder' in df_tech_full.columns:
+                df_tech_full['Precio_Chowder'] = df_tech_full['Precio_Chowder'] / divisor_uk
 
         ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
@@ -524,6 +533,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
+
+            # LÍNEA OCULTA POR DEFECTO PARA PRECIO OBJETIVO CHOWDER
+            if 'Precio_Chowder' in df_tech.columns:
+                fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
 
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False), row=2, col=1)
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False), row=3, col=1)
@@ -1073,6 +1086,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 
 
+
 # ==========================================
 # 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
 # ==========================================
@@ -1312,7 +1326,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Yield Neto": f"{yield_neto:.2f}%",
             "PER": f"{per:.2f} {pts_per}" if per > 0 else f"N/D {pts_per}",
             "P/FCF": f"{p_fcf:.2f} {pts_pfcf}" if p_fcf != -1 else f"N/D {pts_pfcf}",
-            "P/B": f"{pb:.2f}x" if pb > 0 else "N/D",
             "Payout BPA": f"{payout_bpa:.2f}% {pts_bpa}",
             "Payout FCF": f"{payout_fcf:.2f}% {pts_fcf}" if payout_fcf != -1 else f"N/D {pts_fcf}",
             "Deuda/FCF": f"{deuda_fcf:.2f}A {pts_deuda}" if deuda_fcf != -1 else (f"Quema Caja {pts_deuda}" if total_debt > 0 else f"0.00A {pts_deuda}"),
