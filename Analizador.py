@@ -993,6 +993,57 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.markdown("<p style='font-size:0.85rem; color:#aaa;'>La métrica definitiva de tranquilidad. Muestra cuántos años completos necesitaría la empresa, usando todo el efectivo libre anual que genera, para dejar su Deuda Neta a cero. Un valor inferior a 3.0 años demuestra un balance blindado frente a crisis económicas.</p>", unsafe_allow_html=True)
         else: st.info("Datos insuficientes para el gráfico de Deuda.")
 
+        # 8. PERFIL DE DEUDA Y LIQUIDEZ (CORTO VS LARGO)
+        st.markdown("#### ⏳ Estructura de Deuda Actual (Corto vs Largo Plazo)")
+        if df_balance is not None and not df_balance.empty:
+            bs_cols = df_balance.index.tolist()
+            # Buscar métricas de forma segura
+            def get_latest_bs_val(keys):
+                for k in keys:
+                    if k in bs_cols:
+                        s = df_balance.loc[k].dropna()
+                        if not s.empty: return s.iloc[0]
+                return 0.0
+
+            st_debt = get_latest_bs_val(['Current Debt', 'Short Long Term Debt', 'Short Term Debt'])
+            lt_debt = get_latest_bs_val(['Long Term Debt'])
+            caja_actual = get_latest_bs_val(['Cash And Cash Equivalents', 'Cash', 'Total Cash'])
+            
+            if st_debt > 0 or lt_debt > 0 or caja_actual > 0:
+                fig_venc = go.Figure()
+                
+                # Barra de Caja
+                fig_venc.add_trace(go.Bar(
+                    y=['Estructura Actual'], x=[caja_actual], name='Liquidez (Caja y Equivalentes)',
+                    orientation='h', marker_color='#21c354',
+                    text=f"Caja: {caja_actual/1e9:.2f}B {sym}", textposition='inside'
+                ))
+                
+                # Barra de Deuda Corto Plazo
+                fig_venc.add_trace(go.Bar(
+                    y=['Estructura Actual'], x=[st_debt], name='Deuda Corto Plazo (< 1 Año)',
+                    orientation='h', marker_color='#ff9800',
+                    text=f"Corto: {st_debt/1e9:.2f}B {sym}", textposition='inside'
+                ))
+                
+                # Barra de Deuda Largo Plazo
+                fig_venc.add_trace(go.Bar(
+                    y=['Estructura Actual'], x=[lt_debt], name='Deuda Largo Plazo (> 1 Año)',
+                    orientation='h', marker_color='#ff4b4b',
+                    text=f"Largo: {lt_debt/1e9:.2f}B {sym}", textposition='inside'
+                ))
+                
+                fig_venc.update_layout(
+                    barmode='stack', template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=200,
+                    hovermode="y unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+                    xaxis=dict(showticklabels=False, title="")
+                )
+                st.plotly_chart(fig_venc, use_container_width=True)
+                st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Muestra la liquidez inmediata frente a los vencimientos de deuda. La deuda a corto plazo (naranja) es la que vence en menos de 12 meses. Lo ideal es que la barra verde (Caja) sea superior a la barra naranja, indicando que la empresa no necesita emitir nueva deuda cara para pagar la que vence este año.</p>", unsafe_allow_html=True)
+            else:
+                st.info("No hay desglose de deuda a corto/largo plazo en Yahoo Finance para esta empresa.")
+
     except Exception as e:
         st.warning(f"No se han podido cargar los gráficos financieros anuales completos de Yahoo Finance. Error: {e}")
 
@@ -1052,7 +1103,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
-
 
 
 
@@ -1869,3 +1919,4 @@ with tab_cartera:
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
+
