@@ -585,9 +585,36 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### 📈 Crecimiento Anual Compuesto del Dividendo (CAGR / DGR)")
+    
+    def get_dgr_color(val):
+        if val is None: return "#aaa"
+        if val >= 10.0: return "#21c354"
+        elif val >= 7.5: return "#faca2b"
+        elif val >= 5.0: return "#ff9800"
+        elif val >= 2.5: return "#ff7043"
+        else: return "#ff4b4b"
+
+    c_dgr5 = get_dgr_color(dgr_5y)
+    c_dgrp = get_dgr_color(dgr_periodo)
+
+    v_dgr5 = f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D"
+    v_dgrp = f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D"
+
     cd1, cd2 = st.columns(2)
-    cd1.metric("DGR 5 Años (Medio Plazo)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
-    cd2.metric(f"DGR {años_analisis} Años (Periodo Actual)", f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D")
+    with cd1:
+        st.markdown(f"""
+        <div style="display: flex; flex-direction: column; margin-bottom: 1rem;">
+        <span style="font-size: 1rem; color: #c4c4cc;">DGR 5 Años (Medio Plazo)</span>
+        <span style="font-size: 2.2rem; font-weight: 700; color: {c_dgr5}; margin-top: 0.2rem; margin-bottom: 0.1rem;">{v_dgr5}</span>
+        </div>
+        """, unsafe_allow_html=True)
+    with cd2:
+        st.markdown(f"""
+        <div style="display: flex; flex-direction: column; margin-bottom: 1rem;">
+        <span style="font-size: 1rem; color: #c4c4cc;">DGR {años_analisis} Años (Periodo Actual)</span>
+        <span style="font-size: 2.2rem; font-weight: 700; color: {c_dgrp}; margin-top: 0.2rem; margin-bottom: 0.1rem;">{v_dgrp}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
     if not shares_yearly.empty and len(shares_yearly) > 1:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1358,7 +1385,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Aumentos": f"{incrementos_dividendo} {pts_aum}",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
-            # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
@@ -1919,4 +1945,3 @@ with tab_cartera:
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
-
