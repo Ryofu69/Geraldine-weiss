@@ -6,7 +6,7 @@ from datetime import datetime
 import warnings
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import io  # <-- NUEVO: Necesario para leer el texto pegado
+import io 
 
 # Ignorar advertencias menores
 warnings.filterwarnings('ignore')
@@ -418,14 +418,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
         df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
 
-        if yield_req_chowder is not None and yield_req_chowder > 0:
-            df_tech_full['Precio_Chowder'] = (df_tech_full['Div_Anual'] / yield_req_chowder) * 100
-
         if currency == 'GBp':
             for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
                 df_tech_full[col] = df_tech_full[col] / divisor_uk
-            if 'Precio_Chowder' in df_tech_full.columns:
-                df_tech_full['Precio_Chowder'] = df_tech_full['Precio_Chowder'] / divisor_uk
 
         ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
@@ -502,10 +497,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
-
-            # LÍNEA OCULTA POR DEFECTO PARA PRECIO OBJETIVO CHOWDER
-            if 'Precio_Chowder' in df_tech.columns:
-                fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
 
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False), row=2, col=1)
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False), row=3, col=1)
@@ -724,6 +715,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
     else: st.error(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
 
+    if respaldo_institucional > 0:
+        if respaldo_institucional >= 50.0: st.success(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
+        else: st.warning(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
+    else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
+
     st.divider()
     st.subheader("🥣 La Regla de Chowder")
     st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo. La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo.")
@@ -758,7 +754,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.divider()
 
     # ==========================================
-    # PANEL: ANÁLálisis Fundamental Visual
+    # PANEL: ANÁLISIS FUNDAMENTAL VISUAL
     # ==========================================
     st.markdown("### 📉 Análisis Fundamental Visual")
     
@@ -1050,8 +1046,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 
 
+
+
 # ==========================================
-# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE (MEJORADA Y CORREGIDA)
+# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
 # ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     try:
@@ -1221,7 +1219,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                         crecimiento_bpa_3y = (((eps_actual / eps_pasado) ** (1 / 3)) - 1) * 100
         except: pass
 
-        # --- CÁLCULO DE SCORE CON ETIQUETAS DE PUNTUACIÓN DE CARA AL USUARIO ---
+        # --- CÁLCULO DE SCORE ---
         score = 0.0
         
         cond_fcf = payout_fcf != -1 and payout_fcf <= payout_ama_fcf
@@ -1301,7 +1299,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Aumentos": f"{incrementos_dividendo} {pts_aum}",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
-            # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
@@ -1479,12 +1476,16 @@ with tab_masiva:
             else:
                 st.warning("No se pudieron recopilar canales históricos válidos para los tickers introducidos.")
 
-# --- PESTAÑA 3: TU CARTERA PRIVADA (MÉTODO 2 - CAJÓN DE TEXTO) ---
+# --- PESTAÑA 3: TU CARTERA PRIVADA (MOTOR CONTABLE AVANZADO) ---
 with tab_cartera:
     st.markdown("### 💼 Control de Rentabilidad en Tiempo Real")
     st.markdown("> *Privacidad garantizada: Tus datos solo se procesan en la memoria temporal de tu navegador. Ningún dato se guarda en servidores de terceros ni se sube a GitHub.*")
     
-    metodo_carga = st.radio("¿Cómo quieres cargar tu cartera?", ["📂 Subir Archivo", "📝 Pegar Texto (Recomendado si hay desconexiones en móvil)"])
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        metodo_carga = st.radio("¿Cómo quieres cargar tu cartera?", ["📂 Subir Archivo", "📝 Pegar Texto (Recomendado)"])
+    with col_c2:
+        impuesto_cart = st.number_input("Retención media de dividendos (%)", value=19.0, key="imp_cart_3")
     
     df_ops = None
     
@@ -1525,29 +1526,43 @@ with tab_cartera:
                     min_date = df_ops['Fecha'].min()
                     tickers_unicos = df_ops['Ticker'].str.strip().str.upper().unique().tolist()
                     
-                    st.write("Sincronizando cotizaciones históricas desde Yahoo Finance...")
-                    
-                    # 1. Descargar histórico de precios
+                    # 1. Descargar histórico de PRECIOS REALES (Sin Ajustar) y DIVIDENDOS
                     datos_historicos = pd.DataFrame()
-                    with st.spinner("Construyendo tu línea temporal..."):
+                    datos_dividendos = pd.DataFrame()
+                    
+                    with st.spinner("Descargando precios reales y rastreando dividendos desde Yahoo Finance..."):
                         for t in tickers_unicos:
                             try:
                                 tk = yf.Ticker(t)
-                                hist = tk.history(start=min_date)
+                                # IMPORTANTE: auto_adjust=False extrae el precio puro del mercado y aísla la columna de dividendos
+                                hist = tk.history(start=min_date, auto_adjust=False)
                                 if not hist.empty:
                                     if tk.info.get('currency') == 'GBp':
                                         hist['Close'] = hist['Close'] / 100.0
+                                        if 'Dividends' in hist.columns:
+                                            hist['Dividends'] = hist['Dividends'] / 100.0
+                                            
                                     datos_historicos[t] = hist['Close']
+                                    if 'Dividends' in hist.columns:
+                                        datos_dividendos[t] = hist['Dividends']
+                                    else:
+                                        datos_dividendos[t] = 0.0
                             except Exception:
                                 pass
                                 
                     if not datos_historicos.empty:
-                        # 2. Rellenar fechas vacías
+                        # 2. Rellenar fechas vacías (Fines de semana, festivos)
                         datos_historicos.index = datos_historicos.index.tz_localize(None).normalize()
-                        rango_fechas = pd.date_range(start=min_date.normalize(), end=pd.Timestamp.today().normalize())
-                        datos_historicos = datos_historicos.reindex(rango_fechas).ffill().fillna(0)
+                        datos_dividendos.index = datos_dividendos.index.tz_localize(None).normalize()
                         
-                        # 3. Motor contable
+                        rango_fechas = pd.date_range(start=min_date.normalize(), end=pd.Timestamp.today().normalize())
+                        
+                        # Forward fill para precios (el precio se mantiene en fin de semana)
+                        datos_historicos = datos_historicos.reindex(rango_fechas).ffill().fillna(0)
+                        # Fillna(0) para dividendos (si no hay pago ese día, el dividendo es 0)
+                        datos_dividendos = datos_dividendos.reindex(rango_fechas).fillna(0)
+                        
+                        # 3. Motor contable: Seguimiento diario de acciones y capital
                         daily_shares = pd.DataFrame(0.0, index=datos_historicos.index, columns=tickers_unicos)
                         daily_invested = pd.Series(0.0, index=datos_historicos.index)
                         
@@ -1580,10 +1595,21 @@ with tab_cartera:
                                 daily_shares.at[date, t] = current_shares.get(t, 0.0)
                             daily_invested.at[date] = total_invested
                             
-                        # 4. Calcular el Valor Real
+                        # 4. Cálculos Finales de Mercado y Dividendos
+                        # Valor de la cartera SIN contar los dividendos cobrados
                         daily_value = (daily_shares * datos_historicos).sum(axis=1)
                         
-                        # 5. Gráfico
+                        # Cálculo de dividendos exactos: multiplicamos los dividendos del día por 
+                        # las acciones que el usuario tenía en la cartera EL DÍA ANTERIOR a la fecha Ex-Div.
+                        daily_shares_shifted = daily_shares.shift(1).fillna(0)
+                        daily_gross_divs = (daily_shares_shifted * datos_dividendos).sum(axis=1)
+                        daily_net_divs = daily_gross_divs * (1 - (impuesto_cart / 100.0))
+                        
+                        # Acumulador histórico del Interés Compuesto
+                        accumulated_divs = daily_net_divs.cumsum()
+                        total_patrimonio = daily_value + accumulated_divs
+                        
+                        # 5. Gráfico de Evolución
                         st.markdown("#### 📈 Evolución de tu Patrimonio")
                         fig_cartera = go.Figure()
                         
@@ -1595,14 +1621,26 @@ with tab_cartera:
                         
                         fig_cartera.add_trace(go.Scatter(
                             x=daily_value.index, y=daily_value.values, 
-                            fill='tonexty', mode='lines', 
-                            line=dict(color='#21c354', width=2), 
-                            fillcolor='rgba(33, 195, 84, 0.15)', 
-                            name='Valor Mercado'
+                            mode='lines', line=dict(color='#21c354', width=2), 
+                            name='Valor Mercado (Precio Real)'
+                        ))
+                        
+                        fig_cartera.add_trace(go.Scatter(
+                            x=accumulated_divs.index, y=accumulated_divs.values, 
+                            fill='tozeroy', mode='lines', 
+                            line=dict(color='#00d4ff', width=2), 
+                            fillcolor='rgba(0, 212, 255, 0.15)', 
+                            name='Dividendos Netos Acumulados'
+                        ))
+                        
+                        fig_cartera.add_trace(go.Scatter(
+                            x=total_patrimonio.index, y=total_patrimonio.values, 
+                            mode='lines', line=dict(color='#e040fb', width=2.5), 
+                            name='Patrimonio Total (Mercado + Divs)'
                         ))
                         
                         fig_cartera.update_layout(
-                            template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=400,
+                            template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=450,
                             hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                             legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
                         )
@@ -1612,32 +1650,43 @@ with tab_cartera:
                         posiciones_activas = {t: current_shares[t] for t in tickers_unicos if current_shares[t] > 0.001}
                         if posiciones_activas:
                             inversion_final = daily_invested.iloc[-1]
-                            valor_final = daily_value.iloc[-1]
-                            rent_global_pct = ((valor_final - inversion_final) / inversion_final * 100) if inversion_final > 0 else 0
-                            b_l_global = valor_final - inversion_final
+                            valor_mercado_final = daily_value.iloc[-1]
+                            divs_cobrados_totales = accumulated_divs.iloc[-1]
+                            patrimonio_final = total_patrimonio.iloc[-1]
+                            
+                            b_l_mercado = valor_mercado_final - inversion_final
+                            rent_total_pct = ((patrimonio_final - inversion_final) / inversion_final * 100) if inversion_final > 0 else 0
                             
                             st.markdown("#### 🌐 Resumen Global Hoy")
-                            c1, c2, c3 = st.columns(3)
+                            c1, c2, c3, c4 = st.columns(4)
                             c1.metric("Capital Invertido", f"{inversion_final:,.2f}")
-                            c2.metric("Valor de Mercado Actual", f"{valor_final:,.2f}", f"{b_l_global:+,.2f} Absoluto")
-                            c3.metric("Rentabilidad Total Latente", f"{rent_global_pct:+.2f}%")
+                            c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f}", f"{b_l_mercado:+,.2f} Abs.")
+                            c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f}", "Caja Neta")
+                            c4.metric("Rentabilidad Total (Con Divs)", f"{rent_total_pct:+.2f}%")
+                            
+                            # Preparar la tabla desglosada
+                            divs_per_ticker = (daily_shares_shifted * datos_dividendos).sum(axis=0) * (1 - (impuesto_cart / 100.0))
                             
                             resultados_tabla = []
                             for t, acc in posiciones_activas.items():
                                 p_live = datos_historicos[t].iloc[-1]
-                                p_medio = current_cost[t] / acc
+                                p_medio = current_cost[t] / acc if acc > 0 else 0
                                 v_mercado = acc * p_live
-                                rent_pct = ((p_live - p_medio) / p_medio) * 100
-                                b_abs = v_mercado - current_cost[t]
+                                divs_cobrados_accion = divs_per_ticker[t]
+                                
+                                b_abs_mercado = v_mercado - current_cost[t]
+                                b_total = b_abs_mercado + divs_cobrados_accion
+                                rent_pct = (b_total / current_cost[t]) * 100 if current_cost[t] > 0 else 0
                                 
                                 resultados_tabla.append({
                                     "Ticker": t,
                                     "Acciones": round(acc, 4),
                                     "Precio Medio": p_medio,
                                     "Precio Live": p_live,
-                                    "Rentabilidad (%)": rent_pct,
-                                    "P/L Latente": b_abs,
-                                    "Valor Actual": v_mercado
+                                    "Valor Mercado": v_mercado,
+                                    "P/L Latente": b_abs_mercado,
+                                    "Divs. Cobrados": divs_cobrados_accion,
+                                    "Rentab. Total (%)": rent_pct
                                 })
                                 
                             st.markdown("#### 📋 Posiciones Abiertas")
@@ -1646,16 +1695,25 @@ with tab_cartera:
                             def color_rent(val):
                                 color = '#21c354' if val > 0 else '#ff4b4b'
                                 return f'color: {color}; font-weight: bold;'
+                                
+                            def color_divs(val):
+                                color = '#00d4ff' if val > 0 else '#aaaaaa'
+                                return f'color: {color};'
                             
                             formato_columnas = {
                                 "Precio Medio": "{:.2f}",
                                 "Precio Live": "{:.2f}",
-                                "Rentabilidad (%)": "{:+.2f}%",
+                                "Valor Mercado": "{:,.2f}",
                                 "P/L Latente": "{:+.2f}",
-                                "Valor Actual": "{:,.2f}"
+                                "Divs. Cobrados": "{:,.2f}",
+                                "Rentab. Total (%)": "{:+.2f}%"
                             }
                             
-                            styled_df = df_mostrar.style.format(formato_columnas).map(color_rent, subset=['Rentabilidad (%)', 'P/L Latente'])
+                            styled_df = (df_mostrar.style
+                                        .format(formato_columnas)
+                                        .map(color_rent, subset=['Rentab. Total (%)', 'P/L Latente'])
+                                        .map(color_divs, subset=['Divs. Cobrados']))
+                                        
                             st.dataframe(styled_df, use_container_width=True, hide_index=True)
                             
                             csv_export = df_mostrar.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
@@ -1671,4 +1729,3 @@ with tab_cartera:
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
-
