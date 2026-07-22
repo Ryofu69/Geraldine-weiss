@@ -498,6 +498,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
 
+            # LÍNEA OCULTA POR DEFECTO PARA PRECIO OBJETIVO CHOWDER
+            if 'Precio_Chowder' in df_tech.columns:
+                fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
+
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False), row=2, col=1)
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False), row=3, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['MACD'], name='MACD', line=dict(color='#00d4ff', width=1.5), showlegend=False), row=3, col=1)
@@ -651,7 +655,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.markdown("#### 🛡️ 2. Seguridad del Dividendo (Cobertura)")
     if 0 < payout_ratio <= payout_limite_bpa: st.success(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
     elif payout_limite_bpa < payout_ratio <= payout_amarillo_bpa: st.warning(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Atención: Excede el límite óptimo de {payout_limite_bpa:.0f}%, pero se mantiene cubierto bajo el {payout_amarillo_bpa:.0f}%)")
-    else: st.error(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y peligroso: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
+    else: st.error(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y dangerous: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
     
     if payout_forward != -1:
         if payout_forward < (payout_ratio - 1): tendencia_fw = "mejorará"
@@ -1520,20 +1524,30 @@ with tab_cartera:
                 df_ops = df_ops.dropna(subset=['Fecha', 'Ticker', 'Operacion', 'Acciones', 'Precio'])
                 df_ops = df_ops.sort_values('Fecha')
                 
-                # --- LÓGICA DE FILTRO POR AÑADAS (COHORTES) ---
+                # --- FILTROS DE CARTERA (AÑO + EMPRESA) ---
                 años_unicos = sorted(df_ops['Fecha'].dt.year.dropna().unique())
                 opciones_año = ["Todo el Historial"] + [str(int(a)) for a in años_unicos]
                 
-                st.markdown("---")
-                st.markdown("#### 🎯 Filtro Analítico de Entradas (Modo Añada)")
-                año_filtro = st.selectbox("Selecciona un año para ver si tu habilidad para comprar ha mejorado con el tiempo:", opciones_año)
+                tickers_unicos_raw = sorted(df_ops['Ticker'].str.strip().str.upper().unique().tolist())
+                opciones_ticker = ["Todas las Empresas"] + tickers_unicos_raw
                 
+                st.markdown("---")
+                st.markdown("#### 🎯 Filtros Analíticos de Cartera")
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    año_filtro = st.selectbox("📅 Selecciona Año de Compra (Modo Añada):", opciones_año)
+                with col_f2:
+                    ticker_filtro = st.selectbox("🏢 Selecciona Empresa a Inspeccionar:", opciones_ticker)
+                
+                # Aplicar filtrado dinámico
                 if año_filtro != "Todo el Historial":
-                    st.info(f"ℹ️ **Modo Añada {año_filtro} activado:** El sistema ha aislado exclusivamente las compras que hiciste durante {año_filtro} y te mostrará su rendimiento actual como si no hubieras tocado esa cartera. Las ventas se ignoran para evaluar la precisión de tu 'Stock Picking' de aquel año.")
                     df_ops = df_ops[(df_ops['Fecha'].dt.year == int(año_filtro)) & (df_ops['Operacion'].str.capitalize() == 'Compra')]
                 
+                if ticker_filtro != "Todas las Empresas":
+                    df_ops = df_ops[df_ops['Ticker'].str.strip().str.upper() == ticker_filtro]
+                
                 if df_ops.empty:
-                    st.warning("No hay operaciones válidas en la selección actual.")
+                    st.warning("No hay operaciones válidas con los filtros seleccionados.")
                 else:
                     min_date = df_ops['Fecha'].min()
                     tickers_unicos = df_ops['Ticker'].str.strip().str.upper().unique().tolist()
@@ -1546,7 +1560,6 @@ with tab_cartera:
                         for t in tickers_unicos:
                             try:
                                 tk = yf.Ticker(t)
-                                # IMPORTANTE: auto_adjust=False extrae el precio puro del mercado
                                 hist = tk.history(start=min_date, auto_adjust=False)
                                 if not hist.empty:
                                     if tk.info.get('currency') == 'GBp':
@@ -1662,13 +1675,22 @@ with tab_cartera:
                             
                             b_l_mercado = valor_mercado_final - inversion_final
                             b_total_global = b_l_mercado + divs_cobrados_totales
+                            
+                            rent_precio_global_pct = ((valor_mercado_final - inversion_final) / inversion_final * 100) if inversion_final > 0 else 0
+                            pct_divs_sobre_inversion = (divs_cobrados_totales / inversion_final * 100) if inversion_final > 0 else 0
                             rent_total_pct = ((patrimonio_final - inversion_final) / inversion_final * 100) if inversion_final > 0 else 0
                             
                             st.markdown("#### 🌐 Resumen Global Hoy")
                             c1, c2, c3, c4 = st.columns(4)
                             c1.metric("Capital Invertido", f"{inversion_final:,.2f}")
-                            c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f}", f"{b_l_mercado:+,.2f} Abs.")
-                            c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f}", "Caja Neta")
+                            
+                            # Métrica 2: Ahora con PORCENTAJE de revalorización en bolsa + absoluto
+                            c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f}", f"{rent_precio_global_pct:+.2f}% ({b_l_mercado:+,.2f} Abs.)")
+                            
+                            # Métrica 3: Ahora con PORCENTAJE de rendimiento en dividendos sobre capital
+                            c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f}", f"{pct_divs_sobre_inversion:+.2f}% del Capital")
+                            
+                            # Métrica 4: Rentabilidad total combinada
                             c4.metric("Rentab. Total (Con Divs)", f"{rent_total_pct:+.2f}%", f"{b_total_global:+,.2f} Abs. Total")
                             
                             divs_per_ticker = (daily_shares_shifted * datos_dividendos).sum(axis=0) * (1 - (impuesto_cart / 100.0))
@@ -1699,7 +1721,7 @@ with tab_cartera:
                                     "Rentab. Total (%)": rent_total_pct
                                 })
                             
-                            # Ordenar resultados de mayor a menor rentabilidad total para mejor visualización
+                            # Ordenar de mayor a menor rentabilidad total
                             resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rentab. Total (%)'], reverse=True)
                                 
                             st.markdown("#### 📋 Posiciones Abiertas (Tabla Detallada)")
@@ -1739,7 +1761,7 @@ with tab_cartera:
                                 mime="text/csv",
                             )
 
-                            # 7. GRÁFICO MOVIDO AL FINAL: Comparativa Con vs Sin Dividendos por Empresa
+                            # 7. GRÁFICO AL FINAL: Comparativa Con vs Sin Dividendos por Empresa
                             st.markdown("---")
                             st.markdown("#### 📊 Rentabilidad por Empresa (Precio vs Total con Dividendos)")
                             
