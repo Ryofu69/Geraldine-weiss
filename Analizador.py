@@ -418,14 +418,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
         df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
 
-        if yield_req_chowder is not None and yield_req_chowder > 0:
-            df_tech_full['Precio_Chowder'] = (df_tech_full['Div_Anual'] / yield_req_chowder) * 100
-
         if currency == 'GBp':
             for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
                 df_tech_full[col] = df_tech_full[col] / divisor_uk
-            if 'Precio_Chowder' in df_tech_full.columns:
-                df_tech_full['Precio_Chowder'] = df_tech_full['Precio_Chowder'] / divisor_uk
 
         ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
@@ -502,10 +497,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
-
-            # LÍNEA OCULTA POR DEFECTO PARA PRECIO OBJETIVO CHOWDER
-            if 'Precio_Chowder' in df_tech.columns:
-                fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
 
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False), row=2, col=1)
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False), row=3, col=1)
@@ -1307,6 +1298,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Aumentos": f"{incrementos_dividendo} {pts_aum}",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
+            # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
@@ -1528,7 +1520,7 @@ with tab_cartera:
                 df_ops = df_ops.dropna(subset=['Fecha', 'Ticker', 'Operacion', 'Acciones', 'Precio'])
                 df_ops = df_ops.sort_values('Fecha')
                 
-                # --- NUEVA LÓGICA DE FILTRO POR AÑADAS (COHORTES) ---
+                # --- LÓGICA DE FILTRO POR AÑADAS (COHORTES) ---
                 años_unicos = sorted(df_ops['Fecha'].dt.year.dropna().unique())
                 opciones_año = ["Todo el Historial"] + [str(int(a)) for a in años_unicos]
                 
@@ -1669,6 +1661,7 @@ with tab_cartera:
                             patrimonio_final = total_patrimonio.iloc[-1]
                             
                             b_l_mercado = valor_mercado_final - inversion_final
+                            b_total_global = b_l_mercado + divs_cobrados_totales
                             rent_total_pct = ((patrimonio_final - inversion_final) / inversion_final * 100) if inversion_final > 0 else 0
                             
                             st.markdown("#### 🌐 Resumen Global Hoy")
@@ -1676,7 +1669,7 @@ with tab_cartera:
                             c1.metric("Capital Invertido", f"{inversion_final:,.2f}")
                             c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f}", f"{b_l_mercado:+,.2f} Abs.")
                             c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f}", "Caja Neta")
-                            c4.metric("Rentabilidad Total (Con Divs)", f"{rent_total_pct:+.2f}%")
+                            c4.metric("Rentab. Total (Con Divs)", f"{rent_total_pct:+.2f}%", f"{b_total_global:+,.2f} Abs. Total")
                             
                             divs_per_ticker = (daily_shares_shifted * datos_dividendos).sum(axis=0) * (1 - (impuesto_cart / 100.0))
                             
@@ -1701,11 +1694,52 @@ with tab_cartera:
                                     "Valor Mercado": v_mercado,
                                     "P/L Latente": b_abs_mercado,
                                     "Divs. Cobrados": divs_cobrados_accion,
+                                    "Bº Total (Abs)": b_total,
                                     "Rentab. Precio (%)": rent_precio_pct,
                                     "Rentab. Total (%)": rent_total_pct
                                 })
+                            
+                            # Ordenar resultados de mayor a menor rentabilidad total para mejor visualización
+                            resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rentab. Total (%)'], reverse=True)
                                 
-                            # 7. NUEVO GRÁFICO: Comparativa Con vs Sin Dividendos por Empresa
+                            st.markdown("#### 📋 Posiciones Abiertas (Tabla Detallada)")
+                            df_mostrar = pd.DataFrame(resultados_tabla_ordenados)
+                            
+                            def color_rent(val):
+                                color = '#21c354' if val > 0 else '#ff4b4b'
+                                return f'color: {color}; font-weight: bold;'
+                                
+                            def color_divs(val):
+                                color = '#00d4ff' if val > 0 else '#aaaaaa'
+                                return f'color: {color};'
+                            
+                            formato_columnas = {
+                                "Precio Medio": "{:.2f}",
+                                "Precio Live": "{:.2f}",
+                                "Valor Mercado": "{:,.2f}",
+                                "P/L Latente": "{:+.2f}",
+                                "Divs. Cobrados": "{:,.2f}",
+                                "Bº Total (Abs)": "{:+.2f}",
+                                "Rentab. Precio (%)": "{:+.2f}%",
+                                "Rentab. Total (%)": "{:+.2f}%"
+                            }
+                            
+                            styled_df = (df_mostrar.style
+                                        .format(formato_columnas)
+                                        .map(color_rent, subset=['Rentab. Precio (%)', 'Rentab. Total (%)', 'P/L Latente', 'Bº Total (Abs)'])
+                                        .map(color_divs, subset=['Divs. Cobrados']))
+                                        
+                            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                            
+                            csv_export = df_mostrar.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+                            st.download_button(
+                                label="💾 Descargar Resumen de Cartera (CSV)",
+                                data=csv_export,
+                                file_name=f"Mi_Cartera_Live_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                                mime="text/csv",
+                            )
+
+                            # 7. GRÁFICO MOVIDO AL FINAL: Comparativa Con vs Sin Dividendos por Empresa
                             st.markdown("---")
                             st.markdown("#### 📊 Rentabilidad por Empresa (Precio vs Total con Dividendos)")
                             
@@ -1713,9 +1747,6 @@ with tab_cartera:
                             y_rent_precio = []
                             y_rent_total = []
                             colores_precio = []
-                            
-                            # Ordenar resultados de mayor a menor rentabilidad total para mejor visualización
-                            resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rentab. Total (%)'], reverse=True)
 
                             for res in resultados_tabla_ordenados:
                                 x_tickers.append(res['Ticker'])
@@ -1746,42 +1777,6 @@ with tab_cartera:
                             )
                             fig_comp.update_yaxes(title_text="Rentabilidad (%)")
                             st.plotly_chart(fig_comp, use_container_width=True)
-
-                            st.markdown("#### 📋 Posiciones Abiertas (Tabla Detallada)")
-                            df_mostrar = pd.DataFrame(resultados_tabla_ordenados)
-                            
-                            def color_rent(val):
-                                color = '#21c354' if val > 0 else '#ff4b4b'
-                                return f'color: {color}; font-weight: bold;'
-                                
-                            def color_divs(val):
-                                color = '#00d4ff' if val > 0 else '#aaaaaa'
-                                return f'color: {color};'
-                            
-                            formato_columnas = {
-                                "Precio Medio": "{:.2f}",
-                                "Precio Live": "{:.2f}",
-                                "Valor Mercado": "{:,.2f}",
-                                "P/L Latente": "{:+.2f}",
-                                "Divs. Cobrados": "{:,.2f}",
-                                "Rentab. Precio (%)": "{:+.2f}%",
-                                "Rentab. Total (%)": "{:+.2f}%"
-                            }
-                            
-                            styled_df = (df_mostrar.style
-                                        .format(formato_columnas)
-                                        .map(color_rent, subset=['Rentab. Precio (%)', 'Rentab. Total (%)', 'P/L Latente'])
-                                        .map(color_divs, subset=['Divs. Cobrados']))
-                                        
-                            st.dataframe(styled_df, use_container_width=True, hide_index=True)
-                            
-                            csv_export = df_mostrar.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
-                            st.download_button(
-                                label="💾 Descargar Resumen de Cartera (CSV)",
-                                data=csv_export,
-                                file_name=f"Mi_Cartera_Live_{datetime.now().strftime('%Y-%m-%d')}.csv",
-                                mime="text/csv",
-                            )
                             
                     else:
                         st.error("No se han podido descargar los datos históricos para las empresas de tu archivo.")
