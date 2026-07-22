@@ -385,17 +385,47 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_grafico['Precio_Justo'] = (df_grafico['Div_Grafico'] / yield_medio) * 100
         df_grafico['Precio_Venta'] = (df_grafico['Div_Grafico'] / yield_sobrevalorado) * 100
         
+        # --- CÁLCULO DE CHOWDER HISTÓRICO PARA EL GRÁFICO PRINCIPAL ---
+        rolling_5y_dgr = (dividendos_barras / dividendos_barras.shift(5)) ** (1/5) - 1
+        rolling_5y_dgr_pct = rolling_5y_dgr * 100
+        df_grafico['Year'] = df_grafico.index.year
+        df_grafico['DGR_5Y'] = df_grafico['Year'].map(rolling_5y_dgr_pct)
+        df_grafico['Yield_Diario'] = (df_grafico['Div_Grafico'] / df_grafico['Close']) * 100
+        
+        df_grafico['Chowder_Target_Hist'] = 15.0
+        df_grafico.loc[df_grafico['Yield_Diario'] >= 3.0, 'Chowder_Target_Hist'] = 12.0
+        if es_utility_pura or es_telecom:
+            df_grafico.loc[df_grafico['Yield_Diario'] > 4.0, 'Chowder_Target_Hist'] = 8.0
+            
+        df_grafico['Req_Yield_Hist'] = df_grafico['Chowder_Target_Hist'] - df_grafico['DGR_5Y']
+        
+        # Evitar picos infinitos en el gráfico si el Req_Yield es 0 o negativo
+        df_grafico['Precio_Chowder_Hist'] = np.where(
+            df_grafico['Req_Yield_Hist'] > 0.1, 
+            (df_grafico['Div_Grafico'] / df_grafico['Req_Yield_Hist']) * 100, 
+            np.nan
+        )
+        
         if currency == 'GBp':
             df_grafico['Close'] = df_grafico['Close'] / divisor_uk
             df_grafico['Precio_Compra'] = df_grafico['Precio_Compra'] / divisor_uk
             df_grafico['Precio_Justo'] = df_grafico['Precio_Justo'] / divisor_uk
             df_grafico['Precio_Venta'] = df_grafico['Precio_Venta'] / divisor_uk
+            df_grafico['Precio_Chowder_Hist'] = df_grafico['Precio_Chowder_Hist'] / divisor_uk
+            
+        # Recortar picos absurdos visuales para no deformar el eje Y
+        max_price_chart = df_grafico['Close'].max() * 3
+        df_grafico['Precio_Chowder_Hist'] = df_grafico['Precio_Chowder_Hist'].clip(upper=max_price_chart)
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Venta'], name='Franja Sobrevalorada (Venta)', line=dict(color='#ff4b4b', width=2)))
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dash')))
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Compra'], name='Franja Infravalorada (Compra)', line=dict(color='#21c354', width=2)))
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Close'], name='Cotización Real', line=dict(color='#00d4ff', width=3)))
+        
+        # LÍNEA HISTÓRICA DE CHOWDER OCULTA POR DEFECTO
+        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Chowder_Hist'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=2, dash='dashdot'), showlegend=True, visible='legendonly'))
+
         fig.update_layout(
             template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), 
             legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5), 
@@ -403,6 +433,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         )
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
+        st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Muestra la evolución del precio real frente a las franjas de valoración de Weiss. <b>💡 CONSEJO CHOWDER:</b> En la leyenda puedes hacer clic para activar la línea oculta 'Precio Obj. Chowder' y ver a qué precio debías haber comprado en el pasado para superar la regla basándote en el crecimiento de los 5 años anteriores de cada época.</p>", unsafe_allow_html=True)
 
     st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
@@ -416,14 +447,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
         df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
 
-        if yield_req_chowder is not None and yield_req_chowder > 0:
-            df_tech_full['Precio_Chowder'] = (df_tech_full['Div_Anual'] / yield_req_chowder) * 100
-
         if currency == 'GBp':
             for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
                 df_tech_full[col] = df_tech_full[col] / divisor_uk
-            if 'Precio_Chowder' in df_tech_full.columns:
-                df_tech_full['Precio_Chowder'] = df_tech_full['Precio_Chowder'] / divisor_uk
 
         ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
@@ -500,10 +526,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
-
-            # LÍNEA OCULTA POR DEFECTO PARA PRECIO OBJETIVO CHOWDER
-            if 'Precio_Chowder' in df_tech.columns:
-                fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
 
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False), row=2, col=1)
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False), row=3, col=1)
@@ -858,7 +880,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_sost = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_sost.add_trace(go.Bar(x=x_years, y=fcf_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
                 fig_sost.add_trace(go.Bar(x=x_years, y=div_vals, name='Dividendos', marker_color='#ff9800'), secondary_y=False)
-                fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout FCF %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in payout_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#ff4b4b', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout FCF %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in payout_vals], textposition="top center", textfont=dict(color="#ff4b4b", size=11, weight="bold"), line=dict(color='#ff4b4b', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_sost.update_layout(
                     template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -883,7 +905,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_ing = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_ing.add_trace(go.Bar(x=x_years_rev, y=rev_vals, name='Ingresos', marker_color='#21c354'), secondary_y=False)
                 fig_ing.add_trace(go.Bar(x=x_years_rev, y=net_vals, name='B. Neto', marker_color='#faca2b'), secondary_y=False)
-                fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in margin_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#00d4ff', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f"{val:.1f}%" for val in margin_vals], textposition="top center", textfont=dict(color="#00d4ff", size=11, weight="bold"), line=dict(color='#00d4ff', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_ing.update_layout(
                     template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -917,7 +939,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_ev = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_ev.add_trace(go.Bar(x=x_years_ev, y=ev_vals, name='Enterprise Value (EV)', marker_color='#9c27b0'), secondary_y=False)
                 fig_ev.add_trace(go.Bar(x=x_years_ev, y=fcf_ev_vals, name='FCF', marker_color='#00d4ff'), secondary_y=False)
-                fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/FCF', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_vals], textposition="top center", textfont=dict(color="white", size=11, weight="bold"), line=dict(color='#21c354', width=2), marker=dict(size=8)), secondary_y=True)
+                fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/FCF', mode='lines+markers+text', text=[f"{val:.1f}x" for val in ratio_vals], textposition="top center", textfont=dict(color="#21c354", size=11, weight="bold"), line=dict(color='#21c354', width=2), marker=dict(size=8)), secondary_y=True)
                 fig_ev.update_layout(
                     template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0),
                     height=300, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -971,7 +993,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             for y in years_debt:
                 d = debt_s.get(y, 0)
                 c = cash_s.get(y, 0)
-                nd = max(0, d - c) # Evitamos deudas negativas visualmente
+                nd = max(0, d - c) 
                 net_debt_vals.append(nd)
             
             ratio_d_vals = [(nd/fcf) if fcf > 0 else 0 for nd, fcf in zip(net_debt_vals, fcf_d_vals)]
@@ -1053,9 +1075,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 
 
-
 # ==========================================
-# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE (MEJORADA Y CORREGIDA)
+# 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
 # ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     try:
