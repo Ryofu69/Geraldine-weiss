@@ -366,10 +366,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     # --- AVISO CHOWDER ---
     if chowder_number is not None:
         if chowder_pass:
-            st.success(f"🥣 **REGLA DE CHOWDER: APROBADA ({chowder_number:.1f})** — Supera el objetivo exigido de {chowder_target:.0f}[span_0](start_span)[span_0](end_span).")
+            st.success(f"🥣 **REGLA DE CHOWDER: APROBADA ({chowder_number:.1f})** — Supera el objetivo exigido de {chowder_target:.0f}.")
         else:
             txt_precio_c = f" Cotiza a {precio_actual / divisor_uk:.2f}{sym} y debería cotizar a {precio_obj_chowder / divisor_uk:.2f}{sym} para cumplir." if (precio_obj_chowder is not None and yield_req_chowder > 0) else ""
-            st.error(f"🥣 **REGLA DE CHOWDER: SUSPENSA ({chowder_number:.1f})** — No alcanza el objetivo exigido de {chowder_target:.0f}[span_1](start_span)[span_1](end_span).{txt_precio_c}")
+            st.error(f"🥣 **REGLA DE CHOWDER: SUSPENSA ({chowder_number:.1f})** — No alcanza el objetivo exigido de {chowder_target:.0f}.{txt_precio_c}")
     else:
         st.info("🥣 **REGLA DE CHOWDER: N/D** — No hay datos de crecimiento a 5 años suficientes para su cálculo.")
 
@@ -417,14 +417,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
         df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
 
-        if yield_req_chowder is not None and yield_req_chowder > 0:
-            df_tech_full['Precio_Chowder'] = (df_tech_full['Div_Anual'] / yield_req_chowder) * 100
-
         if currency == 'GBp':
             for col in ['Open', 'High', 'Low', 'Close', 'Precio_Compra', 'Precio_Justo', 'Precio_Venta']: 
                 df_tech_full[col] = df_tech_full[col] / divisor_uk
-            if 'Precio_Chowder' in df_tech_full.columns:
-                df_tech_full['Precio_Chowder'] = df_tech_full['Precio_Chowder'] / divisor_uk
 
         ema12 = df_tech_full['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df_tech_full['Close'].ewm(span=26, adjust=False).mean()
@@ -501,10 +496,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
-
-            # LÍNEA OCULTA POR DEFECTO PARA PRECIO OBJETIVO CHOWDER
-            if 'Precio_Chowder' in df_tech.columns:
-                fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
 
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False), row=2, col=1)
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Histogram'], name='Histograma', marker_color=colors_hist, showlegend=False), row=3, col=1)
@@ -730,7 +721,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
     st.subheader("🥣 La Regla de Chowder")
-    st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo[span_2](start_span)[span_2](end_span). La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo[span_3](start_span)[span_3](end_span).")
+    st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo. La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo.")
     
     col_c1, col_c2, col_c3, col_c4 = st.columns(4)
     col_c1.metric("Yield Actual", f"{yield_actual:.2f}%")
@@ -751,13 +742,13 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     st.markdown("#### 📐 Criterios de Aprobación de esta empresa")
     if (es_utility_pura or es_telecom) and yield_actual > 4.0:
-        st.info("Al pertenecer a un sector hiper-estable regulado (Utilities/Telecom) y tener un Yield inicial > 4%, se le aplica la **excepción de Chowder**, bajando el objetivo de puntuación a **≥ 8**[span_4](start_span)[span_4](end_span).")
+        st.info("Al pertenecer a un sector hiper-estable regulado (Utilities/Telecom) y tener un Yield inicial > 4%, se le aplica la **excepción de Chowder**, bajando el objetivo de puntuación a **≥ 8**.")
     elif yield_actual >= 3.0:
-        st.info("Al ofrecer un Yield inicial atractivo (≥ 3.0%), se le exige un objetivo Chowder estándar de **≥ 12**[span_5](start_span)[span_5](end_span).")
+        st.info("Al ofrecer un Yield inicial atractivo (≥ 3.0%), se le exige un objetivo Chowder estándar de **≥ 12**.")
     else:
-        st.info("Al ofrecer un Yield inicial bajo (< 3.0%), se le exige mayor crecimiento para compensar, con un objetivo Chowder estricto de **≥ 15**[span_6](start_span)[span_6](end_span).")
+        st.info("Al ofrecer un Yield inicial bajo (< 3.0%), se le exige mayor crecimiento para compensar, con un objetivo Chowder estricto de **≥ 15**.")
     
-    st.markdown("*Nota: Los números mágicos de 12 y 15 buscan emular o superar la media histórica del S&P 500 (8%), permitiendo que la rentabilidad sobre coste (YoC) de tu cartera se duplique cíclicamente[span_7](start_span)[span_7](end_span).*")
+    st.markdown("*Nota: Los números mágicos de 12 y 15 buscan emular o superar la media histórica del S&P 500 (8%), permitiendo que la rentabilidad sobre coste (YoC) de tu cartera se duplique cíclicamente.*")
 
     st.divider()
 
@@ -1113,7 +1104,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         if currency == 'GBp' and forward_dividend > 0:
             if forward_dividend < (precio_actual / 10): forward_dividend *= 100
 
-        # FIX AÑADIDO: REEMPLAZAR EL AÑO ACTUAL INCOMPLETO POR EL FORWARD DIVIDEND
         dividendos_barras = divs_por_año.copy()
         if año_actual in dividendos_barras.index:
             dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
@@ -1225,7 +1215,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                         crecimiento_bpa_3y = (((eps_actual / eps_pasado) ** (1 / 3)) - 1) * 100
         except: pass
 
-        # --- CÁLCULO DE SCORE CON ETIQUETAS DE PUNTUACIÓN DE CARA AL USUARIO ---
+        # --- CÁLCULO DE SCORE ---
         score = 0.0
         
         cond_fcf = payout_fcf != -1 and payout_fcf <= payout_ama_fcf
@@ -1305,7 +1295,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Aumentos": f"{incrementos_dividendo} {pts_aum}",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
-            # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
@@ -1332,7 +1321,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
 # ==========================================
 st.title("Sistema Fundamental - Método Geraldine Weiss")
 
-tab_individual, tab_masiva = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Múltiple (Radar)"])
+tab_individual, tab_masiva, tab_cartera = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Múltiple (Radar)", "💼 Mi Cartera Privada"])
 
 with tab_individual:
     col_input1, col_input2, col_input3 = st.columns(3)
@@ -1483,3 +1472,126 @@ with tab_masiva:
             else:
                 st.warning("No se pudieron recopilar canales históricos válidos para los tickers introducidos.")
 
+# --- PESTAÑA 3: TU CARTERA PRIVADA (MÉTODO 1 - SUBIDA EN RAM) ---
+with tab_cartera:
+    st.markdown("### 💼 Control de Rentabilidad en Tiempo Real")
+    st.markdown("> *Privacidad garantizada: Este archivo solo se lee en la memoria temporal de tu navegador. Ningún dato se guarda en el servidor ni se sube a GitHub.*")
+    
+    archivo_subido = st.file_uploader("Sube tu historial de operaciones (CSV o Excel)", type=["csv", "xlsx"])
+    
+    if archivo_subido is not None:
+        try:
+            # Autodetección robusta del separador para CSVs en español
+            if archivo_subido.name.endswith('.csv'):
+                df_ops = pd.read_csv(archivo_subido, sep=None, engine='python')
+            else:
+                df_ops = pd.read_excel(archivo_subido)
+                
+            columnas_requeridas = ['Ticker', 'Operacion', 'Acciones', 'Precio']
+            if not all(col in df_ops.columns for col in columnas_requeridas):
+                st.error(f"❌ Error de formato. El archivo debe contener exactamente estas columnas (respetando mayúsculas): {', '.join(columnas_requeridas)}")
+            else:
+                cartera = {}
+                for index, row in df_ops.iterrows():
+                    t = str(row['Ticker']).strip().upper()
+                    op = str(row['Operacion']).strip().capitalize()
+                    try:
+                        acc = float(row['Acciones'])
+                        precio = float(row['Precio'])
+                    except ValueError:
+                        continue # Ignorar filas vacías o con errores de texto
+                    
+                    if t not in cartera:
+                        cartera[t] = {'acciones': 0.0, 'coste_total': 0.0}
+                        
+                    if op == 'Compra':
+                        cartera[t]['acciones'] += acc
+                        cartera[t]['coste_total'] += (acc * precio)
+                    elif op == 'Venta':
+                        if cartera[t]['acciones'] > 0:
+                            precio_medio_actual = cartera[t]['coste_total'] / cartera[t]['acciones']
+                            cartera[t]['acciones'] -= acc
+                            cartera[t]['coste_total'] -= (acc * precio_medio_actual)
+                
+                posiciones_activas = {k: v for k, v in cartera.items() if v['acciones'] > 0.001}
+                
+                if not posiciones_activas:
+                    st.info("No tienes posiciones abiertas o tu archivo está vacío.")
+                else:
+                    resultados_cartera = []
+                    inversion_total = 0.0
+                    valor_actual_total = 0.0
+                    
+                    st.write("Sincronizando cotizaciones en directo desde Yahoo Finance...")
+                    progreso = st.progress(0)
+                    
+                    for i, (ticker_cartera, datos) in enumerate(posiciones_activas.items()):
+                        try:
+                            tk = yf.Ticker(ticker_cartera)
+                            hist = tk.history(period="1d")
+                            
+                            if not hist.empty:
+                                precio_live = hist['Close'].iloc[-1]
+                                currency = tk.info.get('currency', 'USD')
+                                if currency == 'GBp': 
+                                    precio_live = precio_live / 100.0
+                                    
+                                precio_medio = datos['coste_total'] / datos['acciones']
+                                valor_mercado = datos['acciones'] * precio_live
+                                rentabilidad_pct = ((precio_live - precio_medio) / precio_medio) * 100
+                                beneficio_abs = valor_mercado - datos['coste_total']
+                                
+                                inversion_total += datos['coste_total']
+                                valor_actual_total += valor_mercado
+                                
+                                resultados_cartera.append({
+                                    "Ticker": ticker_cartera,
+                                    "Acciones": round(datos['acciones'], 4),
+                                    "Precio Medio": precio_medio,
+                                    "Precio Live": precio_live,
+                                    "Rentabilidad (%)": rentabilidad_pct,
+                                    "P/L Latente": beneficio_abs,
+                                    "Valor Actual": valor_mercado
+                                })
+                        except Exception:
+                            pass
+                        progreso.progress((i + 1) / len(posiciones_activas))
+                    
+                    if resultados_cartera:
+                        rent_global_pct = ((valor_actual_total - inversion_total) / inversion_total) * 100
+                        b_l_global = valor_actual_total - inversion_total
+                        
+                        st.markdown("#### 🌐 Resumen Global")
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Capital Invertido", f"{inversion_total:,.2f}")
+                        c2.metric("Valor de Mercado Actual", f"{valor_actual_total:,.2f}", f"{b_l_global:+,.2f} Absoluto")
+                        c3.metric("Rentabilidad Total Latente", f"{rent_global_pct:+.2f}%")
+                        
+                        st.markdown("#### 📋 Posiciones Abiertas")
+                        df_mostrar = pd.DataFrame(resultados_cartera)
+                        
+                        def color_rent(val):
+                            color = '#21c354' if val > 0 else '#ff4b4b'
+                            return f'color: {color}; font-weight: bold;'
+                        
+                        formato_columnas = {
+                            "Precio Medio": "{:.2f}",
+                            "Precio Live": "{:.2f}",
+                            "Rentabilidad (%)": "{:+.2f}%",
+                            "P/L Latente": "{:+.2f}",
+                            "Valor Actual": "{:,.2f}"
+                        }
+                        
+                        styled_df = df_mostrar.style.format(formato_columnas).map(color_rent, subset=['Rentabilidad (%)', 'P/L Latente'])
+                        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                        
+                        csv_export = df_mostrar.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+                        st.download_button(
+                            label="💾 Descargar Resumen de Cartera (CSV)",
+                            data=csv_export,
+                            file_name=f"Mi_Cartera_Live_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                            mime="text/csv",
+                        )
+                        
+        except Exception as e:
+            st.error(f"No se pudo procesar el archivo. Detalle del error: {e}")
