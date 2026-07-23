@@ -406,7 +406,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- ESTADÍSTICAS DE TOQUES ZONAS (HTML ARREGLADO) ---
+        # --- ESTADÍSTICAS DE TOQUES ZONAS ---
         is_compra = df_grafico['Close'] <= df_grafico['Precio_Compra']
         toques_compra = (is_compra & ~is_compra.shift(1, fill_value=False)).sum()
         
@@ -435,26 +435,26 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         str_ultima_venta, color_ult_venta = format_last_time(is_venta, "#ff4b4b")
 
         html_stats = f"""
-<div style="background-color: rgba(255, 255, 255, 0.05); padding: 15px 20px; border-radius: 5px; margin-top: -15px; margin-bottom: 20px;">
-    <div style="font-size: 0.85rem; color: #aaa; margin-bottom: 12px; font-weight: 600; letter-spacing: 1px;">HISTÓRICO {años_analisis}A</div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-        <span style="font-size: 1rem;"><span style="color: #21c354; font-weight: 900; margin-right: 8px;">—</span>Toques zona compra</span>
-        <span style="color: #21c354; font-weight: bold; font-size: 1.1rem;">{toques_compra}</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; color: #ccc;">
-        <span style="padding-left: 24px;">Última vez</span>
-        <span style="color: {color_ult_compra}; font-weight: 500;">{str_ultima_compra}</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-        <span style="font-size: 1rem;"><span style="color: #ff4b4b; font-weight: 900; margin-right: 8px;">—</span>Toques zona venta</span>
-        <span style="color: #ff4b4b; font-weight: bold; font-size: 1.1rem;">{toques_venta}</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #ccc;">
-        <span style="padding-left: 24px;">Última vez</span>
-        <span style="color: {color_ult_venta}; font-weight: 500;">{str_ultima_venta}</span>
-    </div>
-</div>
-"""
+        <div style="background-color: rgba(255, 255, 255, 0.05); padding: 15px 20px; border-radius: 5px; margin-top: -15px; margin-bottom: 20px;">
+            <div style="font-size: 0.85rem; color: #aaa; margin-bottom: 12px; font-weight: 600; letter-spacing: 1px;">HISTÓRICO {años_analisis}A</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 1rem;"><span style="color: #21c354; font-weight: 900; margin-right: 8px;">—</span>Toques zona compra</span>
+                <span style="color: #21c354; font-weight: bold; font-size: 1.1rem;">{toques_compra}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; color: #ccc;">
+                <span style="padding-left: 24px;">Última vez</span>
+                <span style="color: {color_ult_compra}; font-weight: 500;">{str_ultima_compra}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 1rem;"><span style="color: #ff4b4b; font-weight: 900; margin-right: 8px;">—</span>Toques zona venta</span>
+                <span style="color: #ff4b4b; font-weight: bold; font-size: 1.1rem;">{toques_venta}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #ccc;">
+                <span style="padding-left: 24px;">Última vez</span>
+                <span style="color: {color_ult_venta}; font-weight: 500;">{str_ultima_venta}</span>
+            </div>
+        </div>
+        """
         st.markdown(html_stats, unsafe_allow_html=True)
 
 
@@ -572,6 +572,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.plotly_chart(fig_tech, use_container_width=True)
         else: st.info("No hay suficientes datos recientes en Yahoo Finance para dibujar el panel de 2 meses.")
     else: st.info("No hay suficientes datos históricos en Yahoo Finance para calcular el panel técnico (MACD/Volumen).")
+
+
+
+
+
 
     st.divider()
     st.subheader("📊 Beneficios, Proyecciones y Acciones")
@@ -802,6 +807,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
     else: st.error(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
 
+    if respaldo_institucional > 0:
+        if respaldo_institucional >= 50.0: st.success(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
+        else: st.warning(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
+    else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
+
     st.divider()
     st.subheader("🥣 La Regla de Chowder")
     st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo. La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo.")
@@ -940,6 +950,16 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             
             fig_yoc_hist = go.Figure()
             
+            # Líneas horizontales de zonas de valoración
+            fig_yoc_hist.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", opacity=0.6)
+            fig_yoc_hist.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", opacity=0.6)
+            fig_yoc_hist.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", opacity=0.6)
+
+            # Trazos invisibles para la leyenda
+            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
+            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
+            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
+
             fig_yoc_hist.add_trace(go.Scatter(
                 x=df_yoc_hist.index, y=historial_analisis['Yield_Diario'], mode='lines',
                 line=dict(color='rgba(255, 255, 255, 0.4)', width=1.5), name='Yield Histórico (En su día)'
@@ -959,7 +979,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
             fig_yoc_hist.update_layout(
                 template='plotly_dark', margin=dict(l=0, r=0, t=20, b=50),
-                height=350, yaxis=dict(title="Rentabilidad (%)", tickformat=".2f"), hovermode="x unified",
+                height=400, yaxis=dict(title="Rentabilidad (%)", tickformat=".2f"), hovermode="x unified",
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=True,
                 legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
             )
@@ -1224,9 +1244,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc_p, use_container_width=True)
-
-# FIN DE LA FUNCIÓN DE ANÁLISIS INDIVIDUAL
-
 
 
 
@@ -2041,3 +2058,4 @@ with tab_cartera:
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
+
