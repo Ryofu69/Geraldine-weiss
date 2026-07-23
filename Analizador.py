@@ -1239,9 +1239,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
 
 
-
-
-
 # ==========================================
 # 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
 # ==========================================
