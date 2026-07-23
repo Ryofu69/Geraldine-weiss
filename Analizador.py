@@ -406,7 +406,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- NUEVO: ESTADÍSTICAS DE TOQUES ZONAS (COMPRA/VENTA) ---
+        # --- NUEVO: ESTADÍSTICAS DE TOQUES ZONAS (COMPRA/VENTA) SIN INDENTAR HTML ---
         is_compra = df_grafico['Close'] <= df_grafico['Precio_Compra']
         toques_compra = (is_compra & ~is_compra.shift(1, fill_value=False)).sum()
         
@@ -434,29 +434,28 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         str_ultima_compra, color_ult_compra = format_last_time(is_compra, "#21c354")
         str_ultima_venta, color_ult_venta = format_last_time(is_venta, "#ff4b4b")
 
-        st.markdown(f"""
-        <div style="background-color: rgba(255, 255, 255, 0.05); padding: 15px 20px; border-radius: 5px; margin-top: -15px; margin-bottom: 20px;">
-            <div style="font-size: 0.85rem; color: #aaa; margin-bottom: 12px; font-weight: 600; letter-spacing: 1px;">HISTÓRICO {años_analisis}A</div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-size: 1rem;"><span style="color: #21c354; font-weight: 900; margin-right: 8px;">—</span>Toques zona compra</span>
-                <span style="color: #21c354; font-weight: bold; font-size: 1.1rem;">{toques_compra}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; color: #ccc;">
-                <span style="padding-left: 24px;">Última vez</span>
-                <span style="color: {color_ult_compra}; font-weight: 500;">{str_ultima_compra}</span>
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-size: 1rem;"><span style="color: #ff4b4b; font-weight: 900; margin-right: 8px;">—</span>Toques zona venta</span>
-                <span style="color: #ff4b4b; font-weight: bold; font-size: 1.1rem;">{toques_venta}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #ccc;">
-                <span style="padding-left: 24px;">Última vez</span>
-                <span style="color: {color_ult_venta}; font-weight: 500;">{str_ultima_venta}</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        html_stats = f"""
+<div style="background-color: rgba(255, 255, 255, 0.05); padding: 15px 20px; border-radius: 5px; margin-top: -15px; margin-bottom: 20px;">
+    <div style="font-size: 0.85rem; color: #aaa; margin-bottom: 12px; font-weight: 600; letter-spacing: 1px;">HISTÓRICO {años_analisis}A</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-size: 1rem;"><span style="color: #21c354; font-weight: 900; margin-right: 8px;">—</span>Toques zona compra</span>
+        <span style="color: #21c354; font-weight: bold; font-size: 1.1rem;">{toques_compra}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; color: #ccc;">
+        <span style="padding-left: 24px;">Última vez</span>
+        <span style="color: {color_ult_compra}; font-weight: 500;">{str_ultima_compra}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-size: 1rem;"><span style="color: #ff4b4b; font-weight: 900; margin-right: 8px;">—</span>Toques zona venta</span>
+        <span style="color: #ff4b4b; font-weight: bold; font-size: 1.1rem;">{toques_venta}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #ccc;">
+        <span style="padding-left: 24px;">Última vez</span>
+        <span style="color: {color_ult_venta}; font-weight: 500;">{str_ultima_venta}</span>
+    </div>
+</div>
+"""
+        st.markdown(html_stats, unsafe_allow_html=True)
 
 
     st.divider()
@@ -882,18 +881,15 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             df_yield_chart = yields_validos.copy()
             fig_yield = go.Figure()
             
-            # Trazos reales de la cotización
             fig_yield.add_trace(go.Scatter(
                 x=df_yield_chart.index, y=df_yield_chart.values, mode='lines',
                 line=dict(color='#00d4ff', width=2), name='Histórico', showlegend=False
             ))
             
-            # Lineas horizontales (usamos add_hline sin leyenda nativa para evitar bugs visuales)
             fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b")
             fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354")
             fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b")
 
-            # Trazos invisibles exclusivos para forzar una leyenda interactiva limpia
             fig_yield.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
             fig_yield.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
             fig_yield.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
@@ -933,7 +929,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.plotly_chart(fig_dd, use_container_width=True)
             st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Mide la caída porcentual de la acción desde su último máximo histórico. Es la mejor forma de evaluar la volatilidad real de la empresa y detectar correcciones de mercado severas.</p>", unsafe_allow_html=True)
 
-        # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN (MODIFICADO)
+        # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN
         st.markdown("---")
         st.markdown("#### ⏳ Yield on Cost Histórico")
         st.markdown(f"> **Yield on Cost (YoC):** Muestra el Yield Actual ({yield_actual:.2f}%) que tendrías hoy si hubieras comprado la acción en cualquier fecha del pasado. Calculado dividiendo el dividendo actual ({forward_dividend / divisor_uk:.2f}{sym}) entre el precio histórico de cada día.")
@@ -950,13 +946,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             
             fig_yoc_hist = go.Figure()
             
-            # 1. Yield Histórico (El que había en ese momento) - Semitransparente al fondo
             fig_yoc_hist.add_trace(go.Scatter(
                 x=df_yoc_hist.index, y=historial_analisis['Yield_Diario'], mode='lines',
                 line=dict(color='rgba(255, 255, 255, 0.4)', width=1.5), name='Yield Histórico (En su día)'
             ))
 
-            # 2. Yield on Cost (Línea principal en dorado)
             fig_yoc_hist.add_trace(go.Scatter(
                 x=df_yoc_hist.index, y=df_yoc_hist['YoC_Hist'], mode='lines',
                 line=dict(color='#faca2b', width=2), name='Yield on Cost (Hoy)'
@@ -1236,6 +1230,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
+
+
+
 
 
 
