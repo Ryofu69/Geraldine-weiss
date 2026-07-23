@@ -406,7 +406,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- NUEVO: ESTADÍSTICAS DE TOQUES ZONAS (COMPRA/VENTA) SIN INDENTAR HTML ---
+        # --- ESTADÍSTICAS DE TOQUES ZONAS (HTML ARREGLADO) ---
         is_compra = df_grafico['Close'] <= df_grafico['Precio_Compra']
         toques_compra = (is_compra & ~is_compra.shift(1, fill_value=False)).sum()
         
@@ -555,7 +555,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
 
-            # LÍNEA OCULTA POR DEFECTO PARA PRECIO OBJETIVO CHOWDER
             if 'Precio_Chowder' in df_tech.columns:
                 fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
 
@@ -609,7 +608,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     if price_to_book > 0:
         if es_financiera or es_industrial: pb_optimo, pb_max = 1.5, 2.5; txt_opt = "Óptimo < 1.5x (Fin/Ind)"
-        elif es_tecnologica: pb_optimo, pb_max = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
+        elif es_tecnologica: l_tech, l_amarillo = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
         else: pb_optimo, pb_max = 2.5, 5.0; txt_opt = "Óptimo < 2.5x (General)"
         pb_color = "off" if price_to_book <= pb_optimo else "inverse"
         cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", txt_opt, delta_color=pb_color)
@@ -802,11 +801,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.markdown("#### 🏢 5. Fortaleza Institucional")
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
     else: st.error(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
-
-    if respaldo_institucional > 0:
-        if respaldo_institucional >= 50.0: st.success(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
-        else: st.warning(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
-    else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
 
     st.divider()
     st.subheader("🥣 La Regla de Chowder")
@@ -1212,26 +1206,26 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.markdown(f"> **Cálculo de la proyección:** Basado en {txt_ritmo} con un <span style='color:{color_linea};'>**{signo_dgr}{dgr_proyeccion:.1f}% anual constante**</span>.", unsafe_allow_html=True)
 
-    fig_yoc = go.Figure()
-    fig_yoc.add_trace(go.Bar(
+    fig_yoc_p = go.Figure()
+    fig_yoc_p.add_trace(go.Bar(
         x=x_labels_yoc, y=div_bruto_proyectado, name=f'Div. Esperado ({sym})', marker_color=color_barras, yaxis='y1', 
         text=[f"{val:.2f}{sym}" for val in div_bruto_proyectado], textposition='auto'
     ))
-    fig_yoc.add_trace(go.Scatter(
+    fig_yoc_p.add_trace(go.Scatter(
         x=x_labels_yoc, y=yoc_neto_lista, name="YoC Neto (%)", mode='lines+markers', 
         line=dict(color=color_linea, width=3), marker=dict(size=8), yaxis='y2'
     ))
     
-    fig_yoc.update_layout(
+    fig_yoc_p.update_layout(
         template='plotly_dark', margin=dict(l=0, r=0, t=10, b=40), height=350, hovermode="x unified", 
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
         yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color=color_barras)), tickfont=dict(color=color_barras)), 
         yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), 
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
-    st.plotly_chart(fig_yoc, use_container_width=True)
+    st.plotly_chart(fig_yoc_p, use_container_width=True)
 
-
+# FIN DE LA FUNCIÓN DE ANÁLISIS INDIVIDUAL
 
 
 
@@ -1487,7 +1481,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Aumentos": f"{incrementos_dividendo} {pts_aum}",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A) {pts_hist}",
             
-            # --- COLUMNAS INVISIBLES PARA LÓGICA DE COLORES ---
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
