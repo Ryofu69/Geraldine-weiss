@@ -880,7 +880,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.plotly_chart(fig_dd, use_container_width=True)
             st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Mide la caída porcentual de la acción desde su último máximo histórico. Es la mejor forma de evaluar la volatilidad real de la empresa y detectar correcciones de mercado severas.</p>", unsafe_allow_html=True)
 
-        # 1.5. YIELD ON COST HISTÓRICO (MOVIDO AQUÍ)
+        # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN (MODIFICADO)
         st.markdown("---")
         st.markdown("#### ⏳ Yield on Cost Histórico")
         st.markdown(f"> **Yield on Cost (YoC):** Muestra el Yield Actual ({yield_actual:.2f}%) que tendrías hoy si hubieras comprado la acción en cualquier fecha del pasado. Calculado dividiendo el dividendo actual ({forward_dividend / divisor_uk:.2f}{sym}) entre el precio histórico de cada día.")
@@ -896,12 +896,20 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             df_yoc_hist['YoC_Hist'] = (forward_dividend / df_yoc_hist['Close_Div']) * 100
             
             fig_yoc_hist = go.Figure()
+            
+            # 1. Yield Histórico (El que había en ese momento) - Semitransparente al fondo
+            fig_yoc_hist.add_trace(go.Scatter(
+                x=df_yoc_hist.index, y=historial_analisis['Yield_Diario'], mode='lines',
+                line=dict(color='rgba(255, 255, 255, 0.4)', width=1.5), name='Yield Histórico (En su día)'
+            ))
+
+            # 2. Yield on Cost (Línea principal en dorado)
             fig_yoc_hist.add_trace(go.Scatter(
                 x=df_yoc_hist.index, y=df_yoc_hist['YoC_Hist'], mode='lines',
-                line=dict(color='#faca2b', width=2), name='YoC Histórico'
+                line=dict(color='#faca2b', width=2), name='Yield on Cost (Hoy)'
             ))
             
-            fig_yoc_hist.add_hline(y=yield_actual, line_dash="dash", line_color="#00d4ff", name="Yield Actual Hoy")
+            fig_yoc_hist.add_hline(y=yield_actual, line_dash="dash", line_color="#00d4ff")
             
             fig_yoc_hist.add_annotation(
                 x=df_yoc_hist.index[-1], y=yield_actual, text=f"Yield Hoy: {yield_actual:.2f}%", 
@@ -909,9 +917,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             )
 
             fig_yoc_hist.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0),
-                height=350, yaxis=dict(title="YoC (%)", tickformat=".2f"), hovermode="x unified",
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False
+                template='plotly_dark', margin=dict(l=0, r=0, t=20, b=50),
+                height=350, yaxis=dict(title="Rentabilidad (%)", tickformat=".2f"), hovermode="x unified",
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=True,
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
             )
             fig_yoc_hist.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
             st.plotly_chart(fig_yoc_hist, use_container_width=True)
@@ -1174,7 +1183,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
-
 
 
 
