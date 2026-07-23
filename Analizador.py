@@ -406,6 +406,59 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
 
+        # --- NUEVO: ESTADÍSTICAS DE TOQUES ZONAS (COMPRA/VENTA) ---
+        is_compra = df_grafico['Close'] <= df_grafico['Precio_Compra']
+        toques_compra = (is_compra & ~is_compra.shift(1, fill_value=False)).sum()
+        
+        is_venta = df_grafico['Close'] >= df_grafico['Precio_Venta']
+        toques_venta = (is_venta & ~is_venta.shift(1, fill_value=False)).sum()
+        
+        def format_last_time(is_zone_series, active_color):
+            if is_zone_series.sum() == 0:
+                return "Nunca", "#aaa"
+            if is_zone_series.iloc[-1]:
+                return "Ahora", active_color
+            
+            last_date = is_zone_series[is_zone_series].index[-1]
+            days_diff = (pd.Timestamp.now().normalize() - last_date.tz_localize(None).normalize()).days
+            
+            if days_diff < 30:
+                return f"hace {days_diff} días", "#ccc"
+            elif days_diff < 365:
+                meses = days_diff // 30
+                return f"hace {meses} meses", "#ccc"
+            else:
+                anios = days_diff / 365.25
+                return f"hace {anios:.1f}a".replace(".", ","), "#ccc"
+
+        str_ultima_compra, color_ult_compra = format_last_time(is_compra, "#21c354")
+        str_ultima_venta, color_ult_venta = format_last_time(is_venta, "#ff4b4b")
+
+        st.markdown(f"""
+        <div style="background-color: rgba(255, 255, 255, 0.05); padding: 15px 20px; border-radius: 5px; margin-top: -15px; margin-bottom: 20px;">
+            <div style="font-size: 0.85rem; color: #aaa; margin-bottom: 12px; font-weight: 600; letter-spacing: 1px;">HISTÓRICO {años_analisis}A</div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 1rem;"><span style="color: #21c354; font-weight: 900; margin-right: 8px;">—</span>Toques zona compra</span>
+                <span style="color: #21c354; font-weight: bold; font-size: 1.1rem;">{toques_compra}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; color: #ccc;">
+                <span style="padding-left: 24px;">Última vez</span>
+                <span style="color: {color_ult_compra}; font-weight: 500;">{str_ultima_compra}</span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 1rem;"><span style="color: #ff4b4b; font-weight: 900; margin-right: 8px;">—</span>Toques zona venta</span>
+                <span style="color: #ff4b4b; font-weight: bold; font-size: 1.1rem;">{toques_venta}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #ccc;">
+                <span style="padding-left: 24px;">Última vez</span>
+                <span style="color: {color_ult_venta}; font-weight: 500;">{str_ultima_venta}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
     st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
     st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
@@ -678,7 +731,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     if price_to_book > 0:
         if es_financiera or es_industrial: l_verde, l_amarillo = 1.5, 2.5; ctx = "Sector Fin/Ind (Exige P/B estricto)"
-        elif es_tecnologica: l_verde, l_amarillo = 5.0, 10.0; ctx = "Sector Tech/Software (P/B alto por intangibles)"
+        elif es_tecnologica: l_tech, l_amarillo = 5.0, 10.0; ctx = "Sector Tech/Software (P/B alto por intangibles)"
         else: l_verde, l_amarillo = 2.5, 5.0; ctx = "Sector General"
         if price_to_book <= l_verde: st.success(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Atractivo)")
         elif price_to_book <= l_amarillo: st.warning(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Exigente, pero en el límite)")
@@ -1183,6 +1236,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc, use_container_width=True)
+
+
 
 
 
