@@ -1067,7 +1067,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 fig_venc.update_layout(
                     barmode='stack', template='plotly_dark', margin=dict(l=0, r=0, t=30, b=80), height=250,
                     hovermode="y unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    # Leyenda empujada violentamente hacia abajo (-0.5) para que no pise los controles
                     legend=dict(orientation="h", yanchor="top", y=-0.5, xanchor="center", x=0.5),
                     xaxis=dict(showticklabels=False, title="")
                 )
@@ -1081,6 +1080,46 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
+    # 9. YIELD ON COST HISTÓRICO (NUEVO)
+    st.markdown("#### ⏳ Yield on Cost Histórico")
+    st.markdown(f"> **Yield on Cost (YoC):** Muestra el Yield Actual ({yield_actual:.2f}%) que tendrías hoy si hubieras comprado la acción en cualquier fecha del pasado. Calculado dividiendo el dividendo actual ({forward_dividend / divisor_uk:.2f}{sym}) entre el precio histórico de cada día.")
+    
+    if not historial_analisis.empty and forward_dividend > 0:
+        df_yoc_hist = historial_analisis[['Close']].copy()
+        
+        if currency == 'GBp':
+            df_yoc_hist['Close_Div'] = df_yoc_hist['Close'] / divisor_uk
+        else:
+            df_yoc_hist['Close_Div'] = df_yoc_hist['Close']
+            
+        df_yoc_hist['YoC_Hist'] = (forward_dividend / df_yoc_hist['Close_Div']) * 100
+        
+        fig_yoc_hist = go.Figure()
+        fig_yoc_hist.add_trace(go.Scatter(
+            x=df_yoc_hist.index, y=df_yoc_hist['YoC_Hist'], mode='lines',
+            line=dict(color='#faca2b', width=2), name='YoC Histórico'
+        ))
+        
+        fig_yoc_hist.add_hline(y=yield_actual, line_dash="dash", line_color="#00d4ff", name="Yield Actual Hoy")
+        
+        fig_yoc_hist.add_annotation(
+            x=df_yoc_hist.index[-1], y=yield_actual, text=f"Yield Hoy: {yield_actual:.2f}%", 
+            showarrow=False, yshift=15, font=dict(color="#00d4ff", size=11, weight="bold"), xanchor="right"
+        )
+
+        fig_yoc_hist.update_layout(
+            template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0),
+            height=300, yaxis=dict(title="YoC (%)", tickformat=".2f"), hovermode="x unified",
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False
+        )
+        fig_yoc_hist.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+        st.plotly_chart(fig_yoc_hist, use_container_width=True)
+    else:
+        st.info("Datos insuficientes para calcular el Yield on Cost histórico.")
+
+    st.divider()
+
+    # 10. PROYECCIÓN YOC
     st.markdown("#### 🔮 Proyección de Rentabilidad sobre Coste (Yield on Cost a 15 Años)")
     
     val_5y = dgr_5y if dgr_5y is not None else None
@@ -1128,7 +1167,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     ))
     
     fig_yoc.update_layout(
-        template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=350, hovermode="x unified", 
+        template='plotly_dark', margin=dict(l=0, r=0, t=10, b=40), height=350, hovermode="x unified", 
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
         yaxis=dict(title=dict(text=f"Dividendo ({sym})", font=dict(color=color_barras)), tickfont=dict(color=color_barras)), 
         yaxis2=dict(title=dict(text="YoC Neto (%)", font=dict(color="#faca2b")), tickfont=dict(color="#faca2b"), overlaying='y', side='right', showgrid=False), 
@@ -1952,3 +1991,4 @@ with tab_cartera:
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
+
