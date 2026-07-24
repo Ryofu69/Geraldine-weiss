@@ -1334,7 +1334,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             except: return default
             
         dividendos = ticker.dividends
-        historial = ticker.history(period="15y")
+        historial = ticker.history(period="15y", auto_adjust=False)
         
         if dividendos.empty or len(historial) < 252: 
             return None
