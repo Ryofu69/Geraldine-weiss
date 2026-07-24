@@ -1177,6 +1177,89 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             else:
                 st.info("No hay desglose de deuda a corto/largo plazo en Yahoo Finance para esta empresa.")
 
+            # --- 9. CRECIMIENTO: FCF POR ACCIÓN VS COTIZACIÓN (INDEXADO A 0%) ---
+        st.markdown("---")
+        st.markdown("#### 🚀 Crecimiento: FCF por Acción vs Cotización (Indexado a 0%)")
+        
+        # Intersecar los años donde tenemos tanto FCF como Acciones en circulación
+        years_fcf_share = sorted(list(set(fcf_s.index) & set(shares_s.index)))
+        if len(years_fcf_share) > 1:
+            fcf_share_dict = {}
+            for y in years_fcf_share:
+                if shares_s[y] > 0:
+                    fcf_share_dict[y] = fcf_s[y] / shares_s[y]
+            
+            if len(fcf_share_dict) > 1:
+                df_fcf_share = pd.Series(fcf_share_dict)
+                start_year = df_fcf_share.index[0]
+                base_fcf = df_fcf_share.iloc[0]
+                
+                # Solo podemos indexar si la caja base es positiva
+                if base_fcf > 0: 
+                    fcf_indexed = ((df_fcf_share / base_fcf) - 1) * 100
+                    
+                    # Convertir los años a fechas (31 de diciembre) para alinear con los precios diarios
+                    fcf_dates = pd.to_datetime([f"{y}-12-31" for y in fcf_indexed.index])
+                    fcf_indexed.index = fcf_dates
+                    
+                    # Extraer el histórico de precios desde el inicio del primer año contable
+                    start_date = pd.to_datetime(f"{start_year}-01-01")
+                    df_price_chart = historial_analisis[historial_analisis.index >= start_date]['Close'].copy()
+                    
+                    if not df_price_chart.empty:
+                        if currency == 'GBp':
+                            df_price_chart = df_price_chart / divisor_uk
+                            
+                        base_price = df_price_chart.iloc[0]
+                        price_indexed = ((df_price_chart / base_price) - 1) * 100
+                        
+                        # Calcular CAGR
+                        years_passed_fcf = fcf_dates[-1].year - start_year
+                        cagr_fcf = (((df_fcf_share.iloc[-1] / base_fcf) ** (1/years_passed_fcf)) - 1) * 100 if years_passed_fcf > 0 else 0
+                        
+                        days_passed_price = (df_price_chart.index[-1] - df_price_chart.index[0]).days
+                        years_passed_price = days_passed_price / 365.25
+                        cagr_price = (((df_price_chart.iloc[-1] / base_price) ** (1/years_passed_price)) - 1) * 100 if years_passed_price > 0 else 0
+                        
+                        fig_fcf_price = go.Figure()
+                        
+                        # Trazado de la Cotización (Línea Naranja continua)
+                        fig_fcf_price.add_trace(go.Scatter(
+                            x=price_indexed.index, y=price_indexed.values,
+                            mode='lines', line=dict(color='#ff9800', width=2),
+                            name=f"{ticker_symbol} - Stock Price (Total Change: {price_indexed.iloc[-1]:.2f}%) (CAGR: {cagr_price:.1f}%)"
+                        ))
+                        
+                        # Trazado del FCF por Acción (Línea Azul con marcadores y etiquetas)
+                        fig_fcf_price.add_trace(go.Scatter(
+                            x=fcf_indexed.index, y=fcf_indexed.values,
+                            mode='lines+markers+text', line=dict(color='#00d4ff', width=3),
+                            marker=dict(size=8),
+                            text=[f"{val:.1f}%" for val in fcf_indexed.values], textposition="top left", textfont=dict(color="#00d4ff", size=11, weight="bold"),
+                            name=f"{ticker_symbol} - FCF per Share (Total Change: {fcf_indexed.iloc[-1]:.2f}%) (CAGR: {cagr_fcf:.1f}%)"
+                        ))
+                        
+                        # Línea base del 0%
+                        fig_fcf_price.add_hline(y=0, line_width=1, line_color="rgba(255,255,255,0.2)", line_dash="dash")
+                        
+                        fig_fcf_price.update_layout(
+                            template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=500,
+                            hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                            legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+                            yaxis=dict(title="Crecimiento Acumulado (%)", tickformat=".0f", ticksuffix="%")
+                        )
+                        st.plotly_chart(fig_fcf_price, use_container_width=True)
+                        st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Compara el crecimiento acumulado del Flujo de Caja Libre por Acción (Azul) frente al Precio de la Acción (Naranja), partiendo de 0%. Si el precio crece mucho más rápido que el FCF, indica una expansión de múltiplos (sobrevaloración o altas expectativas). Si el FCF crece a mayor ritmo que el precio, sugiere compresión de múltiplos (infravaloración).</p>", unsafe_allow_html=True)
+                    else:
+                        st.info("No hay suficientes datos históricos de precio para comparar con el FCF.")
+                else:
+                    st.info(f"El Flujo de Caja Libre base en {start_year} era negativo o nulo, no se puede calcular un índice de crecimiento porcentual matemático sobre 0.")
+            else:
+                st.info("Datos insuficientes para calcular el FCF por Acción a lo largo del tiempo.")
+        else:
+            st.info("No se han encontrado datos históricos suficientes de FCF o Acciones en circulación en YFinance para elaborar este gráfico.")
+
+    
     except Exception as e:
         st.warning(f"No se han podido cargar los gráficos financieros anuales completos de Yahoo Finance. Error: {e}")
 
