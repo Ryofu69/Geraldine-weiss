@@ -64,7 +64,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     elif currency == 'GBp': sym = '£'; divisor_uk = 100.0 
     else: sym = '$' 
 
-    historial_completo = ticker.history(period="max")
+    historial_completo = ticker.history(period="max", auto_adjust=False)
     dividendos = ticker.dividends
     
     if dividendos.empty or len(historial_completo) < 252:
