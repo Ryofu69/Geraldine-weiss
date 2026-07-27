@@ -64,6 +64,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     elif currency == 'GBp': sym = '£'; divisor_uk = 100.0 
     else: sym = '$' 
 
+    # IMPORTANTE: auto_adjust=False para usar precios puros (ajustados por splits, pero no por dividendos)
     historial_completo = ticker.history(period="max", auto_adjust=False)
     dividendos = ticker.dividends
     
@@ -302,6 +303,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else:
         chowder_number = None
         chowder_pass = False
+
     # ==========================================
     # INTERFAZ VISUAL STREAMLIT
     # ==========================================
@@ -456,7 +458,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         """
         st.markdown(html_stats, unsafe_allow_html=True)
 
-    st.divider()
+st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
     st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
 
@@ -487,8 +489,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech = df_tech_full[df_tech_full.index >= fecha_display].copy()
 
         if not df_tech.empty:
+            
             ult_close_val = precio_actual / divisor_uk
             ult_suelo_val = precio_compra / divisor_uk
+            
             precio_str = f"{ult_close_val:.2f}{sym}"
             suelo_str = f"{ult_suelo_val:.2f}{sym}"
 
@@ -798,11 +802,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
     else: st.error(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
 
-    if respaldo_institucional > 0:
-        if respaldo_institucional >= 50.0: st.success(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
-        else: st.warning(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
-    else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
-
     st.divider()
     st.subheader("🥣 La Regla de Chowder")
     st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo. La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo.")
@@ -836,7 +835,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
-    # ==========================================
+# ==========================================
     # PANEL: ANÁLISIS FUNDAMENTAL VISUAL
     # ==========================================
     st.markdown("### 📉 Análisis Fundamental Visual")
@@ -924,7 +923,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.plotly_chart(fig_dd, use_container_width=True)
             st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Mide la caída porcentual de la acción desde su último máximo histórico. Es la mejor forma de evaluar la volatilidad real de la empresa y detectar correcciones de mercado severas.</p>", unsafe_allow_html=True)
 
-        # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN (¡AQUÍ ESTÁ LA CORRECCIÓN!)
+        # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN
         st.markdown("---")
         st.markdown("#### ⏳ Yield on Cost Histórico")
         st.markdown(f"> **Yield on Cost (YoC):** Muestra el Yield Actual ({yield_actual:.2f}%) que tendrías hoy si hubieras comprado la acción en cualquier fecha del pasado. Calculado dividiendo el dividendo actual ({forward_dividend / divisor_uk:.2f}{sym}) entre el precio histórico de cada día.")
@@ -941,12 +940,14 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             
             fig_yoc_hist = go.Figure()
             
-            # Líneas horizontales de zonas de valoración
             fig_yoc_hist.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", opacity=0.6)
             fig_yoc_hist.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", opacity=0.6)
             fig_yoc_hist.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", opacity=0.6)
 
-            # AÑADIR PRIMERO LOS DATOS REALES (Configura el Eje X como Fechas)
+            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
+            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
+            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
+
             fig_yoc_hist.add_trace(go.Scatter(
                 x=df_yoc_hist.index, y=historial_analisis['Yield_Diario'], mode='lines',
                 line=dict(color='rgba(255, 255, 255, 0.4)', width=1.5), name='Yield Histórico (En su día)'
@@ -956,11 +957,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 x=df_yoc_hist.index, y=df_yoc_hist['YoC_Hist'], mode='lines',
                 line=dict(color='#faca2b', width=2), name='Yield on Cost (Hoy)'
             ))
-
-            # AÑADIR DESPUÉS LOS TRAZOS INVISIBLES PARA LA LEYENDA
-            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
-            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
-            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
             
             fig_yoc_hist.add_hline(y=yield_actual, line_dash="dash", line_color="#00d4ff")
             
@@ -1177,89 +1173,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             else:
                 st.info("No hay desglose de deuda a corto/largo plazo en Yahoo Finance para esta empresa.")
 
-            # --- 9. CRECIMIENTO: FCF POR ACCIÓN VS COTIZACIÓN (INDEXADO A 0%) ---
-        st.markdown("---")
-        st.markdown("#### 🚀 Crecimiento: FCF por Acción vs Cotización (Indexado a 0%)")
-        
-        # Intersecar los años donde tenemos tanto FCF como Acciones en circulación
-        years_fcf_share = sorted(list(set(fcf_s.index) & set(shares_s.index)))
-        if len(years_fcf_share) > 1:
-            fcf_share_dict = {}
-            for y in years_fcf_share:
-                if shares_s[y] > 0:
-                    fcf_share_dict[y] = fcf_s[y] / shares_s[y]
-            
-            if len(fcf_share_dict) > 1:
-                df_fcf_share = pd.Series(fcf_share_dict)
-                start_year = df_fcf_share.index[0]
-                base_fcf = df_fcf_share.iloc[0]
-                
-                # Solo podemos indexar si la caja base es positiva
-                if base_fcf > 0: 
-                    fcf_indexed = ((df_fcf_share / base_fcf) - 1) * 100
-                    
-                    # Convertir los años a fechas (31 de diciembre) para alinear con los precios diarios
-                    fcf_dates = pd.to_datetime([f"{y}-12-31" for y in fcf_indexed.index])
-                    fcf_indexed.index = fcf_dates
-                    
-                    # Extraer el histórico de precios desde el inicio del primer año contable
-                    start_date = pd.to_datetime(f"{start_year}-01-01")
-                    df_price_chart = historial_analisis[historial_analisis.index >= start_date]['Close'].copy()
-                    
-                    if not df_price_chart.empty:
-                        if currency == 'GBp':
-                            df_price_chart = df_price_chart / divisor_uk
-                            
-                        base_price = df_price_chart.iloc[0]
-                        price_indexed = ((df_price_chart / base_price) - 1) * 100
-                        
-                        # Calcular CAGR
-                        years_passed_fcf = fcf_dates[-1].year - start_year
-                        cagr_fcf = (((df_fcf_share.iloc[-1] / base_fcf) ** (1/years_passed_fcf)) - 1) * 100 if years_passed_fcf > 0 else 0
-                        
-                        days_passed_price = (df_price_chart.index[-1] - df_price_chart.index[0]).days
-                        years_passed_price = days_passed_price / 365.25
-                        cagr_price = (((df_price_chart.iloc[-1] / base_price) ** (1/years_passed_price)) - 1) * 100 if years_passed_price > 0 else 0
-                        
-                        fig_fcf_price = go.Figure()
-                        
-                        # Trazado de la Cotización (Línea Naranja continua)
-                        fig_fcf_price.add_trace(go.Scatter(
-                            x=price_indexed.index, y=price_indexed.values,
-                            mode='lines', line=dict(color='#ff9800', width=2),
-                            name=f"{ticker_symbol} - Stock Price (Total Change: {price_indexed.iloc[-1]:.2f}%) (CAGR: {cagr_price:.1f}%)"
-                        ))
-                        
-                        # Trazado del FCF por Acción (Línea Azul con marcadores y etiquetas)
-                        fig_fcf_price.add_trace(go.Scatter(
-                            x=fcf_indexed.index, y=fcf_indexed.values,
-                            mode='lines+markers+text', line=dict(color='#00d4ff', width=3),
-                            marker=dict(size=8),
-                            text=[f"{val:.1f}%" for val in fcf_indexed.values], textposition="top left", textfont=dict(color="#00d4ff", size=11, weight="bold"),
-                            name=f"{ticker_symbol} - FCF per Share (Total Change: {fcf_indexed.iloc[-1]:.2f}%) (CAGR: {cagr_fcf:.1f}%)"
-                        ))
-                        
-                        # Línea base del 0%
-                        fig_fcf_price.add_hline(y=0, line_width=1, line_color="rgba(255,255,255,0.2)", line_dash="dash")
-                        
-                        fig_fcf_price.update_layout(
-                            template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=500,
-                            hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                            legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
-                            yaxis=dict(title="Crecimiento Acumulado (%)", tickformat=".0f", ticksuffix="%")
-                        )
-                        st.plotly_chart(fig_fcf_price, use_container_width=True)
-                        st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Compara el crecimiento acumulado del Flujo de Caja Libre por Acción (Azul) frente al Precio de la Acción (Naranja), partiendo de 0%. Si el precio crece mucho más rápido que el FCF, indica una expansión de múltiplos (sobrevaloración o altas expectativas). Si el FCF crece a mayor ritmo que el precio, sugiere compresión de múltiplos (infravaloración).</p>", unsafe_allow_html=True)
-                    else:
-                        st.info("No hay suficientes datos históricos de precio para comparar con el FCF.")
-                else:
-                    st.info(f"El Flujo de Caja Libre base en {start_year} era negativo o nulo, no se puede calcular un índice de crecimiento porcentual matemático sobre 0.")
-            else:
-                st.info("Datos insuficientes para calcular el FCF por Acción a lo largo del tiempo.")
-        else:
-            st.info("No se han encontrado datos históricos suficientes de FCF o Acciones en circulación en YFinance para elaborar este gráfico.")
-
-    
     except Exception as e:
         st.warning(f"No se han podido cargar los gráficos financieros anuales completos de Yahoo Finance. Error: {e}")
 
@@ -1319,6 +1232,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig_yoc_p, use_container_width=True)
+
 # ==========================================
 # 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
 # ==========================================
@@ -1334,7 +1248,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             except: return default
             
         dividendos = ticker.dividends
-        historial = ticker.history(period="15y", auto_adjust=False)
+        historial = ticker.history(period="15y")
         
         if dividendos.empty or len(historial) < 252: 
             return None
@@ -1590,24 +1504,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         }
     except:
         return None
-
-# ==========================================
-# 3. MAQUETACIÓN EN PESTAÑAS (UI)
-# ==========================================
-st.title("Sistema Fundamental - Método Geraldine Weiss")
-
-tab_individual, tab_masiva, tab_cartera = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Múltiple (Radar)", "💼 Mi Cartera Privada"])
-
-with tab_individual:
-    col_input1, col_input2, col_input3 = st.columns(3)
-    with col_input1: ticker_input = st.text_input("Ticker individual:", "NVO").upper()
-    with col_input2: años_analisis = st.selectbox("Periodo Histórico:", [5, 10, 12, 15, 20], index=2)
-    with col_input3: impuesto = st.number_input("Retención (%)", value=19.0, key="imp_ind")
-
-    if st.button("Analizar Empresa"):
-        with st.spinner(f"Analizando {ticker_input} en profundidad..."):
-            try: screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
-            except Exception as e: st.error(f"Se ha producido un error: {e}")
 
 with tab_masiva:
     st.markdown("### 📡 Radar Fundamental Completo por Lotes")
