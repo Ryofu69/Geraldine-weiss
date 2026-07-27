@@ -455,8 +455,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         </div>
         """
         st.markdown(html_stats, unsafe_allow_html=True)
-
-    st.divider()
+        st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
     st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
 
@@ -825,7 +824,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.markdown("*Nota: Los números mágicos de 12 y 15 buscan emular o superar la media histórica del S&P 500 (8%), permitiendo que la rentabilidad sobre coste (YoC) de tu cartera se duplique cíclicamente.*")
 
     st.divider()
-
+    
     # ==========================================
     # PANEL: ANÁLISIS FUNDAMENTAL VISUAL
     # ==========================================
@@ -866,18 +865,22 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             df_yield_chart = yields_validos.copy()
             fig_yield = go.Figure()
             
+            # Trazos reales de la cotización
             fig_yield.add_trace(go.Scatter(
                 x=df_yield_chart.index, y=df_yield_chart.values, mode='lines',
                 line=dict(color='#00d4ff', width=2), name='Histórico', showlegend=False
             ))
             
+            # Lineas horizontales (usamos add_hline sin leyenda nativa para evitar bugs visuales)
             fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b")
             fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354")
             fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b")
 
-            fig_yield.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
-            fig_yield.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
-            fig_yield.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
+            # Trazos invisibles exclusivos para forzar una leyenda interactiva limpia
+            primera_fecha_yield = df_yield_chart.index[0]
+            fig_yield.add_trace(go.Scatter(x=[primera_fecha_yield], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
+            fig_yield.add_trace(go.Scatter(x=[primera_fecha_yield], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
+            fig_yield.add_trace(go.Scatter(x=[primera_fecha_yield], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
             fig_yield.add_trace(go.Scatter(
                 x=[df_yield_chart.index[-1]], y=[df_yield_chart.iloc[-1]], mode='markers',
                 marker=dict(color='#00d4ff', size=10, symbol='diamond'), name=f"Actual: {yield_actual:.2f}%"
@@ -921,7 +924,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         
         if not historial_analisis.empty and forward_dividend > 0:
             df_yoc_hist = historial_analisis[['Close', 'Yield_Diario']].copy()
-            # EVITAR ERRORES DE DATOS VACÍOS PARA QUE PLOTLY NO COLAPSE EL EJE X
             df_yoc_hist = df_yoc_hist.dropna(subset=['Close', 'Yield_Diario'])
             
             if currency == 'GBp':
@@ -931,20 +933,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 
             df_yoc_hist['YoC_Hist'] = (forward_dividend / df_yoc_hist['Close_Div']) * 100
             
-            # FILTRO EXTRA POR SI ALGUN PRECIO ES CERO Y DA INFINITO
             df_yoc_hist.replace([np.inf, -np.inf], np.nan, inplace=True)
             df_yoc_hist = df_yoc_hist.dropna(subset=['YoC_Hist'])
             
             fig_yoc_hist = go.Figure()
             
-            fig_yoc_hist.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", opacity=0.6)
-            fig_yoc_hist.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", opacity=0.6)
-            fig_yoc_hist.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", opacity=0.6)
-
-            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
-            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
-            fig_yoc_hist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
-
+            # 1. Trazos principales PRIMERO para fijar el eje X en modo Datetime
             fig_yoc_hist.add_trace(go.Scatter(
                 x=df_yoc_hist.index, y=df_yoc_hist['Yield_Diario'], mode='lines',
                 line=dict(color='rgba(255, 255, 255, 0.4)', width=1.5), name='Yield Histórico (En su día)'
@@ -954,6 +948,17 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 x=df_yoc_hist.index, y=df_yoc_hist['YoC_Hist'], mode='lines',
                 line=dict(color='#faca2b', width=2), name='Yield on Cost (Hoy)'
             ))
+
+            # 2. Líneas horizontales de zonas de valoración
+            fig_yoc_hist.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", opacity=0.6)
+            fig_yoc_hist.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", opacity=0.6)
+            fig_yoc_hist.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", opacity=0.6)
+
+            # 3. Trazos invisibles para la leyenda con FECHA REAL para no romper el eje
+            primera_fecha = df_yoc_hist.index[0]
+            fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
+            fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
+            fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
             
             fig_yoc_hist.add_hline(y=yield_actual, line_dash="dash", line_color="#00d4ff")
             
@@ -1502,24 +1507,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     except:
         return None
 
-# ==========================================
-# 3. MAQUETACIÓN EN PESTAÑAS (UI)
-# ==========================================
-st.title("Sistema Fundamental - Método Geraldine Weiss")
-
-tab_individual, tab_masiva, tab_cartera = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Múltiple (Radar)", "💼 Mi Cartera Privada"])
-
-with tab_individual:
-    col_input1, col_input2, col_input3 = st.columns(3)
-    with col_input1: ticker_input = st.text_input("Ticker individual:", "NVO").upper()
-    with col_input2: años_analisis = st.selectbox("Periodo Histórico:", [5, 10, 12, 15, 20], index=2)
-    with col_input3: impuesto = st.number_input("Retención (%)", value=19.0, key="imp_ind")
-
-    if st.button("Analizar Empresa"):
-        with st.spinner(f"Analizando {ticker_input} en profundidad..."):
-            try: screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
-            except Exception as e: st.error(f"Se ha producido un error: {e}")
-
 with tab_masiva:
     st.markdown("### 📡 Radar Fundamental Completo por Lotes")
     st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** respecto al Suelo Fundamental.")
@@ -2016,3 +2003,4 @@ with tab_cartera:
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
+            
