@@ -105,7 +105,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     historial_analisis.loc[historial_analisis['Year'] == año_actual, 'Div_Anual'] = forward_dividend
     historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
 
+    # Calculamos el Yield y eliminamos cualquier Infinito provocado por Cierres a 0.00
     historial_analisis['Yield_Diario'] = (historial_analisis['Div_Anual'] / historial_analisis['Close']) * 100
+    historial_analisis.replace([np.inf, -np.inf], np.nan, inplace=True)
 
     yields_validos = historial_analisis['Yield_Diario'].dropna()
     yields_validos = yields_validos[yields_validos > 0]
@@ -455,7 +457,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         """
         st.markdown(html_stats, unsafe_allow_html=True)
 
-    st.divider()
+st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
     st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
 
@@ -598,7 +600,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     if price_to_book > 0:
         if es_financiera or es_industrial: pb_optimo, pb_max = 1.5, 2.5; txt_opt = "Óptimo < 1.5x (Fin/Ind)"
-        elif es_tecnologica: pb_optimo, pb_max = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
+        elif es_tecnologica: l_tech, l_amarillo = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
         else: pb_optimo, pb_max = 2.5, 5.0; txt_opt = "Óptimo < 2.5x (General)"
         pb_color = "off" if price_to_book <= pb_optimo else "inverse"
         cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", txt_opt, delta_color=pb_color)
@@ -719,7 +721,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     if price_to_book > 0:
         if es_financiera or es_industrial: l_verde, l_amarillo = 1.5, 2.5; ctx = "Sector Fin/Ind (Exige P/B estricto)"
-        elif es_tecnologica: l_verde, l_amarillo = 5.0, 10.0; ctx = "Sector Tech/Software (P/B alto por intangibles)"
+        elif es_tecnologica: l_tech, l_amarillo = 5.0, 10.0; ctx = "Sector Tech/Software (P/B alto por intangibles)"
         else: l_verde, l_amarillo = 2.5, 5.0; ctx = "Sector General"
         if price_to_book <= l_verde: st.success(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Atractivo)")
         elif price_to_book <= l_amarillo: st.warning(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Exigente, pero en el límite)")
@@ -792,11 +794,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
     else: st.error(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
 
-    if respaldo_institucional > 0:
-        if respaldo_institucional >= 50.0: st.success(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
-        else: st.warning(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
-    else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
-
     st.divider()
     st.subheader("🥣 La Regla de Chowder")
     st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo. La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo.")
@@ -830,7 +827,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.divider()
 
-    # ==========================================
+# ==========================================
     # PANEL: ANÁLISIS FUNDAMENTAL VISUAL
     # ==========================================
     st.markdown("### 📉 Análisis Fundamental Visual")
@@ -918,14 +915,14 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.plotly_chart(fig_dd, use_container_width=True)
             st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Mide la caída porcentual de la acción desde su último máximo histórico. Es la mejor forma de evaluar la volatilidad real de la empresa y detectar correcciones de mercado severas.</p>", unsafe_allow_html=True)
 
-        # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN
+        # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN (MODIFICADO Y SOLUCIONADO)
         st.markdown("---")
         st.markdown("#### ⏳ Yield on Cost Histórico")
         st.markdown(f"> **Yield on Cost (YoC):** Muestra el Yield Actual ({yield_actual:.2f}%) que tendrías hoy si hubieras comprado la acción en cualquier fecha del pasado. Calculado dividiendo el dividendo actual ({forward_dividend / divisor_uk:.2f}{sym}) entre el precio histórico de cada día.")
         
         if not historial_analisis.empty and forward_dividend > 0:
             df_yoc_hist = historial_analisis[['Close', 'Yield_Diario']].copy()
-            df_yoc_hist = df_yoc_hist.dropna(subset=['Yield_Diario'])
+            df_yoc_hist = df_yoc_hist.dropna(subset=['Close', 'Yield_Diario'])
             
             if currency == 'GBp':
                 df_yoc_hist['Close_Div'] = df_yoc_hist['Close'] / divisor_uk
@@ -1500,24 +1497,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         }
     except:
         return None
-
-# ==========================================
-# 3. MAQUETACIÓN EN PESTAÑAS (UI)
-# ==========================================
-st.title("Sistema Fundamental - Método Geraldine Weiss")
-
-tab_individual, tab_masiva, tab_cartera = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Múltiple (Radar)", "💼 Mi Cartera Privada"])
-
-with tab_individual:
-    col_input1, col_input2, col_input3 = st.columns(3)
-    with col_input1: ticker_input = st.text_input("Ticker individual:", "NVO").upper()
-    with col_input2: años_analisis = st.selectbox("Periodo Histórico:", [5, 10, 12, 15, 20], index=2)
-    with col_input3: impuesto = st.number_input("Retención (%)", value=19.0, key="imp_ind")
-
-    if st.button("Analizar Empresa"):
-        with st.spinner(f"Analizando {ticker_input} en profundidad..."):
-            try: screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
-            except Exception as e: st.error(f"Se ha producido un error: {e}")
 
 with tab_masiva:
     st.markdown("### 📡 Radar Fundamental Completo por Lotes")
