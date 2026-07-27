@@ -434,28 +434,29 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         str_ultima_venta, color_ult_venta = format_last_time(is_venta, "#ff4b4b")
 
         html_stats = f"""
-        <div style="background-color: rgba(255, 255, 255, 0.05); padding: 15px 20px; border-radius: 5px; margin-top: -15px; margin-bottom: 20px;">
-            <div style="font-size: 0.85rem; color: #aaa; margin-bottom: 12px; font-weight: 600; letter-spacing: 1px;">HISTÓRICO {años_analisis}A</div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-size: 1rem;"><span style="color: #21c354; font-weight: 900; margin-right: 8px;">—</span>Toques zona compra</span>
-                <span style="color: #21c354; font-weight: bold; font-size: 1.1rem;">{toques_compra}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; color: #ccc;">
-                <span style="padding-left: 24px;">Última vez</span>
-                <span style="color: {color_ult_compra}; font-weight: 500;">{str_ultima_compra}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-size: 1rem;"><span style="color: #ff4b4b; font-weight: 900; margin-right: 8px;">—</span>Toques zona venta</span>
-                <span style="color: #ff4b4b; font-weight: bold; font-size: 1.1rem;">{toques_venta}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #ccc;">
-                <span style="padding-left: 24px;">Última vez</span>
-                <span style="color: {color_ult_venta}; font-weight: 500;">{str_ultima_venta}</span>
-            </div>
-        </div>
-        """
+<div style="background-color: rgba(255, 255, 255, 0.05); padding: 15px 20px; border-radius: 5px; margin-top: -15px; margin-bottom: 20px;">
+    <div style="font-size: 0.85rem; color: #aaa; margin-bottom: 12px; font-weight: 600; letter-spacing: 1px;">HISTÓRICO {años_analisis}A</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-size: 1rem;"><span style="color: #21c354; font-weight: 900; margin-right: 8px;">—</span>Toques zona compra</span>
+        <span style="color: #21c354; font-weight: bold; font-size: 1.1rem;">{toques_compra}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; color: #ccc;">
+        <span style="padding-left: 24px;">Última vez</span>
+        <span style="color: {color_ult_compra}; font-weight: 500;">{str_ultima_compra}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-size: 1rem;"><span style="color: #ff4b4b; font-weight: 900; margin-right: 8px;">—</span>Toques zona venta</span>
+        <span style="color: #ff4b4b; font-weight: bold; font-size: 1.1rem;">{toques_venta}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #ccc;">
+        <span style="padding-left: 24px;">Última vez</span>
+        <span style="color: {color_ult_venta}; font-weight: 500;">{str_ultima_venta}</span>
+    </div>
+</div>
+"""
         st.markdown(html_stats, unsafe_allow_html=True)
-        st.divider()
+
+    st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
     st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
 
@@ -598,7 +599,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     if price_to_book > 0:
         if es_financiera or es_industrial: pb_optimo, pb_max = 1.5, 2.5; txt_opt = "Óptimo < 1.5x (Fin/Ind)"
-        elif es_tecnologica: pb_optimo, pb_max = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
+        elif es_tecnologica: l_tech, l_amarillo = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
         else: pb_optimo, pb_max = 2.5, 5.0; txt_opt = "Óptimo < 2.5x (General)"
         pb_color = "off" if price_to_book <= pb_optimo else "inverse"
         cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", txt_opt, delta_color=pb_color)
@@ -865,22 +866,18 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             df_yield_chart = yields_validos.copy()
             fig_yield = go.Figure()
             
-            # Trazos reales de la cotización
             fig_yield.add_trace(go.Scatter(
                 x=df_yield_chart.index, y=df_yield_chart.values, mode='lines',
                 line=dict(color='#00d4ff', width=2), name='Histórico', showlegend=False
             ))
             
-            # Lineas horizontales (usamos add_hline sin leyenda nativa para evitar bugs visuales)
             fig_yield.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b")
             fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354")
             fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b")
 
-            # Trazos invisibles exclusivos para forzar una leyenda interactiva limpia
-            primera_fecha_yield = df_yield_chart.index[0]
-            fig_yield.add_trace(go.Scatter(x=[primera_fecha_yield], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
-            fig_yield.add_trace(go.Scatter(x=[primera_fecha_yield], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
-            fig_yield.add_trace(go.Scatter(x=[primera_fecha_yield], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
+            fig_yield.add_trace(go.Scatter(x=[df_yield_chart.index[0]], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
+            fig_yield.add_trace(go.Scatter(x=[df_yield_chart.index[0]], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
+            fig_yield.add_trace(go.Scatter(x=[df_yield_chart.index[0]], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
             fig_yield.add_trace(go.Scatter(
                 x=[df_yield_chart.index[-1]], y=[df_yield_chart.iloc[-1]], mode='markers',
                 marker=dict(color='#00d4ff', size=10, symbol='diamond'), name=f"Actual: {yield_actual:.2f}%"
@@ -938,7 +935,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             
             fig_yoc_hist = go.Figure()
             
-            # 1. Trazos principales PRIMERO para fijar el eje X en modo Datetime
             fig_yoc_hist.add_trace(go.Scatter(
                 x=df_yoc_hist.index, y=df_yoc_hist['Yield_Diario'], mode='lines',
                 line=dict(color='rgba(255, 255, 255, 0.4)', width=1.5), name='Yield Histórico (En su día)'
@@ -948,13 +944,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 x=df_yoc_hist.index, y=df_yoc_hist['YoC_Hist'], mode='lines',
                 line=dict(color='#faca2b', width=2), name='Yield on Cost (Hoy)'
             ))
-
-            # 2. Líneas horizontales de zonas de valoración
+            
             fig_yoc_hist.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", opacity=0.6)
             fig_yoc_hist.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", opacity=0.6)
             fig_yoc_hist.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", opacity=0.6)
 
-            # 3. Trazos invisibles para la leyenda con FECHA REAL para no romper el eje
             primera_fecha = df_yoc_hist.index[0]
             fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
             fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
@@ -1507,6 +1501,24 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     except:
         return None
 
+# ==========================================
+# 3. MAQUETACIÓN EN PESTAÑAS (UI)
+# ==========================================
+st.title("Sistema Fundamental - Método Geraldine Weiss")
+
+tab_individual, tab_masiva, tab_cartera = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Múltiple (Radar)", "💼 Mi Cartera Privada"])
+
+with tab_individual:
+    col_input1, col_input2, col_input3 = st.columns(3)
+    with col_input1: ticker_input = st.text_input("Ticker individual:", "NVO").upper()
+    with col_input2: años_analisis = st.selectbox("Periodo Histórico:", [5, 10, 12, 15, 20], index=2)
+    with col_input3: impuesto = st.number_input("Retención (%)", value=19.0, key="imp_ind")
+
+    if st.button("Analizar Empresa"):
+        with st.spinner(f"Analizando {ticker_input} en profundidad..."):
+            try: screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
+            except Exception as e: st.error(f"Se ha producido un error: {e}")
+
 with tab_masiva:
     st.markdown("### 📡 Radar Fundamental Completo por Lotes")
     st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** respecto al Suelo Fundamental.")
@@ -2003,4 +2015,3 @@ with tab_cartera:
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
-            
