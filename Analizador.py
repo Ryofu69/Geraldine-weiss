@@ -64,7 +64,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     elif currency == 'GBp': sym = '£'; divisor_uk = 100.0 
     else: sym = '$' 
 
-    # IMPORTANTE: auto_adjust=False para usar precios puros (ajustados por splits, pero no por dividendos)
     historial_completo = ticker.history(period="max", auto_adjust=False)
     dividendos = ticker.dividends
     
@@ -458,7 +457,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         """
         st.markdown(html_stats, unsafe_allow_html=True)
 
-st.divider()
+
+    st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses)")
     st.markdown("> **Uso según el Método Weiss:** Busca picos de volumen rojo extremo (Capitulación) cuando las barras toquen la línea verde discontinua (Suelo Fundamental). Dispara cuando el MACD cruce al alza perdiendo inercia bajista.")
 
@@ -802,6 +802,11 @@ st.divider()
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
     else: st.error(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
 
+    if respaldo_institucional > 0:
+        if respaldo_institucional >= 50.0: st.success(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% en manos de Fondos/Bancos (Cumple criterio de respaldo institucional)")
+        else: st.warning(f"{t_info} Respaldo Institucional: {respaldo_institucional:.1f}% (Interés institucional bajo o fragmentado)")
+    else: st.warning(f"{t_info} Respaldo Institucional: Datos no disponibles en Yahoo")
+
     st.divider()
     st.subheader("🥣 La Regla de Chowder")
     st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo. La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo.")
@@ -835,7 +840,7 @@ st.divider()
 
     st.divider()
 
-# ==========================================
+    # ==========================================
     # PANEL: ANÁLISIS FUNDAMENTAL VISUAL
     # ==========================================
     st.markdown("### 📉 Análisis Fundamental Visual")
@@ -1248,7 +1253,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             except: return default
             
         dividendos = ticker.dividends
-        historial = ticker.history(period="15y")
+        historial = ticker.history(period="15y", auto_adjust=False)
         
         if dividendos.empty or len(historial) < 252: 
             return None
@@ -1505,6 +1510,24 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
     except:
         return None
 
+# ==========================================
+# 3. MAQUETACIÓN EN PESTAÑAS (UI)
+# ==========================================
+st.title("Sistema Fundamental - Método Geraldine Weiss")
+
+tab_individual, tab_masiva, tab_cartera = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Múltiple (Radar)", "💼 Mi Cartera Privada"])
+
+with tab_individual:
+    col_input1, col_input2, col_input3 = st.columns(3)
+    with col_input1: ticker_input = st.text_input("Ticker individual:", "NVO").upper()
+    with col_input2: años_analisis = st.selectbox("Periodo Histórico:", [5, 10, 12, 15, 20], index=2)
+    with col_input3: impuesto = st.number_input("Retención (%)", value=19.0, key="imp_ind")
+
+    if st.button("Analizar Empresa"):
+        with st.spinner(f"Analizando {ticker_input} en profundidad..."):
+            try: screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
+            except Exception as e: st.error(f"Se ha producido un error: {e}")
+
 with tab_masiva:
     st.markdown("### 📡 Radar Fundamental Completo por Lotes")
     st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** respecto al Suelo Fundamental.")
@@ -1682,12 +1705,10 @@ with tab_cartera:
             if not all(col in df_ops.columns for col in columnas_requeridas):
                 st.error(f"❌ Error de formato. El archivo debe contener exactamente estas columnas (respetando mayúsculas): {', '.join(columnas_requeridas)}")
             else:
-                # Procesar fechas y limpiar datos vacíos
                 df_ops['Fecha'] = pd.to_datetime(df_ops['Fecha'], errors='coerce', dayfirst=True)
                 df_ops = df_ops.dropna(subset=['Fecha', 'Ticker', 'Operacion', 'Acciones', 'Precio'])
                 df_ops = df_ops.sort_values('Fecha')
                 
-                # --- FILTROS DE CARTERA (AÑO + EMPRESA) ---
                 años_unicos = sorted(df_ops['Fecha'].dt.year.dropna().unique())
                 opciones_año = ["Todo el Historial"] + [str(int(a)) for a in años_unicos]
                 
@@ -1702,7 +1723,6 @@ with tab_cartera:
                 with col_f2:
                     ticker_filtro = st.selectbox("🏢 Selecciona Empresa a Inspeccionar:", opciones_ticker)
                 
-                # Aplicar filtrado dinámico
                 if año_filtro != "Todo el Historial":
                     df_ops = df_ops[(df_ops['Fecha'].dt.year == int(año_filtro)) & (df_ops['Operacion'].str.capitalize() == 'Compra')]
                 
@@ -1715,7 +1735,6 @@ with tab_cartera:
                     min_date = df_ops['Fecha'].min()
                     tickers_unicos = df_ops['Ticker'].str.strip().str.upper().unique().tolist()
                     
-                    # 1. Descargar histórico de PRECIOS REALES y DIVIDENDOS
                     datos_historicos = pd.DataFrame()
                     datos_dividendos = pd.DataFrame()
                     
@@ -1723,7 +1742,6 @@ with tab_cartera:
                         for t in tickers_unicos:
                             try:
                                 tk = yf.Ticker(t)
-                                # IMPORTANTE: auto_adjust=False extrae el precio puro del mercado
                                 hist = tk.history(start=min_date, auto_adjust=False)
                                 if not hist.empty:
                                     if tk.info.get('currency') == 'GBp':
@@ -1740,7 +1758,6 @@ with tab_cartera:
                                 pass
                                 
                     if not datos_historicos.empty:
-                        # 2. Rellenar fechas vacías
                         datos_historicos.index = datos_historicos.index.tz_localize(None).normalize()
                         datos_dividendos.index = datos_dividendos.index.tz_localize(None).normalize()
                         
@@ -1749,7 +1766,6 @@ with tab_cartera:
                         datos_historicos = datos_historicos.reindex(rango_fechas).ffill().fillna(0)
                         datos_dividendos = datos_dividendos.reindex(rango_fechas).fillna(0)
                         
-                        # 3. Motor contable diario
                         daily_shares = pd.DataFrame(0.0, index=datos_historicos.index, columns=tickers_unicos)
                         daily_invested = pd.Series(0.0, index=datos_historicos.index)
                         
@@ -1782,7 +1798,6 @@ with tab_cartera:
                                 daily_shares.at[date, t] = current_shares.get(t, 0.0)
                             daily_invested.at[date] = total_invested
                             
-                        # 4. Cálculos Finales
                         daily_value = (daily_shares * datos_historicos).sum(axis=1)
                         
                         daily_shares_shifted = daily_shares.shift(1).fillna(0)
@@ -1792,7 +1807,6 @@ with tab_cartera:
                         accumulated_divs = daily_net_divs.cumsum()
                         total_patrimonio = daily_value + accumulated_divs
                         
-                        # 5. Gráfico de Evolución
                         st.markdown("#### 📈 Evolución de tu Patrimonio")
                         fig_cartera = go.Figure()
                         
@@ -1829,7 +1843,6 @@ with tab_cartera:
                         )
                         st.plotly_chart(fig_cartera, use_container_width=True)
 
-                        # 6. Tabla Resumen Actual
                         posiciones_activas = {t: current_shares[t] for t in tickers_unicos if current_shares[t] > 0.001}
                         if posiciones_activas:
                             inversion_final = daily_invested.iloc[-1]
@@ -1847,7 +1860,6 @@ with tab_cartera:
                             st.markdown("#### 🌐 Resumen Global Hoy")
                             c1, c2, c3, c4 = st.columns(4)
                             c1.metric("Capital Invertido", f"{inversion_final:,.2f}")
-                            
                             c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f}", f"{rent_precio_global_pct:+.2f}% ({b_l_mercado:+,.2f} Abs.)")
                             c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f}", f"{pct_divs_sobre_inversion:+.2f}% del Capital")
                             c4.metric("Rentab. Total (Con Divs)", f"{rent_total_pct:+.2f}%", f"{b_total_global:+,.2f} Abs. Total")
@@ -1880,7 +1892,6 @@ with tab_cartera:
                                     "Rentab. Total (%)": rent_total_pct
                                 })
                             
-                            # Ordenar de mayor a menor rentabilidad total
                             resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rentab. Total (%)'], reverse=True)
                                 
                             st.markdown("#### 📋 Posiciones Abiertas (Tabla Detallada)")
@@ -1912,7 +1923,6 @@ with tab_cartera:
                                         
                             st.dataframe(styled_df, use_container_width=True, hide_index=True)
                             
-                            # --- 8. CALENDARIO DE DIVIDENDOS (NUEVO FORMATO GRÁFICO BARRAS AGRUPADAS) ---
                             if divs_cobrados_totales > 0:
                                 st.markdown("---")
                                 st.markdown("#### 🗓️ Calendario Histórico de Dividendos Netos")
@@ -1928,7 +1938,6 @@ with tab_cartera:
                                                  7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
                                     
                                     agrupado_meses = df_divs_hist.groupby(['Año', 'Mes'])['Dividendo'].sum().reset_index()
-                                    
                                     anual_divs = df_divs_hist.groupby('Año')['Dividendo'].sum().reset_index()
                                     anual_divs['Crecimiento YoY (%)'] = anual_divs['Dividendo'].pct_change() * 100
                                     
@@ -1951,21 +1960,13 @@ with tab_cartera:
                                                     y_valores.append(0.0)
                                             
                                             fig_meses.add_trace(go.Bar(
-                                                x=nombres_meses,
-                                                y=y_valores,
-                                                name=str(año)
+                                                x=nombres_meses, y=y_valores, name=str(año)
                                             ))
                                             
                                         fig_meses.update_layout(
-                                            barmode='group',
-                                            template='plotly_dark',
-                                            margin=dict(l=0, r=0, t=10, b=0),
-                                            height=350,
-                                            hovermode="x unified",
-                                            paper_bgcolor='rgba(0,0,0,0)',
-                                            plot_bgcolor='rgba(0,0,0,0)',
-                                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-                                            yaxis=dict(title="Dividendos Netos")
+                                            barmode='group', template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=350,
+                                            hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5), yaxis=dict(title="Dividendos Netos")
                                         )
                                         st.plotly_chart(fig_meses, use_container_width=True)
                                         
@@ -1982,7 +1983,6 @@ with tab_cartera:
                                         }).map(color_yoy, subset=['Crecimiento YoY (%)'])
                                         st.dataframe(styled_anual, use_container_width=True, hide_index=True)
 
-                            # 9. GRÁFICO AL FINAL: Comparativa Con vs Sin Dividendos por Empresa
                             st.markdown("---")
                             st.markdown("#### 📊 Rentabilidad por Empresa (Precio vs Total con Dividendos)")
                             
@@ -2003,14 +2003,12 @@ with tab_cartera:
                             
                             fig_comp.add_trace(go.Bar(
                                 x=x_tickers, y=y_rent_precio, name='Solo Cotización (Mercado)',
-                                marker_color=colores_precio,
-                                text=[f"{val:+.1f}%" for val in y_rent_precio], textposition='auto'
+                                marker_color=colores_precio, text=[f"{val:+.1f}%" for val in y_rent_precio], textposition='auto'
                             ))
                             
                             fig_comp.add_trace(go.Bar(
                                 x=x_tickers, y=y_rent_total, name='Total (Mercado + Dividendos)',
-                                marker_color='#00d4ff',
-                                text=[f"{val:+.1f}%" for val in y_rent_total], textposition='auto'
+                                marker_color='#00d4ff', text=[f"{val:+.1f}%" for val in y_rent_total], textposition='auto'
                             ))
                             
                             fig_comp.update_layout(
