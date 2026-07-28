@@ -1411,7 +1411,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                                 acc_fin = sh_data.iloc[-1]
                                 if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
                                 break
-            except: pass
+        except: pass
 
         dgr_5y = None
         if len(dividendos_barras) >= 6:
