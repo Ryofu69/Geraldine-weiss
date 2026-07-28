@@ -1763,7 +1763,7 @@ with tab_cartera:
                     datos_historicos = pd.DataFrame()
                     datos_dividendos = pd.DataFrame()
                     
-                    with st.spinner("Descargando precios reales (sin ajustes) y rastreando dividendos desde Yahoo Finance..."):
+                    with st.spinner("Descargando datos y ajustando zonas horarias..."):
                         for t in tickers_unicos:
                             try:
                                 tk = yf.Ticker(t)
@@ -1771,18 +1771,21 @@ with tab_cartera:
                                 if not hist.empty:
                                     hist.index = hist.index.tz_localize(None).normalize()
                                     hist = hist[~hist.index.duplicated(keep='last')]
-                                    if tk.info.get('currency') == 'GBp':
+                                    
+                                    # --- PARCHE YAHOO: Forzar lectura desde la BBDD principal ---
+                                    divs_reales = tk.dividends
+                                    if not divs_reales.empty:
+                                        divs_reales.index = divs_reales.index.tz_localize(None).normalize()
+                                        divs_reales = divs_reales[~divs_reales.index.duplicated(keep='last')]
+                                        
+                                    if tk.info.get('currency') == 'GBp': 
                                         hist['Close'] = hist['Close'] / 100.0
-                                        if 'Dividends' in hist.columns:
-                                            hist['Dividends'] = hist['Dividends'] / 100.0
-                                            
+                                        if not divs_reales.empty: divs_reales = divs_reales / 100.0
+                                        
                                     datos_historicos[t] = hist['Close']
-                                    if 'Dividends' in hist.columns:
-                                        datos_dividendos[t] = hist['Dividends']
-                                    else:
-                                        datos_dividendos[t] = 0.0
-                            except Exception:
-                                pass
+                                    datos_dividendos[t] = divs_reales if not divs_reales.empty else 0.0
+                                    # -----------------------------------------------------------
+                            except: pass
                                 
                     if not datos_historicos.empty:
                         datos_historicos.index = datos_historicos.index.tz_localize(None).normalize()
