@@ -2116,7 +2116,7 @@ with tab_cartera:
                                         st.dataframe(styled_anual, use_container_width=True, hide_index=True)
 
                             st.markdown("---")
-                            st.markdown("#### 📊 Rentabilidad por Empresa (Precio vs Total con Dividendos)")
+                            st.markdown("#### 📊 Rentabilidad por Empresa en Euros (Precio vs Total con Dividendos)")
                             
                             x_tickers = []
                             y_rent_precio = []
@@ -2125,8 +2125,8 @@ with tab_cartera:
 
                             for res in resultados_tabla_ordenados:
                                 x_tickers.append(res['Ticker'])
-                                r_precio = res['Rentab. Precio (%)']
-                                r_total = res['Rentab. Total (%)']
+                                r_precio = res['Rent. Precio (€)']
+                                r_total = res['Rent. Total (€)']
                                 y_rent_precio.append(r_precio)
                                 y_rent_total.append(r_total)
                                 colores_precio.append('#21c354' if r_precio >= 0 else '#ff4b4b')
@@ -2134,12 +2134,12 @@ with tab_cartera:
                             fig_comp = go.Figure()
                             
                             fig_comp.add_trace(go.Bar(
-                                x=x_tickers, y=y_rent_precio, name='Solo Cotización (Mercado)',
+                                x=x_tickers, y=y_rent_precio, name='Solo Cotización (€)',
                                 marker_color=colores_precio, text=[f"{val:+.1f}%" for val in y_rent_precio], textposition='auto'
                             ))
                             
                             fig_comp.add_trace(go.Bar(
-                                x=x_tickers, y=y_rent_total, name='Total (Mercado + Dividendos)',
+                                x=x_tickers, y=y_rent_total, name='Total (Cotización + Divs €)',
                                 marker_color='#00d4ff', text=[f"{val:+.1f}%" for val in y_rent_total], textposition='auto'
                             ))
                             
@@ -2148,7 +2148,7 @@ with tab_cartera:
                                 hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5)
                             )
-                            fig_comp.update_yaxes(title_text="Rentabilidad (%)")
+                            fig_comp.update_yaxes(title_text="Rentabilidad Real en Euros (%)")
                             st.plotly_chart(fig_comp, use_container_width=True)
                             
                     else:
