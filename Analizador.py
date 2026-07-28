@@ -177,7 +177,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             p_fcf = precio_actual / fcf_per_share
             fcf_yield = (fcf_per_share / precio_actual) * 100
     
-    if fcf > 0:
+if fcf > 0:
         deuda_fcf = total_debt / fcf
 
     dividendos_barras = divs_por_año.copy()
@@ -206,35 +206,47 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 racha_sin_recortes += 1
             else: break
 
-    fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
-    variacion_acciones = None
+    # === INICIO CÁLCULO DE ACCIONES (DOBLE MOTOR) ===
     shares_yearly = pd.Series(dtype=float)
+    variacion_acciones = None
+
+    # Motor 1: Income Statement (Prioridad para Americanas)
     try:
-        shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
-        if shares_hist is not None and len(shares_hist) > 1:
-            shares_yearly = shares_hist.groupby(shares_hist.index.year).last()
-            if len(shares_yearly) >= (años_analisis + 1):
-                acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
-            else:
-                acc_ini = shares_yearly.iloc[0]
-            acc_fin = shares_yearly.iloc[-1]
-            if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+        inc_stmt = ticker.income_stmt
+        if not inc_stmt.empty:
+            for key in ['Basic Average Shares', 'Diluted Average Shares']:
+                if key in inc_stmt.index:
+                    sh_data = inc_stmt.loc[key].dropna()
+                    sh_data = sh_data[sh_data > 0].sort_index()
+                    if len(sh_data) >= 2:
+                        shares_yearly = sh_data.groupby(sh_data.index.year).last()
+                        acc_ini = shares_yearly.iloc[0]
+                        acc_fin = shares_yearly.iloc[-1]
+                        # Escudo anti-bug de Yahoo (Rechaza caídas irreales > 90%)
+                        if acc_ini > 0 and (acc_fin / acc_ini) > 0.10: 
+                            variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                            break
     except Exception: pass
-    
+
+    # Motor 2: get_shares_full (Respaldo para Europeas como WKL.AS)
     if variacion_acciones is None or shares_yearly.empty:
         try:
-            inc_stmt = ticker.income_stmt
-            if not inc_stmt.empty:
-                for key in ['Basic Average Shares', 'Diluted Average Shares']:
-                    if key in inc_stmt.index:
-                        sh_data = inc_stmt.loc[key].dropna().sort_index()
-                        if len(sh_data) >= 2:
-                            shares_yearly = sh_data.groupby(sh_data.index.year).last()
-                            acc_ini = shares_yearly.iloc[0]
-                            acc_fin = shares_yearly.iloc[-1]
-                            if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-                            break
+            fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
+            shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
+            if shares_hist is not None and len(shares_hist) > 1:
+                sy = shares_hist.groupby(shares_hist.index.year).last()
+                sy = sy[sy > 0]
+                if len(sy) >= 2:
+                    shares_yearly = sy
+                    if len(shares_yearly) >= (años_analisis + 1):
+                        acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
+                    else:
+                        acc_ini = shares_yearly.iloc[0]
+                    acc_fin = shares_yearly.iloc[-1]
+                    if acc_ini > 0 and (acc_fin / acc_ini) > 0.10:
+                        variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
         except Exception: pass
+    # === FIN CÁLCULO DE ACCIONES ===
 
     if yield_infravalorado > 0: precio_compra = (forward_dividend / yield_infravalorado) * 100
     else: precio_compra = 0
