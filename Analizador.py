@@ -1906,15 +1906,6 @@ with tab_cartera:
                             pct_divs_sobre_inversion = (divs_cobrados_totales / inversion_final * 100) if inversion_final > 0 else 0
                             rent_total_pct = ((patrimonio_final - inversion_final) / inversion_final * 100) if inversion_final > 0 else 0
                             
-                            st.markdown("#### 🌐 Resumen Global Hoy")
-                            c1, c2, c3, c4 = st.columns(4)
-                            c1.metric("Capital Invertido", f"{inversion_final:,.2f}")
-                            c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f}", f"{rent_precio_global_pct:+.2f}% ({b_l_mercado:+,.2f} Abs.)")
-                            c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f}", f"{pct_divs_sobre_inversion:+.2f}% del Capital")
-                            c4.metric("Rentab. Total (Con Divs)", f"{rent_total_pct:+.2f}%", f"{b_total_global:+,.2f} Abs. Total")
-                            
-                            divs_per_ticker = (daily_shares_shifted * datos_dividendos).sum(axis=0) * (1 - (impuesto_cart / 100.0))
-                            
                             # --- NUEVO: OBTENER FX HISTÓRICO PARA RENTABILIDADES EN EUROS ---
                             fx_rates_hoy = {'EUR': 1.0, 'USD': 1.0, 'GBP': 1.0, 'GBp': 1.0}
                             historico_fx = {}
@@ -1943,7 +1934,13 @@ with tab_cartera:
                                 return fx_rates_hoy.get(divisa, 1.0)
                             # ----------------------------------------------------------------
 
+                            divs_per_ticker = (daily_shares_shifted * datos_dividendos).sum(axis=0) * (1 - (impuesto_cart / 100.0))
+                            
                             resultados_tabla = []
+                            global_inversion_eur = 0.0
+                            global_mercado_eur = 0.0
+                            global_divs_eur = 0.0
+                            
                             for t, acc in posiciones_activas.items():
                                 try: curr = yf.Ticker(t).info.get('currency', 'USD')
                                 except: curr = 'USD'
@@ -1992,6 +1989,11 @@ with tab_cartera:
                                 rent_precio_eur = (b_abs_eur / coste_eur_total) * 100 if coste_eur_total > 0 else 0
                                 rent_total_eur = (b_total_eur / coste_eur_total) * 100 if coste_eur_total > 0 else 0
                                 
+                                # SUMAR AL GLOBAL EN EUROS
+                                global_inversion_eur += coste_eur_total
+                                global_mercado_eur += v_mercado_eur
+                                global_divs_eur += divs_eur
+                                
                                 sym_divisa = "€" if curr == "EUR" else ("£" if curr in ["GBP", "GBp"] else "$")
                                 
                                 resultados_tabla.append({
@@ -2008,6 +2010,21 @@ with tab_cartera:
                                     "Rent. Precio (Orig)": rent_precio_orig,
                                     "Rent. Total (Orig)": rent_total_orig
                                 })
+                            
+                            # --- PINTAR EL RESUMEN GLOBAL CON EUROS REALES ---
+                            b_l_mercado_eur = global_mercado_eur - global_inversion_eur
+                            b_total_global_eur = b_l_mercado_eur + global_divs_eur
+                            
+                            rent_precio_global_pct = (b_l_mercado_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0
+                            pct_divs_sobre_inversion = (global_divs_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0
+                            rent_total_pct = (b_total_global_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0
+                            
+                            st.markdown("#### 🌐 Resumen Global Hoy (Todo convertido a Euros €)")
+                            c1, c2, c3, c4 = st.columns(4)
+                            c1.metric("Capital Invertido", f"{global_inversion_eur:,.2f} €")
+                            c2.metric("Valor Mercado (Sin Divs)", f"{global_mercado_eur:,.2f} €", f"{rent_precio_global_pct:+.2f}% ({b_l_mercado_eur:+,.2f} € Abs.)")
+                            c3.metric("Dividendos Cobrados", f"{global_divs_eur:,.2f} €", f"{pct_divs_sobre_inversion:+.2f}% del Capital")
+                            c4.metric("Rentab. Total (Con Divs)", f"{rent_total_pct:+.2f}%", f"{b_total_global_eur:+,.2f} € Total")
                             
                             resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rent. Total (€)'], reverse=True)
                                 
