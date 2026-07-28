@@ -1906,94 +1906,135 @@ with tab_cartera:
                             pct_divs_sobre_inversion = (divs_cobrados_totales / inversion_final * 100) if inversion_final > 0 else 0
                             rent_total_pct = ((patrimonio_final - inversion_final) / inversion_final * 100) if inversion_final > 0 else 0
                             
-                            st.markdown("#### 🌐 Resumen Global Hoy (Euros)")
+                            st.markdown("#### 🌐 Resumen Global Hoy")
                             c1, c2, c3, c4 = st.columns(4)
-                            c1.metric("Capital Invertido", f"{inversion_final:,.2f} €")
-                            c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f} €", f"{rent_precio_global_pct:+.2f}% ({b_l_mercado:+,.2f} €)")
-                            c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f} €", f"{pct_divs_sobre_inversion:+.2f}% del Capital")
-                            c4.metric("Rentab. Total (Con Divs)", f"{rent_total_pct:+.2f}%", f"{b_total_global:+,.2f} € Total")
+                            c1.metric("Capital Invertido", f"{inversion_final:,.2f}")
+                            c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f}", f"{rent_precio_global_pct:+.2f}% ({b_l_mercado:+,.2f} Abs.)")
+                            c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f}", f"{pct_divs_sobre_inversion:+.2f}% del Capital")
+                            c4.metric("Rentab. Total (Con Divs)", f"{rent_total_pct:+.2f}%", f"{b_total_global:+,.2f} Abs. Total")
                             
                             divs_per_ticker = (daily_shares_shifted * datos_dividendos).sum(axis=0) * (1 - (impuesto_cart / 100.0))
                             
+                            # --- NUEVO: OBTENER FX HISTÓRICO PARA RENTABILIDADES EN EUROS ---
+                            fx_rates_hoy = {'EUR': 1.0, 'USD': 1.0, 'GBP': 1.0, 'GBp': 1.0}
+                            historico_fx = {}
+                            try:
+                                fx_usd = yf.Ticker("EURUSD=X").history(start=min_date)['Close']
+                                fx_usd.index = fx_usd.index.tz_localize(None).normalize()
+                                historico_fx['USD'] = fx_usd
+                                fx_rates_hoy['USD'] = float(fx_usd.iloc[-1]) if not fx_usd.empty else 1.0
+                                
+                                fx_gbp = yf.Ticker("EURGBP=X").history(start=min_date)['Close']
+                                fx_gbp.index = fx_gbp.index.tz_localize(None).normalize()
+                                historico_fx['GBP'] = fx_gbp
+                                historico_fx['GBp'] = fx_gbp
+                                fx_rates_hoy['GBP'] = float(fx_gbp.iloc[-1]) if not fx_gbp.empty else 1.0
+                                fx_rates_hoy['GBp'] = fx_rates_hoy['GBP']
+                            except: pass
+
+                            def get_fx_hist(divisa, fecha):
+                                if divisa == 'EUR': return 1.0
+                                serie = historico_fx.get(divisa)
+                                if serie is not None and not serie.empty:
+                                    fecha_norm = pd.Timestamp(fecha).normalize()
+                                    if fecha_norm in serie.index: return float(serie.loc[fecha_norm])
+                                    idx = serie.index.get_indexer([fecha_norm], method='pad')[0]
+                                    if idx != -1: return float(serie.iloc[idx])
+                                return fx_rates_hoy.get(divisa, 1.0)
+                            # ----------------------------------------------------------------
+
                             resultados_tabla = []
                             for t, acc in posiciones_activas.items():
-                                try:
-                                    curr = yf.Ticker(t).info.get('currency', 'USD')
-                                except:
-                                    curr = 'USD'
+                                try: curr = yf.Ticker(t).info.get('currency', 'USD')
+                                except: curr = 'USD'
                                 
-                                rate_fx = fx_rates.get(curr, 1.0)
-                                if curr == 'GBp':
-                                    rate_fx = rate_fx * 100.0  # Ajuste de peniques a libras
-                                
+                                fx_hoy = fx_rates_hoy.get(curr, 1.0)
                                 p_actual = datos_historicos[t].iloc[-1]
                                 p_medio = current_cost[t] / acc if acc > 0 else 0
                                 
-                                # Valores en divisa original
+                                # Calcular Coste Total en Euros usando el tipo de cambio del día de compra
+                                coste_eur_total = 0.0
+                                acc_acumuladas = 0.0
+                                ops_t = df_ops[df_ops['Ticker'] == t].sort_values('Fecha')
+                                for _, row in ops_t.iterrows():
+                                    op = row['Operacion'].strip().capitalize()
+                                    a = float(row['Acciones'])
+                                    p = float(row['Precio'])
+                                    if curr == 'GBp': p = p / 100.0
+                                    
+                                    fx_d = get_fx_hist(curr, row['Fecha'])
+                                    if op == 'Compra':
+                                        acc_acumuladas += a
+                                        coste_eur_total += (a * p) / fx_d
+                                    elif op == 'Venta' and acc_acumuladas > 0:
+                                        pmp_eur = coste_eur_total / acc_acumuladas
+                                        acc_acumuladas -= a
+                                        coste_eur_total -= (a * pmp_eur)
+                                        
+                                if coste_eur_total <= 0: coste_eur_total = (current_cost[t] / fx_hoy) if fx_hoy > 0 else current_cost[t]
+                                
+                                # ABSOLUTOS (En divisa original)
                                 v_mercado_orig = acc * p_actual
                                 b_abs_orig = v_mercado_orig - current_cost[t]
                                 divs_orig = divs_per_ticker[t]
                                 b_total_orig = b_abs_orig + divs_orig
                                 
-                                # Conversión real a Euros (€)
-                                v_mercado_eur = v_mercado_orig / rate_fx
-                                b_abs_eur = b_abs_orig / rate_fx
-                                divs_eur = divs_orig / rate_fx
-                                b_total_eur = b_total_orig / rate_fx
+                                # PORCENTAJES EN ORIGINAL
+                                rent_precio_orig = (b_abs_orig / current_cost[t]) * 100 if current_cost[t] > 0 else 0
+                                rent_total_orig = (b_total_orig / current_cost[t]) * 100 if current_cost[t] > 0 else 0
                                 
-                                rent_precio_pct = (b_abs_orig / current_cost[t]) * 100 if current_cost[t] > 0 else 0
-                                rent_total_pct = (b_total_orig / current_cost[t]) * 100 if current_cost[t] > 0 else 0
+                                # PORCENTAJES EN EUROS
+                                v_mercado_eur = v_mercado_orig / fx_hoy
+                                divs_eur = divs_orig / fx_hoy
+                                b_abs_eur = v_mercado_eur - coste_eur_total
+                                b_total_eur = b_abs_eur + divs_eur
+                                
+                                rent_precio_eur = (b_abs_eur / coste_eur_total) * 100 if coste_eur_total > 0 else 0
+                                rent_total_eur = (b_total_eur / coste_eur_total) * 100 if coste_eur_total > 0 else 0
                                 
                                 sym_divisa = "€" if curr == "EUR" else ("£" if curr in ["GBP", "GBp"] else "$")
                                 
                                 resultados_tabla.append({
                                     "Ticker": t,
-                                    "Divisa": curr,
                                     "Acciones": round(acc, 4),
                                     "Precio Medio": f"{p_medio:.2f} {sym_divisa}",
                                     "Precio Actual": f"{p_actual:.2f} {sym_divisa}",
-                                    "Valor (€)": v_mercado_eur,
-                                    "P/L (€)": b_abs_eur,
-                                    "Divs (€)": divs_eur,
-                                    "Bº Total (€)": b_total_eur,
-                                    "Valor (Orig)": v_mercado_orig,
-                                    "P/L (Orig)": b_abs_orig,
-                                    "Divs (Orig)": divs_orig,
-                                    "Bº Total (Orig)": b_total_orig,
-                                    "Rent. Precio (%)": rent_precio_pct,
-                                    "Rent. Total (%)": rent_total_pct
+                                    "Valor Mercado": v_mercado_orig,
+                                    "P/L Latente": b_abs_orig,
+                                    "Divs. Cobrados": divs_orig,
+                                    "Bº Total (Abs)": b_total_orig,
+                                    "Rent. Precio (€)": rent_precio_eur,
+                                    "Rent. Total (€)": rent_total_eur,
+                                    "Rent. Precio (Orig)": rent_precio_orig,
+                                    "Rent. Total (Orig)": rent_total_orig
                                 })
                             
-                            resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rent. Total (%)'], reverse=True)
+                            resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rent. Total (€)'], reverse=True)
                                 
-                            st.markdown("#### 📋 Posiciones Abiertas (Impacto Divisa vs Original)")
+                            st.markdown("#### 📋 Posiciones Abiertas (Tabla Detallada)")
                             df_mostrar = pd.DataFrame(resultados_tabla_ordenados)
                             
                             def color_rent(val):
-                                color = '#21c354' if val > 0 else '#ff4b4b'
-                                return f'color: {color}; font-weight: bold;'
+                                return f"color: {'#21c354' if val > 0 else '#ff4b4b'}; font-weight: bold;"
                                 
                             def color_divs(val):
-                                color = '#00d4ff' if val > 0 else '#aaaaaa'
-                                return f'color: {color};'
+                                return f"color: {'#00d4ff' if val > 0 else '#aaaaaa'};"
                             
                             formato_columnas = {
-                                "Valor (€)": "{:,.2f} €",
-                                "P/L (€)": "{:+.2f} €",
-                                "Divs (€)": "{:,.2f} €",
-                                "Bº Total (€)": "{:+.2f} €",
-                                "Valor (Orig)": "{:,.2f}",
-                                "P/L (Orig)": "{:+.2f}",
-                                "Divs (Orig)": "{:,.2f}",
-                                "Bº Total (Orig)": "{:+.2f}",
-                                "Rent. Precio (%)": "{:+.2f}%",
-                                "Rent. Total (%)": "{:+.2f}%"
+                                "Valor Mercado": "{:,.2f}",
+                                "P/L Latente": "{:+.2f}",
+                                "Divs. Cobrados": "{:,.2f}",
+                                "Bº Total (Abs)": "{:+.2f}",
+                                "Rent. Precio (€)": "{:+.2f}%",
+                                "Rent. Total (€)": "{:+.2f}%",
+                                "Rent. Precio (Orig)": "{:+.2f}%",
+                                "Rent. Total (Orig)": "{:+.2f}%"
                             }
                             
                             styled_df = (df_mostrar.style
                                         .format(formato_columnas)
-                                        .map(color_rent, subset=['Rent. Precio (%)', 'Rent. Total (%)', 'P/L (€)', 'Bº Total (€)', 'P/L (Orig)', 'Bº Total (Orig)'])
-                                        .map(color_divs, subset=['Divs (€)', 'Divs (Orig)']))
+                                        .map(color_rent, subset=['P/L Latente', 'Bº Total (Abs)', 'Rent. Precio (€)', 'Rent. Total (€)', 'Rent. Precio (Orig)', 'Rent. Total (Orig)'])
+                                        .map(color_divs, subset=['Divs. Cobrados']))
                                         
                             st.dataframe(styled_df, use_container_width=True, hide_index=True)
                             
