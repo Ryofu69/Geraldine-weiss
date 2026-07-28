@@ -1760,10 +1760,10 @@ with tab_cartera:
                     min_date = df_ops['Fecha'].min()
                     tickers_unicos = df_ops['Ticker'].str.strip().str.upper().unique().tolist()
                     
-                    datos_historicos = pd.DataFrame()
-                    datos_dividendos = pd.DataFrame()
+                    dict_historicos = {}
+                    dict_dividendos = {}
                     
-                    with st.spinner("Descargando datos y ajustando zonas horarias..."):
+                    with st.spinner("Descargando precios reales y unificando calendarios (EEUU/Europa)..."):
                         for t in tickers_unicos:
                             try:
                                 tk = yf.Ticker(t)
@@ -1772,33 +1772,30 @@ with tab_cartera:
                                     hist.index = hist.index.tz_localize(None).normalize()
                                     hist = hist[~hist.index.duplicated(keep='last')]
                                     
-                                    # --- SISTEMA HÍBRIDO DE DIVIDENDOS ---
-                                    divs_finales = pd.Series(0.0, index=hist.index)
-                                    
-                                    # 1. Intentar leer de la tabla principal (Americanas como Comcast)
+                                    # Sistema Híbrido: Extraer dividendos sin perder días
                                     if 'Dividends' in hist.columns and hist['Dividends'].sum() > 0:
                                         divs_finales = hist['Dividends']
                                     else:
-                                        # 2. Plan de Emergencia BBDD secundaria (Europeas como WKL.AS)
                                         divs_reales = tk.dividends
                                         if not divs_reales.empty:
                                             divs_reales.index = divs_reales.index.tz_localize(None).normalize()
                                             divs_reales = divs_reales[~divs_reales.index.duplicated(keep='last')]
-                                            # Alinear los días exactos para no romper el resto de la cartera
-                                            divs_finales = divs_reales.reindex(hist.index).fillna(0.0)
+                                            divs_finales = divs_reales[divs_reales.index >= min_date]
+                                        else:
+                                            divs_finales = pd.Series(dtype=float)
                                             
                                     if tk.info.get('currency') == 'GBp': 
                                         hist['Close'] = hist['Close'] / 100.0
-                                        divs_finales = divs_finales / 100.0
+                                        if not divs_finales.empty: divs_finales = divs_finales / 100.0
                                         
-                                    datos_historicos[t] = hist['Close']
-                                    datos_dividendos[t] = divs_finales
-                                    # -------------------------------------
+                                    dict_historicos[t] = hist['Close']
+                                    dict_dividendos[t] = divs_finales
                             except: pass
                                 
-                    if not datos_historicos.empty:
-                        datos_historicos.index = datos_historicos.index.tz_localize(None).normalize()
-                        datos_dividendos.index = datos_dividendos.index.tz_localize(None).normalize()
+                    if dict_historicos:
+                        # Al crear un DataFrame desde el Diccionario, Pandas unifica todos los calendarios sin perder ni un festivo
+                        datos_historicos = pd.DataFrame(dict_historicos)
+                        datos_dividendos = pd.DataFrame(dict_dividendos)
                         
                         rango_fechas = pd.date_range(start=min_date.normalize(), end=pd.Timestamp.today().normalize())
                         
