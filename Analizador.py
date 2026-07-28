@@ -1383,19 +1383,35 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
 
         deuda_fcf = total_debt / fcf if fcf > 0 else -1.0
 
+        fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
         variacion_acciones = None
         try:
-            inc_stmt = ticker.income_stmt
-            if not inc_stmt.empty:
-                for key in ['Basic Average Shares', 'Diluted Average Shares']:
-                    if key in inc_stmt.index:
-                        sh_data = inc_stmt.loc[key].dropna().sort_index()
-                        if len(sh_data) >= 2:
-                            acc_ini = sh_data.iloc[0]
-                            acc_fin = sh_data.iloc[-1]
-                            if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-                            break
+            shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
+            if shares_hist is not None and len(shares_hist) > 1:
+                shares_yearly = shares_hist.groupby(shares_hist.index.year).last()
+                if len(shares_yearly) >= (años_analisis + 1):
+                    acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
+                else:
+                    acc_ini = shares_yearly.iloc[0]
+                acc_fin = shares_yearly.iloc[-1]
+                if acc_ini > 0 and acc_fin > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
         except: pass
+
+        if variacion_acciones is None:
+            try:
+                inc_stmt = ticker.income_stmt
+                if not inc_stmt.empty:
+                    for key in ['Basic Average Shares', 'Diluted Average Shares']:
+                        if key in inc_stmt.index:
+                            sh_data = inc_stmt.loc[key].dropna()
+                            # Escudo anti-ceros corruptos de Yahoo Finance
+                            sh_data = sh_data[sh_data > 0].sort_index() 
+                            if len(sh_data) >= 2:
+                                acc_ini = sh_data.iloc[0]
+                                acc_fin = sh_data.iloc[-1]
+                                if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                                break
+            except: pass
 
         dgr_5y = None
         if len(dividendos_barras) >= 6:
