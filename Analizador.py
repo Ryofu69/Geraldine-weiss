@@ -895,25 +895,75 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Muestra la rentabilidad por dividendo a lo largo del tiempo. Las caídas bruscas del precio provocan picos en el Yield (tocando la línea verde inferior), señalando las mejores oportunidades históricas de compra.</p>", unsafe_allow_html=True)
 
         # 2. Drawdown Histórico
-        with col_graf2:
-            st.markdown("#### 📉 Drawdown Histórico")
-            df_dd = historial_analisis[['Close']].copy()
-            df_dd['Max'] = df_dd['Close'].cummax()
-            df_dd['Drawdown'] = (df_dd['Close'] - df_dd['Max']) / df_dd['Max'] * 100
-            
-            fig_dd = go.Figure()
-            fig_dd.add_trace(go.Scatter(
-                x=df_dd.index, y=df_dd['Drawdown'], fill='tozeroy', mode='lines',
-                line=dict(color='#ff4b4b', width=1.5), fillcolor='rgba(255, 75, 75, 0.2)', name='Drawdown %'
-            ))
-            fig_dd.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50),
-                height=320, yaxis=dict(title="Caída desde Máximos (%)", tickformat=".1f", ticksuffix="%"), hovermode="x unified",
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
-            )
-            st.plotly_chart(fig_dd, use_container_width=True)
-            st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Mide la caída porcentual de la acción desde su último máximo histórico. Es la mejor forma de evaluar la volatilidad real de la empresa y detectar correcciones de mercado severas.</p>", unsafe_allow_html=True)
 
+# -------------------------------------------------------------
+        # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN Y FRANJAS
+        # -------------------------------------------------------------
+        st.markdown("---")
+        st.markdown("#### ⏳ Yield on Cost Histórico")
+        st.markdown(f"> **Yield on Cost (YoC):** Muestra el Yield Actual ({yield_actual:.2f}%) que tendrías hoy si hubieras comprado la acción en cualquier fecha del pasado. Calculado dividiendo el dividendo actual ({forward_dividend / divisor_uk:.2f}{sym}) entre el precio histórico de cada día.")
+        
+        if not historial_analisis.empty and forward_dividend > 0:
+            df_yoc_hist = historial_analisis[['Close', 'Yield_Diario']].copy()
+            
+            # Limpieza exhaustiva para que Plotly no rompa el eje de fechas
+            df_yoc_hist = df_yoc_hist.dropna(subset=['Close', 'Yield_Diario'])
+            
+            if currency == 'GBp':
+                df_yoc_hist['Close_Div'] = df_yoc_hist['Close'] / divisor_uk
+            else:
+                df_yoc_hist['Close_Div'] = df_yoc_hist['Close']
+                
+            df_yoc_hist['YoC_Hist'] = (forward_dividend / df_yoc_hist['Close_Div']) * 100
+            
+            # Filtro contra infinitos por si Yahoo devuelve precio 0.00 algún día festivo
+            df_yoc_hist.replace([np.inf, -np.inf], np.nan, inplace=True)
+            df_yoc_hist = df_yoc_hist.dropna(subset=['YoC_Hist'])
+            
+            fig_yoc_hist = go.Figure()
+            
+            # 1. Trazos principales PRIMERO para fijar el eje X en modo Fechas (Datetime)
+            fig_yoc_hist.add_trace(go.Scatter(
+                x=df_yoc_hist.index, y=df_yoc_hist['Yield_Diario'], mode='lines',
+                line=dict(color='rgba(255, 255, 255, 0.4)', width=1.5), name='Yield Histórico (En su día)'
+            ))
+
+            fig_yoc_hist.add_trace(go.Scatter(
+                x=df_yoc_hist.index, y=df_yoc_hist['YoC_Hist'], mode='lines',
+                line=dict(color='#faca2b', width=2), name='Yield on Cost (Hoy)'
+            ))
+
+            # 2. Líneas horizontales de zonas de valoración
+            fig_yoc_hist.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", opacity=0.6)
+            fig_yoc_hist.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", opacity=0.6)
+            fig_yoc_hist.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", opacity=0.6)
+
+            # 3. Trazos invisibles usando LA PRIMERA FECHA REAL para crear la leyenda interactiva
+            primera_fecha = df_yoc_hist.index[0]
+            fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
+            fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
+            fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
+            
+            # Línea y texto del Yield Actual
+            fig_yoc_hist.add_hline(y=yield_actual, line_dash="dash", line_color="#00d4ff")
+            fig_yoc_hist.add_annotation(
+                x=df_yoc_hist.index[-1], y=yield_actual, text=f"Yield Hoy: {yield_actual:.2f}%", 
+                showarrow=False, yshift=15, font=dict(color="#00d4ff", size=11, weight="bold"), xanchor="right"
+            )
+
+            fig_yoc_hist.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=20, b=50),
+                height=400, yaxis=dict(title="Rentabilidad (%)", tickformat=".2f"), hovermode="x unified",
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=True,
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+            )
+            fig_yoc_hist.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+            st.plotly_chart(fig_yoc_hist, use_container_width=True)
+        else:
+            st.info("Datos insuficientes para calcular el Yield on Cost histórico.")
+            
+        st.markdown("---")
+        
         # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN
         st.markdown("---")
         st.markdown("#### ⏳ Yield on Cost Histórico")
