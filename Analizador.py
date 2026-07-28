@@ -2098,22 +2098,41 @@ with tab_cartera:
                                         fig_meses.update_layout(
                                             barmode='group', template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=350,
                                             hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5), yaxis=dict(title="Dividendos Netos")
+                                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5), yaxis=dict(title="Dividendos Netos (€)")
                                         )
                                         st.plotly_chart(fig_meses, use_container_width=True)
                                         
                                     with col_cal2:
-                                        st.markdown("##### 📈 Resumen por Años (YoY)")
+                                        st.markdown("##### 📝 Resumen YoY")
                                         def color_yoy(val):
                                             if pd.isna(val): return ''
                                             color = '#21c354' if val > 0 else ('#ff4b4b' if val < 0 else '#aaaaaa')
                                             return f'color: {color}; font-weight: bold;'
                                             
                                         styled_anual = anual_divs.style.format({
-                                            'Dividendo': '{:,.2f}',
+                                            'Dividendo': '{:,.2f} €',
                                             'Crecimiento YoY (%)': '{:+.2f}%'
                                         }).map(color_yoy, subset=['Crecimiento YoY (%)'])
                                         st.dataframe(styled_anual, use_container_width=True, hide_index=True)
+
+                                    # --- NUEVO GRÁFICO ANUAL (BOLA DE NIEVE) ---
+                                    st.markdown("<br>", unsafe_allow_html=True)
+                                    st.markdown("##### 📈 Evolución Anual (Efecto Bola de Nieve)")
+                                    fig_anual = go.Figure()
+                                    fig_anual.add_trace(go.Bar(
+                                        x=anual_divs['Año'].astype(str),
+                                        y=anual_divs['Dividendo'],
+                                        name='Total Cobrado en el Año',
+                                        marker_color='#00d4ff',
+                                        text=[f"{val:,.2f} €" for val in anual_divs['Dividendo']],
+                                        textposition='auto'
+                                    ))
+                                    fig_anual.update_layout(
+                                        template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=350,
+                                        hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                                        yaxis=dict(title="Dividendos Netos Totales (€)")
+                                    )
+                                    st.plotly_chart(fig_anual, use_container_width=True)
 
                             st.markdown("---")
                             st.markdown("#### 📊 Rentabilidad por Empresa en Euros (Precio vs Total con Dividendos)")
