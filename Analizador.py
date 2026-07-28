@@ -177,7 +177,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             p_fcf = precio_actual / fcf_per_share
             fcf_yield = (fcf_per_share / precio_actual) * 100
     
-if fcf > 0:
+    if fcf > 0:
         deuda_fcf = total_debt / fcf
 
     dividendos_barras = divs_por_año.copy()
@@ -446,26 +446,26 @@ if fcf > 0:
         str_ultima_venta, color_ult_venta = format_last_time(is_venta, "#ff4b4b")
 
         html_stats = f"""
-<div style="background-color: rgba(255, 255, 255, 0.05); padding: 15px 20px; border-radius: 5px; margin-top: -15px; margin-bottom: 20px;">
-    <div style="font-size: 0.85rem; color: #aaa; margin-bottom: 12px; font-weight: 600; letter-spacing: 1px;">HISTÓRICO {años_analisis}A</div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-        <span style="font-size: 1rem;"><span style="color: #21c354; font-weight: 900; margin-right: 8px;">—</span>Toques zona compra</span>
-        <span style="color: #21c354; font-weight: bold; font-size: 1.1rem;">{toques_compra}</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; color: #ccc;">
-        <span style="padding-left: 24px;">Última vez</span>
-        <span style="color: {color_ult_compra}; font-weight: 500;">{str_ultima_compra}</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-        <span style="font-size: 1rem;"><span style="color: #ff4b4b; font-weight: 900; margin-right: 8px;">—</span>Toques zona venta</span>
-        <span style="color: #ff4b4b; font-weight: bold; font-size: 1.1rem;">{toques_venta}</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #ccc;">
-        <span style="padding-left: 24px;">Última vez</span>
-        <span style="color: {color_ult_venta}; font-weight: 500;">{str_ultima_venta}</span>
-    </div>
-</div>
-"""
+        <div style="background-color: rgba(255, 255, 255, 0.05); padding: 15px 20px; border-radius: 5px; margin-top: -15px; margin-bottom: 20px;">
+            <div style="font-size: 0.85rem; color: #aaa; margin-bottom: 12px; font-weight: 600; letter-spacing: 1px;">HISTÓRICO {años_analisis}A</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 1rem;"><span style="color: #21c354; font-weight: 900; margin-right: 8px;">—</span>Toques zona compra</span>
+                <span style="color: #21c354; font-weight: bold; font-size: 1.1rem;">{toques_compra}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; color: #ccc;">
+                <span style="padding-left: 24px;">Última vez</span>
+                <span style="color: {color_ult_compra}; font-weight: 500;">{str_ultima_compra}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 1rem;"><span style="color: #ff4b4b; font-weight: 900; margin-right: 8px;">—</span>Toques zona venta</span>
+                <span style="color: #ff4b4b; font-weight: bold; font-size: 1.1rem;">{toques_venta}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: #ccc;">
+                <span style="padding-left: 24px;">Última vez</span>
+                <span style="color: {color_ult_venta}; font-weight: 500;">{str_ultima_venta}</span>
+            </div>
+        </div>
+        """
         st.markdown(html_stats, unsafe_allow_html=True)
 
     st.divider()
@@ -907,75 +907,25 @@ if fcf > 0:
             st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Muestra la rentabilidad por dividendo a lo largo del tiempo. Las caídas bruscas del precio provocan picos en el Yield (tocando la línea verde inferior), señalando las mejores oportunidades históricas de compra.</p>", unsafe_allow_html=True)
 
         # 2. Drawdown Histórico
-
-# -------------------------------------------------------------
-        # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN Y FRANJAS
-        # -------------------------------------------------------------
-        st.markdown("---")
-        st.markdown("#### ⏳ Yield on Cost Histórico")
-        st.markdown(f"> **Yield on Cost (YoC):** Muestra el Yield Actual ({yield_actual:.2f}%) que tendrías hoy si hubieras comprado la acción en cualquier fecha del pasado. Calculado dividiendo el dividendo actual ({forward_dividend / divisor_uk:.2f}{sym}) entre el precio histórico de cada día.")
-        
-        if not historial_analisis.empty and forward_dividend > 0:
-            df_yoc_hist = historial_analisis[['Close', 'Yield_Diario']].copy()
+        with col_graf2:
+            st.markdown("#### 📉 Drawdown Histórico")
+            df_dd = historial_analisis[['Close']].copy()
+            df_dd['Max'] = df_dd['Close'].cummax()
+            df_dd['Drawdown'] = (df_dd['Close'] - df_dd['Max']) / df_dd['Max'] * 100
             
-            # Limpieza exhaustiva para que Plotly no rompa el eje de fechas
-            df_yoc_hist = df_yoc_hist.dropna(subset=['Close', 'Yield_Diario'])
-            
-            if currency == 'GBp':
-                df_yoc_hist['Close_Div'] = df_yoc_hist['Close'] / divisor_uk
-            else:
-                df_yoc_hist['Close_Div'] = df_yoc_hist['Close']
-                
-            df_yoc_hist['YoC_Hist'] = (forward_dividend / df_yoc_hist['Close_Div']) * 100
-            
-            # Filtro contra infinitos por si Yahoo devuelve precio 0.00 algún día festivo
-            df_yoc_hist.replace([np.inf, -np.inf], np.nan, inplace=True)
-            df_yoc_hist = df_yoc_hist.dropna(subset=['YoC_Hist'])
-            
-            fig_yoc_hist = go.Figure()
-            
-            # 1. Trazos principales PRIMERO para fijar el eje X en modo Fechas (Datetime)
-            fig_yoc_hist.add_trace(go.Scatter(
-                x=df_yoc_hist.index, y=df_yoc_hist['Yield_Diario'], mode='lines',
-                line=dict(color='rgba(255, 255, 255, 0.4)', width=1.5), name='Yield Histórico (En su día)'
+            fig_dd = go.Figure()
+            fig_dd.add_trace(go.Scatter(
+                x=df_dd.index, y=df_dd['Drawdown'], fill='tozeroy', mode='lines',
+                line=dict(color='#ff4b4b', width=1.5), fillcolor='rgba(255, 75, 75, 0.2)', name='Drawdown %'
             ))
-
-            fig_yoc_hist.add_trace(go.Scatter(
-                x=df_yoc_hist.index, y=df_yoc_hist['YoC_Hist'], mode='lines',
-                line=dict(color='#faca2b', width=2), name='Yield on Cost (Hoy)'
-            ))
-
-            # 2. Líneas horizontales de zonas de valoración
-            fig_yoc_hist.add_hline(y=yield_medio, line_dash="dash", line_color="#faca2b", opacity=0.6)
-            fig_yoc_hist.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354", opacity=0.6)
-            fig_yoc_hist.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b", opacity=0.6)
-
-            # 3. Trazos invisibles usando LA PRIMERA FECHA REAL para crear la leyenda interactiva
-            primera_fecha = df_yoc_hist.index[0]
-            fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
-            fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
-            fig_yoc_hist.add_trace(go.Scatter(x=[primera_fecha], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
-            
-            # Línea y texto del Yield Actual
-            fig_yoc_hist.add_hline(y=yield_actual, line_dash="dash", line_color="#00d4ff")
-            fig_yoc_hist.add_annotation(
-                x=df_yoc_hist.index[-1], y=yield_actual, text=f"Yield Hoy: {yield_actual:.2f}%", 
-                showarrow=False, yshift=15, font=dict(color="#00d4ff", size=11, weight="bold"), xanchor="right"
+            fig_dd.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50),
+                height=320, yaxis=dict(title="Caída desde Máximos (%)", tickformat=".1f", ticksuffix="%"), hovermode="x unified",
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
+            st.plotly_chart(fig_dd, use_container_width=True)
+            st.markdown("<p style='font-size:0.85rem; color:#aaa;'>Mide la caída porcentual de la acción desde su último máximo histórico. Es la mejor forma de evaluar la volatilidad real de la empresa y detectar correcciones de mercado severas.</p>", unsafe_allow_html=True)
 
-            fig_yoc_hist.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=20, b=50),
-                height=400, yaxis=dict(title="Rentabilidad (%)", tickformat=".2f"), hovermode="x unified",
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=True,
-                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
-            )
-            fig_yoc_hist.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
-            st.plotly_chart(fig_yoc_hist, use_container_width=True)
-        else:
-            st.info("Datos insuficientes para calcular el Yield on Cost histórico.")
-            
-        st.markdown("---")
-        
         # 1.5. YIELD ON COST HISTÓRICO CON SUPERPOSICIÓN
         st.markdown("---")
         st.markdown("#### ⏳ Yield on Cost Histórico")
@@ -1395,36 +1345,46 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
 
         deuda_fcf = total_debt / fcf if fcf > 0 else -1.0
 
-        # === CORRECCIÓN WKL.AS (Evitar -100%) ===
-        fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
+        # === INICIO CÁLCULO DE ACCIONES (DOBLE MOTOR) ===
+        shares_yearly = pd.Series(dtype=float)
         variacion_acciones = None
-        try:
-            shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
-            if shares_hist is not None and len(shares_hist) > 1:
-                shares_yearly = shares_hist.groupby(shares_hist.index.year).last()
-                if len(shares_yearly) >= (años_analisis + 1):
-                    acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
-                else:
-                    acc_ini = shares_yearly.iloc[0]
-                acc_fin = shares_yearly.iloc[-1]
-                if acc_ini > 0 and acc_fin > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-        except: pass
 
-        if variacion_acciones is None:
-            try:
-                inc_stmt = ticker.income_stmt
-                if not inc_stmt.empty:
-                    for key in ['Basic Average Shares', 'Diluted Average Shares']:
-                        if key in inc_stmt.index:
-                            sh_data = inc_stmt.loc[key].dropna()
-                            sh_data = sh_data[sh_data > 0].sort_index()
-                            if len(sh_data) >= 2:
-                                acc_ini = sh_data.iloc[0]
-                                acc_fin = sh_data.iloc[-1]
-                                if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+        # Motor 1: Income Statement
+        try:
+            inc_stmt = ticker.income_stmt
+            if not inc_stmt.empty:
+                for key in ['Basic Average Shares', 'Diluted Average Shares']:
+                    if key in inc_stmt.index:
+                        sh_data = inc_stmt.loc[key].dropna()
+                        sh_data = sh_data[sh_data > 0].sort_index()
+                        if len(sh_data) >= 2:
+                            shares_yearly = sh_data.groupby(sh_data.index.year).last()
+                            acc_ini = shares_yearly.iloc[0]
+                            acc_fin = shares_yearly.iloc[-1]
+                            if acc_ini > 0 and (acc_fin / acc_ini) > 0.10: 
+                                variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
                                 break
-            except: pass
-        # =======================================
+        except Exception: pass
+
+        # Motor 2: get_shares_full
+        if variacion_acciones is None or shares_yearly.empty:
+            try:
+                fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
+                shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
+                if shares_hist is not None and len(shares_hist) > 1:
+                    sy = shares_hist.groupby(shares_hist.index.year).last()
+                    sy = sy[sy > 0]
+                    if len(sy) >= 2:
+                        shares_yearly = sy
+                        if len(shares_yearly) >= (años_analisis + 1):
+                            acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
+                        else:
+                            acc_ini = shares_yearly.iloc[0]
+                        acc_fin = shares_yearly.iloc[-1]
+                        if acc_ini > 0 and (acc_fin / acc_ini) > 0.10:
+                            variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+            except Exception: pass
+        # === FIN CÁLCULO DE ACCIONES ===
 
         dgr_5y = None
         if len(dividendos_barras) >= 6:
