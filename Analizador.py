@@ -206,45 +206,47 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
                 racha_sin_recortes += 1
             else: break
 
-    # === INICIO CÁLCULO DE ACCIONES (DOBLE MOTOR) ===
+    # === INICIO CÁLCULO DE ACCIONES (MOTOR DUAL ARREGLADO) ===
     shares_yearly = pd.Series(dtype=float)
     variacion_acciones = None
 
-    # Motor 1: Income Statement (Prioridad para Americanas)
+    # Motor 1: get_shares_full (Lee todo el historial disponible)
     try:
-        inc_stmt = ticker.income_stmt
-        if not inc_stmt.empty:
-            for key in ['Basic Average Shares', 'Diluted Average Shares']:
-                if key in inc_stmt.index:
-                    sh_data = inc_stmt.loc[key].dropna()
-                    sh_data = sh_data[sh_data > 0].sort_index()
-                    if len(sh_data) >= 2:
-                        shares_yearly = sh_data.groupby(sh_data.index.year).last()
-                        acc_ini = shares_yearly.iloc[0]
-                        acc_fin = shares_yearly.iloc[-1]
-                        # Escudo anti-bug de Yahoo (Rechaza caídas irreales > 90%)
-                        if acc_ini > 0 and (acc_fin / acc_ini) > 0.10: 
-                            variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-                            break
+        fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
+        shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
+        if shares_hist is not None and len(shares_hist) > 1:
+            sy = shares_hist.groupby(shares_hist.index.year).last()
+            sy = sy[sy > 0] # Limpiamos ceros falsos de Yahoo
+            sy = sy[sy.pct_change().fillna(0) > -0.50] # Limpiamos caídas irreales (>50%)
+            
+            if len(sy) >= 2:
+                shares_yearly = sy
+                if len(shares_yearly) >= (años_analisis + 1):
+                    acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
+                else:
+                    acc_ini = shares_yearly.iloc[0]
+                acc_fin = shares_yearly.iloc[-1]
+                if acc_ini > 0:
+                    variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
     except Exception: pass
 
-    # Motor 2: get_shares_full (Respaldo para Europeas como WKL.AS)
+    # Motor 2: Income Statement (Respaldo por si falla el primero)
     if variacion_acciones is None or shares_yearly.empty:
         try:
-            fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
-            shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
-            if shares_hist is not None and len(shares_hist) > 1:
-                sy = shares_hist.groupby(shares_hist.index.year).last()
-                sy = sy[sy > 0]
-                if len(sy) >= 2:
-                    shares_yearly = sy
-                    if len(shares_yearly) >= (años_analisis + 1):
-                        acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
-                    else:
-                        acc_ini = shares_yearly.iloc[0]
-                    acc_fin = shares_yearly.iloc[-1]
-                    if acc_ini > 0 and (acc_fin / acc_ini) > 0.10:
-                        variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+            inc_stmt = ticker.income_stmt
+            if not inc_stmt.empty:
+                for key in ['Basic Average Shares', 'Diluted Average Shares']:
+                    if key in inc_stmt.index:
+                        sh_data = inc_stmt.loc[key].dropna()
+                        sh_data = sh_data[sh_data > 0].sort_index()
+                        sh_data = sh_data[sh_data.pct_change().fillna(0) > -0.50]
+                        if len(sh_data) >= 2:
+                            shares_yearly = sh_data.groupby(sh_data.index.year).last()
+                            acc_ini = shares_yearly.iloc[0]
+                            acc_fin = shares_yearly.iloc[-1]
+                            if acc_ini > 0: 
+                                variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                                break
         except Exception: pass
     # === FIN CÁLCULO DE ACCIONES ===
 
@@ -377,6 +379,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     elif score >= 5.0: st.warning(f"⚖️ **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Aceptable. Tiene solidez pero presenta debilidades en su flujo de efectivo o valoración.")
     else: st.error(f"🚨 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Calidad Insuficiente. No supera los filtros de caja real y seguridad.")
 
+    # --- AVISO CHOWDER ---
     if chowder_number is not None:
         if chowder_pass:
             st.success(f"🥣 **REGLA DE CHOWDER: APROBADA ({chowder_number:.1f})** — Supera el objetivo exigido de {chowder_target:.0f}.")
@@ -418,6 +421,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
 
+        # --- ESTADÍSTICAS DE TOQUES ZONAS ---
         is_compra = df_grafico['Close'] <= df_grafico['Precio_Compra']
         toques_compra = (is_compra & ~is_compra.shift(1, fill_value=False)).sum()
         
@@ -499,10 +503,13 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         df_tech = df_tech_full[df_tech_full.index >= fecha_display].copy()
 
         if not df_tech.empty:
+            
             ult_close_val = precio_actual / divisor_uk
             ult_suelo_val = precio_compra / divisor_uk
+            
             precio_str = f"{ult_close_val:.2f}{sym}"
             suelo_str = f"{ult_suelo_val:.2f}{sym}"
+
             if ult_suelo_val > 0: dist_suelo = ((ult_close_val - ult_suelo_val) / ult_suelo_val) * 100
             else: dist_suelo = 999.0
 
@@ -516,10 +523,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             vol_elevado = max_vol_reciente > (avg_vol * 1.5)
 
             analisis_ia = f"🧠 **Análisis de la IA (Leyendo cotización actual: {precio_str}):** "
+
             if dist_suelo <= 0:
                 descuento_extra = abs(dist_suelo)
                 if descuento_extra > 0.5: analisis_ia += f"🎯 **En Zona de Disparo.** El precio ({precio_str}) cotiza un **{descuento_extra:.1f}% por debajo** de tu Suelo Fundamental ({suelo_str}). "
                 else: analisis_ia += f"🎯 **En Zona de Disparo.** El precio ({precio_str}) está tocando el Suelo Fundamental ({suelo_str}). "
+                
                 if vol_elevado: analisis_ia += "Se detecta volumen extremo reciente (posible capitulación). "
                 if ult_macd > ult_signal and ult_hist > 0: analisis_ia += "El MACD confirma giro alcista. **Escenario de COMPRA IDEAL.**"
                 elif ult_macd < ult_signal and ult_hist > penult_hist: analisis_ia += "El MACD sigue bajista pero pierde fuerza. Atento al inminente cruce al alza."
@@ -540,8 +549,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_tech = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.5, 0.2, 0.3])
 
             fig_tech.add_trace(go.Ohlc(
-                x=df_tech.index, open=df_tech['Open'], high=df_tech['High'], low=df_tech['Low'], close=df_tech['Close'], 
-                name='Precio', increasing_line_color='#21c354', decreasing_line_color='#ff4b4b', showlegend=False
+                x=df_tech.index, open=df_tech['Open'], high=df_tech['High'],
+                low=df_tech['Low'], close=df_tech['Close'], name='Precio',
+                increasing_line_color='#21c354', decreasing_line_color='#ff4b4b',
+                showlegend=False
             ), row=1, col=1)
 
             ex_div_ts = info.get('exDividendDate')
@@ -731,11 +742,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     else: st.error(f"{t_pfcf} P/FCF (Efectivo Real): NEGATIVO")
 
     if price_to_book > 0:
-        if es_financiera or es_industrial: l_verde, l_amarillo = 1.5, 2.5; ctx = "Sector Fin/Ind (Exige P/B estricto)"
-        elif es_tecnologica: l_verde, l_amarillo = 5.0, 10.0; ctx = "Sector Tech/Software (P/B alto por intangibles)"
-        else: l_verde, l_amarillo = 2.5, 5.0; ctx = "Sector General"
-        if price_to_book <= l_verde: st.success(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Atractivo)")
-        elif price_to_book <= l_amarillo: st.warning(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Exigente, pero en el límite)")
+        if es_financiera or es_industrial: pb_optimo, pb_max = 1.5, 2.5; ctx = "Sector Fin/Ind (Exige P/B estricto)"
+        elif es_tecnologica: pb_optimo, pb_max = 5.0, 10.0; ctx = "Sector Tech/Software (P/B alto por intangibles)"
+        else: pb_optimo, pb_max = 2.5, 5.0; ctx = "Sector General"
+        if price_to_book <= pb_optimo: st.success(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Atractivo)")
+        elif price_to_book <= pb_max: st.warning(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Exigente, pero en el límite)")
         else: st.error(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Sobrevaloración contable extrema o recompras masivas)")
 
     st.markdown("#### 🛡️ 2. Seguridad del Dividendo (Cobertura)")
@@ -887,9 +898,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             fig_yield.add_hline(y=yield_infravalorado, line_dash="dot", line_color="#21c354")
             fig_yield.add_hline(y=yield_sobrevalorado, line_dash="dot", line_color="#ff4b4b")
 
-            fig_yield.add_trace(go.Scatter(x=[df_yield_chart.index[0]], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
-            fig_yield.add_trace(go.Scatter(x=[df_yield_chart.index[0]], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
-            fig_yield.add_trace(go.Scatter(x=[df_yield_chart.index[0]], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
+            primera_fecha_yield = df_yield_chart.index[0]
+            fig_yield.add_trace(go.Scatter(x=[primera_fecha_yield], y=[None], mode='lines', line=dict(color='#ff4b4b', dash='dot'), name=f"Techo: {yield_sobrevalorado:.2f}%"))
+            fig_yield.add_trace(go.Scatter(x=[primera_fecha_yield], y=[None], mode='lines', line=dict(color='#faca2b', dash='dash'), name=f"Media: {yield_medio:.2f}%"))
+            fig_yield.add_trace(go.Scatter(x=[primera_fecha_yield], y=[None], mode='lines', line=dict(color='#21c354', dash='dot'), name=f"Suelo: {yield_infravalorado:.2f}%"))
             fig_yield.add_trace(go.Scatter(
                 x=[df_yield_chart.index[-1]], y=[df_yield_chart.iloc[-1]], mode='markers',
                 marker=dict(color='#00d4ff', size=10, symbol='diamond'), name=f"Actual: {yield_actual:.2f}%"
@@ -1241,6 +1253,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     )
     st.plotly_chart(fig_yoc_p, use_container_width=True)
 
+
 # ==========================================
 # 2. FUNCIÓN PARA EL RADAR MÚLTIPLE
 # ==========================================
@@ -1345,44 +1358,44 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
 
         deuda_fcf = total_debt / fcf if fcf > 0 else -1.0
 
-        # === INICIO CÁLCULO DE ACCIONES (DOBLE MOTOR) ===
+        # === INICIO CÁLCULO DE ACCIONES (MOTOR DUAL ARREGLADO) ===
         shares_yearly = pd.Series(dtype=float)
         variacion_acciones = None
 
-        # Motor 1: Income Statement
         try:
-            inc_stmt = ticker.income_stmt
-            if not inc_stmt.empty:
-                for key in ['Basic Average Shares', 'Diluted Average Shares']:
-                    if key in inc_stmt.index:
-                        sh_data = inc_stmt.loc[key].dropna()
-                        sh_data = sh_data[sh_data > 0].sort_index()
-                        if len(sh_data) >= 2:
-                            shares_yearly = sh_data.groupby(sh_data.index.year).last()
-                            acc_ini = shares_yearly.iloc[0]
-                            acc_fin = shares_yearly.iloc[-1]
-                            if acc_ini > 0 and (acc_fin / acc_ini) > 0.10: 
-                                variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-                                break
+            fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
+            shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
+            if shares_hist is not None and len(shares_hist) > 1:
+                sy = shares_hist.groupby(shares_hist.index.year).last()
+                sy = sy[sy > 0]
+                sy = sy[sy.pct_change().fillna(0) > -0.50]
+                if len(sy) >= 2:
+                    shares_yearly = sy
+                    if len(shares_yearly) >= (años_analisis + 1):
+                        acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
+                    else:
+                        acc_ini = shares_yearly.iloc[0]
+                    acc_fin = shares_yearly.iloc[-1]
+                    if acc_ini > 0:
+                        variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
         except Exception: pass
 
-        # Motor 2: get_shares_full
         if variacion_acciones is None or shares_yearly.empty:
             try:
-                fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
-                shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
-                if shares_hist is not None and len(shares_hist) > 1:
-                    sy = shares_hist.groupby(shares_hist.index.year).last()
-                    sy = sy[sy > 0]
-                    if len(sy) >= 2:
-                        shares_yearly = sy
-                        if len(shares_yearly) >= (años_analisis + 1):
-                            acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
-                        else:
-                            acc_ini = shares_yearly.iloc[0]
-                        acc_fin = shares_yearly.iloc[-1]
-                        if acc_ini > 0 and (acc_fin / acc_ini) > 0.10:
-                            variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                inc_stmt = ticker.income_stmt
+                if not inc_stmt.empty:
+                    for key in ['Basic Average Shares', 'Diluted Average Shares']:
+                        if key in inc_stmt.index:
+                            sh_data = inc_stmt.loc[key].dropna()
+                            sh_data = sh_data[sh_data > 0].sort_index()
+                            sh_data = sh_data[sh_data.pct_change().fillna(0) > -0.50]
+                            if len(sh_data) >= 2:
+                                shares_yearly = sh_data.groupby(sh_data.index.year).last()
+                                acc_ini = shares_yearly.iloc[0]
+                                acc_fin = shares_yearly.iloc[-1]
+                                if acc_ini > 0: 
+                                    variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                                    break
             except Exception: pass
         # === FIN CÁLCULO DE ACCIONES ===
 
@@ -1539,518 +1552,5 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         }
     except:
         return None
-
-# ==========================================
-# 3. MAQUETACIÓN EN PESTAÑAS (UI)
-# ==========================================
-st.title("Sistema Fundamental - Método Geraldine Weiss")
-
-tab_individual, tab_masiva, tab_cartera = st.tabs(["🔍 Análisis de Francotirador", "📑 Screener Múltiple (Radar)", "💼 Mi Cartera Privada"])
-
-with tab_individual:
-    col_input1, col_input2, col_input3 = st.columns(3)
-    with col_input1: ticker_input = st.text_input("Ticker individual:", "NVO").upper()
-    with col_input2: años_analisis = st.selectbox("Periodo Histórico:", [5, 10, 12, 15, 20], index=2)
-    with col_input3: impuesto = st.number_input("Retención (%)", value=19.0, key="imp_ind")
-
-    if st.button("Analizar Empresa"):
-        with st.spinner(f"Analizando {ticker_input} en profundidad..."):
-            try: screener_weiss_definitivo(ticker_input, años_analisis, impuesto)
-            except Exception as e: st.error(f"Se ha producido un error: {e}")
-
-with tab_masiva:
-    st.markdown("### 📡 Radar Fundamental Completo por Lotes")
-    st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** respecto al Suelo Fundamental.")
-    st.markdown("> *Nota: El porcentaje de la 'Cotización Actual' indica a qué distancia exacta se encuentra de su **Suelo de Compra**. Las métricas de puntuación indican explícitamente cuánto aportan al Score global.*")
     
-    tickers_masivos = st.text_area("Lista de Tickers (separados por comas):", "NVO, LOW, ACN, MSFT, JNJ, PG, PEP, HD")
     
-    col_m1, col_m2 = st.columns(2)
-    with col_m1: años_masivos = st.selectbox("Periodo para canal histórico:", [5, 10, 12, 15, 20], index=2, key="años_mas")
-    with col_m2: impuesto_masivo = st.number_input("Retención (%)", value=19.0, key="imp_mas")
-
-    if st.button("🚀 Escanear Watchlist"):
-        lista_tickers = [t.strip() for t in tickers_masivos.split(",") if t.strip()]
-        
-        if len(lista_tickers) > 0:
-            barra_progreso = st.progress(0)
-            texto_estado = st.empty()
-            resultados = []
-            
-            for idx, ticker in enumerate(lista_tickers):
-                texto_estado.text(f"Escaneando {ticker} ({idx+1}/{len(lista_tickers)})...")
-                datos = analizar_empresa_rapido(ticker, años_masivos, impuesto_masivo)
-                if datos: resultados.append(datos)
-                barra_progreso.progress((idx + 1) / len(lista_tickers))
-            
-            texto_estado.text("¡Escaneo masivo completado!")
-            
-            if resultados:
-                df_res = pd.DataFrame(resultados).sort_values(by="_Dist_Suelo")
-                
-                def color_row(row):
-                    styles = [''] * len(row)
-                    est = row['Estado']
-                    for idx, col_name in enumerate(row.index):
-                        if col_name == 'Score Weiss':
-                            if row['_score'] >= 8: styles[idx] = 'color: #21c354; font-weight: bold;'
-                            elif row['_score'] >= 5: styles[idx] = 'color: #faca2b; font-weight: bold;'
-                            else: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
-                        elif col_name == 'Cotización Actual':
-                            if "COMPRA" in est: styles[idx] = 'color: #21c354; font-weight: bold;'
-                            elif "SOBREVALORADA" in est: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
-                            else: styles[idx] = 'color: #faca2b; font-weight: bold;'
-                        elif col_name == 'Suelo (Infra)': styles[idx] = 'color: #21c354;'
-                        elif col_name == 'Precio Justo': styles[idx] = 'color: #faca2b;'
-                        elif col_name == 'Techo (Sobre)': styles[idx] = 'color: #ff4b4b;'
-                        elif col_name in ['Yield Bruto', 'Yield Neto', 'Div. Neto']:
-                            if row['_y_act'] >= row['_y_inf']: styles[idx] = 'color: #21c354;'
-                            elif row['_y_act'] >= row['_y_med']: styles[idx] = 'color: #faca2b;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'PER':
-                            if 0 < row['_per'] <= 20: styles[idx] = 'color: #21c354;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'P/FCF':
-                            if 0 < row['_p_fcf'] <= 20: styles[idx] = 'color: #21c354;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'P/B':
-                            pb = row['_pb']
-                            sec = row['_sec']
-                            if pb <= 0: styles[idx] = 'color: #ff4b4b;'
-                            else:
-                                lv, la = (1.5, 2.5) if sec == 1 else ((5.0, 10.0) if sec == 2 else (2.5, 5.0))
-                                if pb <= lv: styles[idx] = 'color: #21c354;'
-                                elif pb <= la: styles[idx] = 'color: #faca2b;'
-                                else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Payout BPA':
-                            p = row['_pay_bpa']
-                            if 0 < p <= row['_l_bpa']: styles[idx] = 'color: #21c354;'
-                            elif p <= row['_a_bpa']: styles[idx] = 'color: #faca2b;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Payout FCF':
-                            p = row['_pay_fcf']
-                            if 0 <= p <= row['_l_fcf']: styles[idx] = 'color: #21c354;'
-                            elif p <= row['_a_fcf']: styles[idx] = 'color: #faca2b;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Deuda/FCF':
-                            d = row['_deuda']
-                            if 0 <= d <= 3.0: styles[idx] = 'color: #21c354;'
-                            elif d <= 5.0: styles[idx] = 'color: #faca2b;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Acciones':
-                            a = row['_acc']
-                            if a < -0.5: styles[idx] = 'color: #21c354;'
-                            elif a <= 1.0: styles[idx] = 'color: #faca2b;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Crec. BPA 3Y':
-                            c = row['_cbpa3']
-                            if c != -999 and c > 0: styles[idx] = 'color: #21c354;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Consist. BPA':
-                            if row['_cons'] == 1: styles[idx] = 'color: #21c354;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'DGR 5A':
-                            d = row['_dgr']
-                            if d >= 10.0: styles[idx] = 'color: #21c354;'
-                            elif d >= 7.5: styles[idx] = 'color: #faca2b;'
-                            elif d >= 5.0: styles[idx] = 'color: #ff9800;'
-                            elif d >= 2.5: styles[idx] = 'color: #ff7043;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == f'DGR {años_masivos}A':
-                            d = row['_dgr_per']
-                            if d >= 10.0: styles[idx] = 'color: #21c354;'
-                            elif d >= 7.5: styles[idx] = 'color: #faca2b;'
-                            elif d >= 5.0: styles[idx] = 'color: #ff9800;'
-                            elif d >= 2.5: styles[idx] = 'color: #ff7043;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Chowder':
-                            c_num = row['_chowder']
-                            c_tar = row['_chowder_target']
-                            if c_num != -999.0:
-                                if c_num >= c_tar: styles[idx] = 'color: #21c354; font-weight: bold;'
-                                else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Aumentos':
-                            if row['_aum'] >= min(5, años_masivos): styles[idx] = 'color: #21c354;'
-                            else: styles[idx] = 'color: #ff4b4b;'
-                        elif col_name == 'Años Pag.':
-                            if row['_hist'] == 1: styles[idx] = 'color: #21c354;'
-                            else: styles[idx] = 'color: #faca2b;'
-                        elif col_name == 'Estado':
-                            if "COMPRA" in est: styles[idx] = 'background-color: #004d00; color: white;'
-                            elif "SOBREVALORADA" in est: styles[idx] = 'background-color: #4d0000; color: white;'
-                            else: styles[idx] = 'background-color: #4d4d00; color: white;'
-                    return styles
-                
-                columnas_visibles = [c for c in df_res.columns if not c.startswith('_')]
-                styled_df = df_res.style.apply(color_row, axis=1)
-                st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
-                
-                df_export = df_res[columnas_visibles]
-                csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
-                st.download_button(
-                    label="💾 Descargar CSV para Google Sheets",
-                    data=csv,
-                    file_name=f"Screener_Multi_Weiss_{datetime.now().strftime('%Y-%m-%d')}.csv",
-                    mime="text/csv",
-                )
-            else:
-                st.warning("No se pudieron recopilar canales históricos válidos para los tickers introducidos.")
-
-# --- PESTAÑA 3: TU CARTERA PRIVADA ---
-with tab_cartera:
-    st.markdown("### 💼 Control de Rentabilidad en Tiempo Real")
-    st.markdown("> *Privacidad garantizada: Tus datos solo se procesan en la memoria temporal de tu navegador. Ningún dato se guarda en servidores de terceros ni se sube a GitHub.*")
-    
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        metodo_carga = st.radio("¿Cómo quieres cargar tu cartera?", ["📂 Subir Archivo", "📝 Pegar Texto (Recomendado)"])
-    with col_c2:
-        impuesto_cart = st.number_input("Retención media de dividendos (%)", value=19.0, key="imp_cart_3")
-    
-    df_ops = None
-    
-    if metodo_carga == "📂 Subir Archivo":
-        archivo_subido = st.file_uploader("Sube tu historial de operaciones (CSV o Excel)", type=["csv", "xlsx"])
-        if archivo_subido is not None:
-            try:
-                if archivo_subido.name.endswith('.csv'):
-                    df_ops = pd.read_csv(archivo_subido, sep=None, engine='python')
-                else:
-                    df_ops = pd.read_excel(archivo_subido)
-            except Exception as e:
-                st.error(f"Error al leer el archivo: {e}")
-                
-    else:
-        st.info("Pega directamente el contenido de tu CSV a continuación. Asegúrate de incluir los encabezados: Fecha, Ticker, Operacion, Acciones, Precio.")
-        texto_csv = st.text_area("Pega aquí el contenido de tu CSV:", height=200)
-        if texto_csv:
-            try:
-                df_ops = pd.read_csv(io.StringIO(texto_csv), sep=None, engine='python')
-            except Exception as e:
-                st.error(f"Error al leer el texto pegado: {e}")
-
-    if df_ops is not None:
-        try:
-            columnas_requeridas = ['Fecha', 'Ticker', 'Operacion', 'Acciones', 'Precio']
-            if not all(col in df_ops.columns for col in columnas_requeridas):
-                st.error(f"❌ Error de formato. El archivo debe contener exactamente estas columnas (respetando mayúsculas): {', '.join(columnas_requeridas)}")
-            else:
-                df_ops['Fecha'] = pd.to_datetime(df_ops['Fecha'], errors='coerce', dayfirst=True)
-                df_ops = df_ops.dropna(subset=['Fecha', 'Ticker', 'Operacion', 'Acciones', 'Precio'])
-                df_ops = df_ops.sort_values('Fecha')
-                
-                años_unicos = sorted(df_ops['Fecha'].dt.year.dropna().unique())
-                opciones_año = ["Todo el Historial"] + [str(int(a)) for a in años_unicos]
-                
-                tickers_unicos_raw = sorted(df_ops['Ticker'].str.strip().str.upper().unique().tolist())
-                opciones_ticker = ["Todas las Empresas"] + tickers_unicos_raw
-                
-                st.markdown("---")
-                st.markdown("#### 🎯 Filtros Analíticos de Cartera")
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    año_filtro = st.selectbox("📅 Selecciona Año de Compra (Modo Añada):", opciones_año)
-                with col_f2:
-                    ticker_filtro = st.selectbox("🏢 Selecciona Empresa a Inspeccionar:", opciones_ticker)
-                
-                if año_filtro != "Todo el Historial":
-                    df_ops = df_ops[(df_ops['Fecha'].dt.year == int(año_filtro)) & (df_ops['Operacion'].str.capitalize() == 'Compra')]
-                
-                if ticker_filtro != "Todas las Empresas":
-                    df_ops = df_ops[df_ops['Ticker'].str.strip().str.upper() == ticker_filtro]
-                
-                if df_ops.empty:
-                    st.warning("No hay operaciones válidas con los filtros seleccionados.")
-                else:
-                    min_date = df_ops['Fecha'].min()
-                    tickers_unicos = df_ops['Ticker'].str.strip().str.upper().unique().tolist()
-                    
-                    datos_historicos = pd.DataFrame()
-                    datos_dividendos = pd.DataFrame()
-                    
-                    with st.spinner("Descargando precios reales (sin ajustes) y rastreando dividendos desde Yahoo Finance..."):
-                        for t in tickers_unicos:
-                            try:
-                                tk = yf.Ticker(t)
-                                hist = tk.history(start=min_date, auto_adjust=False)
-                                if not hist.empty:
-                                    if tk.info.get('currency') == 'GBp':
-                                        hist['Close'] = hist['Close'] / 100.0
-                                        if 'Dividends' in hist.columns:
-                                            hist['Dividends'] = hist['Dividends'] / 100.0
-                                            
-                                    datos_historicos[t] = hist['Close']
-                                    if 'Dividends' in hist.columns:
-                                        datos_dividendos[t] = hist['Dividends']
-                                    else:
-                                        datos_dividendos[t] = 0.0
-                            except Exception:
-                                pass
-                                
-                    if not datos_historicos.empty:
-                        datos_historicos.index = datos_historicos.index.tz_localize(None).normalize()
-                        datos_dividendos.index = datos_dividendos.index.tz_localize(None).normalize()
-                        
-                        rango_fechas = pd.date_range(start=min_date.normalize(), end=pd.Timestamp.today().normalize())
-                        
-                        datos_historicos = datos_historicos.reindex(rango_fechas).ffill().fillna(0)
-                        datos_dividendos = datos_dividendos.reindex(rango_fechas).fillna(0)
-                        
-                        daily_shares = pd.DataFrame(0.0, index=datos_historicos.index, columns=tickers_unicos)
-                        daily_invested = pd.Series(0.0, index=datos_historicos.index)
-                        
-                        current_shares = {t: 0.0 for t in tickers_unicos}
-                        current_cost = {t: 0.0 for t in tickers_unicos}
-                        total_invested = 0.0
-                        
-                        for date in datos_historicos.index:
-                            ops_today = df_ops[df_ops['Fecha'].dt.date == date.date()]
-                            for _, row in ops_today.iterrows():
-                                t = row['Ticker'].strip().upper()
-                                op = row['Operacion'].strip().capitalize()
-                                acc = float(row['Acciones'])
-                                precio = float(row['Precio'])
-                                
-                                if op == 'Compra':
-                                    current_shares[t] += acc
-                                    coste = acc * precio
-                                    current_cost[t] += coste
-                                    total_invested += coste
-                                elif op == 'Venta':
-                                    if current_shares.get(t, 0) > 0:
-                                        pmp = current_cost[t] / current_shares[t]
-                                        current_shares[t] -= acc
-                                        coste_reducido = acc * pmp
-                                        current_cost[t] -= coste_reducido
-                                        total_invested -= coste_reducido
-                                        
-                            for t in tickers_unicos:
-                                daily_shares.at[date, t] = current_shares.get(t, 0.0)
-                            daily_invested.at[date] = total_invested
-                            
-                        daily_value = (daily_shares * datos_historicos).sum(axis=1)
-                        
-                        daily_shares_shifted = daily_shares.shift(1).fillna(0)
-                        daily_gross_divs = (daily_shares_shifted * datos_dividendos).sum(axis=1)
-                        daily_net_divs = daily_gross_divs * (1 - (impuesto_cart / 100.0))
-                        
-                        accumulated_divs = daily_net_divs.cumsum()
-                        total_patrimonio = daily_value + accumulated_divs
-                        
-                        st.markdown("#### 📈 Evolución de tu Patrimonio")
-                        fig_cartera = go.Figure()
-                        
-                        fig_cartera.add_trace(go.Scatter(
-                            x=daily_invested.index, y=daily_invested.values, 
-                            mode='lines', line=dict(color='#faca2b', width=2, dash='dash'), 
-                            name='Capital Aportado'
-                        ))
-                        
-                        fig_cartera.add_trace(go.Scatter(
-                            x=daily_value.index, y=daily_value.values, 
-                            mode='lines', line=dict(color='#21c354', width=2), 
-                            name='Valor Mercado (Precio Real)'
-                        ))
-                        
-                        fig_cartera.add_trace(go.Scatter(
-                            x=accumulated_divs.index, y=accumulated_divs.values, 
-                            fill='tozeroy', mode='lines', 
-                            line=dict(color='#00d4ff', width=2), 
-                            fillcolor='rgba(0, 212, 255, 0.15)', 
-                            name='Dividendos Netos Acumulados'
-                        ))
-                        
-                        fig_cartera.add_trace(go.Scatter(
-                            x=total_patrimonio.index, y=total_patrimonio.values, 
-                            mode='lines', line=dict(color='#e040fb', width=2.5), 
-                            name='Patrimonio Total (Mercado + Divs)'
-                        ))
-                        
-                        fig_cartera.update_layout(
-                            template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=450,
-                            hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                            legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
-                        )
-                        st.plotly_chart(fig_cartera, use_container_width=True)
-
-                        posiciones_activas = {t: current_shares[t] for t in tickers_unicos if current_shares[t] > 0.001}
-                        if posiciones_activas:
-                            inversion_final = daily_invested.iloc[-1]
-                            valor_mercado_final = daily_value.iloc[-1]
-                            divs_cobrados_totales = accumulated_divs.iloc[-1]
-                            patrimonio_final = total_patrimonio.iloc[-1]
-                            
-                            b_l_mercado = valor_mercado_final - inversion_final
-                            b_total_global = b_l_mercado + divs_cobrados_totales
-                            
-                            rent_precio_global_pct = ((valor_mercado_final - inversion_final) / inversion_final * 100) if inversion_final > 0 else 0
-                            pct_divs_sobre_inversion = (divs_cobrados_totales / inversion_final * 100) if inversion_final > 0 else 0
-                            rent_total_pct = ((patrimonio_final - inversion_final) / inversion_final * 100) if inversion_final > 0 else 0
-                            
-                            st.markdown("#### 🌐 Resumen Global Hoy")
-                            c1, c2, c3, c4 = st.columns(4)
-                            c1.metric("Capital Invertido", f"{inversion_final:,.2f}")
-                            c2.metric("Valor Mercado (Sin Divs)", f"{valor_mercado_final:,.2f}", f"{rent_precio_global_pct:+.2f}% ({b_l_mercado:+,.2f} Abs.)")
-                            c3.metric("Dividendos Cobrados", f"{divs_cobrados_totales:,.2f}", f"{pct_divs_sobre_inversion:+.2f}% del Capital")
-                            c4.metric("Rentab. Total (Con Divs)", f"{rent_total_pct:+.2f}%", f"{b_total_global:+,.2f} Abs. Total")
-                            
-                            divs_per_ticker = (daily_shares_shifted * datos_dividendos).sum(axis=0) * (1 - (impuesto_cart / 100.0))
-                            
-                            resultados_tabla = []
-                            for t, acc in posiciones_activas.items():
-                                p_live = datos_historicos[t].iloc[-1]
-                                p_medio = current_cost[t] / acc if acc > 0 else 0
-                                v_mercado = acc * p_live
-                                divs_cobrados_accion = divs_per_ticker[t]
-                                
-                                b_abs_mercado = v_mercado - current_cost[t]
-                                b_total = b_abs_mercado + divs_cobrados_accion
-                                
-                                rent_precio_pct = (b_abs_mercado / current_cost[t]) * 100 if current_cost[t] > 0 else 0
-                                rent_total_pct = (b_total / current_cost[t]) * 100 if current_cost[t] > 0 else 0
-                                
-                                resultados_tabla.append({
-                                    "Ticker": t,
-                                    "Acciones": round(acc, 4),
-                                    "Precio Medio": p_medio,
-                                    "Precio Live": p_live,
-                                    "Valor Mercado": v_mercado,
-                                    "P/L Latente": b_abs_mercado,
-                                    "Divs. Cobrados": divs_cobrados_accion,
-                                    "Bº Total (Abs)": b_total,
-                                    "Rentab. Precio (%)": rent_precio_pct,
-                                    "Rentab. Total (%)": rent_total_pct
-                                })
-                            
-                            resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rentab. Total (%)'], reverse=True)
-                                
-                            st.markdown("#### 📋 Posiciones Abiertas (Tabla Detallada)")
-                            df_mostrar = pd.DataFrame(resultados_tabla_ordenados)
-                            
-                            def color_rent(val):
-                                color = '#21c354' if val > 0 else '#ff4b4b'
-                                return f'color: {color}; font-weight: bold;'
-                                
-                            def color_divs(val):
-                                color = '#00d4ff' if val > 0 else '#aaaaaa'
-                                return f'color: {color};'
-                            
-                            formato_columnas = {
-                                "Precio Medio": "{:.2f}",
-                                "Precio Live": "{:.2f}",
-                                "Valor Mercado": "{:,.2f}",
-                                "P/L Latente": "{:+.2f}",
-                                "Divs. Cobrados": "{:,.2f}",
-                                "Bº Total (Abs)": "{:+.2f}",
-                                "Rentab. Precio (%)": "{:+.2f}%",
-                                "Rentab. Total (%)": "{:+.2f}%"
-                            }
-                            
-                            styled_df = (df_mostrar.style
-                                        .format(formato_columnas)
-                                        .map(color_rent, subset=['Rentab. Precio (%)', 'Rentab. Total (%)', 'P/L Latente', 'Bº Total (Abs)'])
-                                        .map(color_divs, subset=['Divs. Cobrados']))
-                                        
-                            st.dataframe(styled_df, use_container_width=True, hide_index=True)
-                            
-                            if divs_cobrados_totales > 0:
-                                st.markdown("---")
-                                st.markdown("#### 🗓️ Calendario Histórico de Dividendos Netos")
-                                
-                                df_divs_hist = pd.DataFrame({'Fecha': daily_net_divs.index, 'Dividendo': daily_net_divs.values})
-                                df_divs_hist = df_divs_hist[df_divs_hist['Dividendo'] > 0]
-                                
-                                if not df_divs_hist.empty:
-                                    df_divs_hist['Año'] = df_divs_hist['Fecha'].dt.year
-                                    df_divs_hist['Mes'] = df_divs_hist['Fecha'].dt.month
-                                    
-                                    meses_str = {1: 'Ene', 2: 'Feb', 3: 'Mar', 4: 'Abr', 5: 'May', 6: 'Jun', 
-                                                 7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
-                                    
-                                    agrupado_meses = df_divs_hist.groupby(['Año', 'Mes'])['Dividendo'].sum().reset_index()
-                                    anual_divs = df_divs_hist.groupby('Año')['Dividendo'].sum().reset_index()
-                                    anual_divs['Crecimiento YoY (%)'] = anual_divs['Dividendo'].pct_change() * 100
-                                    
-                                    col_cal1, col_cal2 = st.columns([2.5, 1])
-                                    
-                                    with col_cal1:
-                                        st.markdown("##### 📊 Ingresos Mensuales (Comparativa Anual)")
-                                        fig_meses = go.Figure()
-                                        años_presentes = sorted(agrupado_meses['Año'].unique())
-                                        nombres_meses = [meses_str[i] for i in range(1, 13)]
-                                        
-                                        for año in años_presentes:
-                                            datos_año = agrupado_meses[agrupado_meses['Año'] == año]
-                                            y_valores = []
-                                            for m in range(1, 13):
-                                                fila_mes = datos_año[datos_año['Mes'] == m]
-                                                if not fila_mes.empty:
-                                                    y_valores.append(fila_mes['Dividendo'].values[0])
-                                                else:
-                                                    y_valores.append(0.0)
-                                            
-                                            fig_meses.add_trace(go.Bar(
-                                                x=nombres_meses, y=y_valores, name=str(año)
-                                            ))
-                                            
-                                        fig_meses.update_layout(
-                                            barmode='group', template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=350,
-                                            hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5), yaxis=dict(title="Dividendos Netos")
-                                        )
-                                        st.plotly_chart(fig_meses, use_container_width=True)
-                                        
-                                    with col_cal2:
-                                        st.markdown("##### 📈 Resumen por Años (YoY)")
-                                        def color_yoy(val):
-                                            if pd.isna(val): return ''
-                                            color = '#21c354' if val > 0 else ('#ff4b4b' if val < 0 else '#aaaaaa')
-                                            return f'color: {color}; font-weight: bold;'
-                                            
-                                        styled_anual = anual_divs.style.format({
-                                            'Dividendo': '{:,.2f}',
-                                            'Crecimiento YoY (%)': '{:+.2f}%'
-                                        }).map(color_yoy, subset=['Crecimiento YoY (%)'])
-                                        st.dataframe(styled_anual, use_container_width=True, hide_index=True)
-
-                            st.markdown("---")
-                            st.markdown("#### 📊 Rentabilidad por Empresa (Precio vs Total con Dividendos)")
-                            
-                            x_tickers = []
-                            y_rent_precio = []
-                            y_rent_total = []
-                            colores_precio = []
-
-                            for res in resultados_tabla_ordenados:
-                                x_tickers.append(res['Ticker'])
-                                r_precio = res['Rentab. Precio (%)']
-                                r_total = res['Rentab. Total (%)']
-                                y_rent_precio.append(r_precio)
-                                y_rent_total.append(r_total)
-                                colores_precio.append('#21c354' if r_precio >= 0 else '#ff4b4b')
-                            
-                            fig_comp = go.Figure()
-                            
-                            fig_comp.add_trace(go.Bar(
-                                x=x_tickers, y=y_rent_precio, name='Solo Cotización (Mercado)',
-                                marker_color=colores_precio, text=[f"{val:+.1f}%" for val in y_rent_precio], textposition='auto'
-                            ))
-                            
-                            fig_comp.add_trace(go.Bar(
-                                x=x_tickers, y=y_rent_total, name='Total (Mercado + Dividendos)',
-                                marker_color='#00d4ff', text=[f"{val:+.1f}%" for val in y_rent_total], textposition='auto'
-                            ))
-                            
-                            fig_comp.update_layout(
-                                barmode='group', template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=400,
-                                hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5)
-                            )
-                            fig_comp.update_yaxes(title_text="Rentabilidad (%)")
-                            st.plotly_chart(fig_comp, use_container_width=True)
-                            
-                    else:
-                        st.error("No se han podido descargar los datos históricos para las empresas de tu archivo.")
-
-        except Exception as e:
-            st.error(f"No se pudo procesar el archivo. Verifica que las fechas estén correctas. Detalle: {e}")
