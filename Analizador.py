@@ -1952,17 +1952,21 @@ with tab_cartera:
                                     "Acciones": round(acc, 4),
                                     "Precio Medio": f"{p_medio:.2f} {sym_divisa}",
                                     "Precio Actual": f"{p_actual:.2f} {sym_divisa}",
-                                    "Valor Mercado (€)": v_mercado_eur,
-                                    "P/L Latente (€)": b_abs_eur,
-                                    "Divs. Cobrados (€)": divs_eur,
+                                    "Valor (€)": v_mercado_eur,
+                                    "P/L (€)": b_abs_eur,
+                                    "Divs (€)": divs_eur,
                                     "Bº Total (€)": b_total_eur,
-                                    "Rentab. Precio (%)": rent_precio_pct,
-                                    "Rentab. Total (%)": rent_total_pct
+                                    "Valor (Orig)": v_mercado_orig,
+                                    "P/L (Orig)": b_abs_orig,
+                                    "Divs (Orig)": divs_orig,
+                                    "Bº Total (Orig)": b_total_orig,
+                                    "Rent. Precio (%)": rent_precio_pct,
+                                    "Rent. Total (%)": rent_total_pct
                                 })
                             
-                            resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rentab. Total (%)'], reverse=True)
+                            resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rent. Total (%)'], reverse=True)
                                 
-                            st.markdown("#### 📋 Posiciones Abiertas (Tabla Detallada)")
+                            st.markdown("#### 📋 Posiciones Abiertas (Impacto Divisa vs Original)")
                             df_mostrar = pd.DataFrame(resultados_tabla_ordenados)
                             
                             def color_rent(val):
@@ -1974,18 +1978,22 @@ with tab_cartera:
                                 return f'color: {color};'
                             
                             formato_columnas = {
-                                "Valor Mercado (€)": "{:,.2f} €",
-                                "P/L Latente (€)": "{:+.2f} €",
-                                "Divs. Cobrados (€)": "{:,.2f} €",
+                                "Valor (€)": "{:,.2f} €",
+                                "P/L (€)": "{:+.2f} €",
+                                "Divs (€)": "{:,.2f} €",
                                 "Bº Total (€)": "{:+.2f} €",
-                                "Rentab. Precio (%)": "{:+.2f}%",
-                                "Rentab. Total (%)": "{:+.2f}%"
+                                "Valor (Orig)": "{:,.2f}",
+                                "P/L (Orig)": "{:+.2f}",
+                                "Divs (Orig)": "{:,.2f}",
+                                "Bº Total (Orig)": "{:+.2f}",
+                                "Rent. Precio (%)": "{:+.2f}%",
+                                "Rent. Total (%)": "{:+.2f}%"
                             }
                             
                             styled_df = (df_mostrar.style
                                         .format(formato_columnas)
-                                        .map(color_rent, subset=['Rentab. Precio (%)', 'Rentab. Total (%)', 'P/L Latente (€)', 'Bº Total (€)'])
-                                        .map(color_divs, subset=['Divs. Cobrados (€)']))
+                                        .map(color_rent, subset=['Rent. Precio (%)', 'Rent. Total (%)', 'P/L (€)', 'Bº Total (€)', 'P/L (Orig)', 'Bº Total (Orig)'])
+                                        .map(color_divs, subset=['Divs (€)', 'Divs (Orig)']))
                                         
                             st.dataframe(styled_df, use_container_width=True, hide_index=True)
                             
