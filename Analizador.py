@@ -1772,19 +1772,28 @@ with tab_cartera:
                                     hist.index = hist.index.tz_localize(None).normalize()
                                     hist = hist[~hist.index.duplicated(keep='last')]
                                     
-                                    # --- PARCHE YAHOO: Forzar lectura desde la BBDD principal ---
-                                    divs_reales = tk.dividends
-                                    if not divs_reales.empty:
-                                        divs_reales.index = divs_reales.index.tz_localize(None).normalize()
-                                        divs_reales = divs_reales[~divs_reales.index.duplicated(keep='last')]
-                                        
+                                    # --- SISTEMA HÍBRIDO DE DIVIDENDOS ---
+                                    divs_finales = pd.Series(0.0, index=hist.index)
+                                    
+                                    # 1. Intentar leer de la tabla principal (Americanas como Comcast)
+                                    if 'Dividends' in hist.columns and hist['Dividends'].sum() > 0:
+                                        divs_finales = hist['Dividends']
+                                    else:
+                                        # 2. Plan de Emergencia BBDD secundaria (Europeas como WKL.AS)
+                                        divs_reales = tk.dividends
+                                        if not divs_reales.empty:
+                                            divs_reales.index = divs_reales.index.tz_localize(None).normalize()
+                                            divs_reales = divs_reales[~divs_reales.index.duplicated(keep='last')]
+                                            # Alinear los días exactos para no romper el resto de la cartera
+                                            divs_finales = divs_reales.reindex(hist.index).fillna(0.0)
+                                            
                                     if tk.info.get('currency') == 'GBp': 
                                         hist['Close'] = hist['Close'] / 100.0
-                                        if not divs_reales.empty: divs_reales = divs_reales / 100.0
+                                        divs_finales = divs_finales / 100.0
                                         
                                     datos_historicos[t] = hist['Close']
-                                    datos_dividendos[t] = divs_reales if not divs_reales.empty else 0.0
-                                    # -----------------------------------------------------------
+                                    datos_dividendos[t] = divs_finales
+                                    # -------------------------------------
                             except: pass
                                 
                     if not datos_historicos.empty:
