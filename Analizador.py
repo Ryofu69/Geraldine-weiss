@@ -599,7 +599,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     
     if price_to_book > 0:
         if es_financiera or es_industrial: pb_optimo, pb_max = 1.5, 2.5; txt_opt = "Óptimo < 1.5x (Fin/Ind)"
-        elif es_tecnologica: l_tech, l_amarillo = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
+        elif es_tecnologica: pb_optimo, pb_max = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
         else: pb_optimo, pb_max = 2.5, 5.0; txt_opt = "Óptimo < 2.5x (General)"
         pb_color = "off" if price_to_book <= pb_optimo else "inverse"
         cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", txt_opt, delta_color=pb_color)
