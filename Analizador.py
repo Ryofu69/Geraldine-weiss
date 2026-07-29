@@ -1901,7 +1901,8 @@ with tab_cartera:
                             c4.metric("Rentab. Total (Con Divs)", f"{(b_total_global_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0:+.2f}%", f"{b_total_global_eur:+,.2f} € Total")
                             
                             st.markdown("#### 📋 Posiciones Abiertas (Impacto Divisa vs Original)")
-                            df_mostrar = pd.DataFrame(sorted(resultados_tabla, key=lambda k: k['Rent. Total (€)'], reverse=True))
+                            resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rent. Total (€)'], reverse=True)
+                            df_mostrar = pd.DataFrame(resultados_tabla_ordenados)
                             styled_df = df_mostrar.style.format({"Valor Mercado": "{:,.2f}", "P/L Latente": "{:+.2f}", "Divs. Cobrados": "{:,.2f}", "Bº Total (Abs)": "{:+.2f}", "Rent. Precio (€)": "{:+.2f}%", "Rent. Total (€)": "{:+.2f}%", "Rent. Precio (Orig)": "{:+.2f}%", "Rent. Total (Orig)": "{:+.2f}%"}).map(lambda val: f"color: {'#21c354' if val > 0 else '#ff4b4b'}; font-weight: bold;", subset=['P/L Latente', 'Bº Total (Abs)', 'Rent. Precio (€)', 'Rent. Total (€)', 'Rent. Precio (Orig)', 'Rent. Total (Orig)']).map(lambda val: f"color: {'#00d4ff' if val > 0 else '#aaaaaa'};", subset=['Divs. Cobrados'])
                             st.dataframe(styled_df, use_container_width=True, hide_index=True)
                             
