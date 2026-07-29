@@ -1952,7 +1952,11 @@ with tab_cartera:
                         st.markdown("### 📸 Radiografía del Año Natural (Toda la Cartera)")
                         st.markdown("> *Esta vista ignora los filtros de 'Modo Añada' de arriba. Muestra cómo se comportó **toda tu cartera real** (lo viejo y lo nuevo) desde el 1 de enero hasta el 31 de diciembre del año que selecciones.*")
                         
-                        opciones_radio = [str(int(a)) for a in años_unicos]
+                        # 1. Rango de años continuo (sin saltos, aunque no hayas aportado capital)
+                        año_minimo = int(df_ops_global['Fecha'].dt.year.min())
+                        año_actual = int(pd.Timestamp.today().year)
+                        opciones_radio = [str(a) for a in range(año_minimo, año_actual + 1)]
+                        
                         año_radio = st.selectbox("Selecciona Año a Inspeccionar:", opciones_radio, index=len(opciones_radio)-1, key="año_rad")
                         
                         if año_radio:
@@ -2000,11 +2004,17 @@ with tab_cartera:
                                 
                                 base_pct = val_ini + aportaciones if (val_ini + aportaciones) > 0 else 1.0
                                 
+                                # 2. Función para convertir números al formato español (2.345,67)
+                                def fmt_es(num, signo=False):
+                                    if pd.isna(num): return "0,00"
+                                    s = f"{num:+,.2f}" if signo else f"{num:,.2f}"
+                                    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+                                
                                 c1, c2, c3, c4 = st.columns(4)
-                                c1.metric(f"Valor Base ({año_radio})", f"{base_pct:,.2f}", f"Inversión nueva aportada: {aportaciones:+,.2f}")
-                                c2.metric("P/L de Mercado (Anual)", f"{b_mercado:+,.2f}", f"{(b_mercado/base_pct)*100:+.2f}%")
-                                c3.metric("Dividendos Netos (Anual)", f"{div_tot:,.2f}", f"{(div_tot/base_pct)*100:+.2f}% del Capital Base")
-                                c4.metric("Beneficio Total (Anual)", f"{b_total:+,.2f}", f"{(b_total/base_pct)*100:+.2f}%")
+                                c1.metric(f"Valor Base ({año_radio})", f"{fmt_es(base_pct)} €", f"Inversión nueva aportada: {fmt_es(aportaciones, True)} €")
+                                c2.metric("P/L de Mercado (Anual)", f"{fmt_es(b_mercado, True)} €", f"{(b_mercado/base_pct)*100:+.2f}%")
+                                c3.metric("Dividendos Netos (Anual)", f"{fmt_es(div_tot)} €", f"{(div_tot/base_pct)*100:+.2f}% del Capital Base")
+                                c4.metric("Beneficio Total (Anual)", f"{fmt_es(b_total, True)} €", f"{(b_total/base_pct)*100:+.2f}%")
                                 
                                 fig_y = go.Figure()
                                 fig_y.add_trace(go.Scatter(x=di_y.index, y=di_y.values, mode='lines', line=dict(color='#faca2b', width=2, dash='dash'), name='Capital Global Invertido'))
@@ -2023,8 +2033,11 @@ with tab_cartera:
                                     df_d_y['Mes'] = df_d_y['Fecha'].dt.month
                                     agrup_m = df_d_y.groupby('Mes')['Dividendo'].sum()
                                     y_vals = [agrup_m.get(m, 0.0) for m in range(1, 13)]
-                                    fig_d = go.Figure(go.Bar(x=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'], y=y_vals, marker_color='#00d4ff', text=[f"{v:,.2f}" if v>0 else "" for v in y_vals], textposition='auto'))
-                                    fig_d.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=300, yaxis_title="Dividendos Netos", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                                    # Formatear también las etiquetas de las barras al español
+                                    text_vals = [f"{fmt_es(v)} €" if v > 0 else "" for v in y_vals]
+                                    
+                                    fig_d = go.Figure(go.Bar(x=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'], y=y_vals, marker_color='#00d4ff', text=text_vals, textposition='auto'))
+                                    fig_d.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=300, yaxis_title="Dividendos Netos (€)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                                     st.plotly_chart(fig_d, use_container_width=True)
                                 else:
                                     st.info(f"No se cobraron dividendos en {año_radio}.")
