@@ -1730,11 +1730,11 @@ with tab_cartera:
             if not all(col in df_ops.columns for col in columnas_requeridas):
                 st.error(f"❌ Error de formato. El archivo debe contener exactamente estas columnas (respetando mayúsculas): {', '.join(columnas_requeridas)}")
             else:
-                ddf_ops['Fecha'] = pd.to_datetime(df_ops['Fecha'], errors='coerce', dayfirst=True)
+                df_ops['Fecha'] = pd.to_datetime(df_ops['Fecha'], errors='coerce', dayfirst=True)
                 df_ops = df_ops.dropna(subset=['Fecha', 'Ticker', 'Operacion', 'Acciones', 'Precio'])
                 df_ops = df_ops.sort_values('Fecha')
                 
-                # --- NUEVO: GUARDAR COPIA GLOBAL ANTES DE LOS FILTROS ---
+                # --- GUARDAR COPIA GLOBAL ANTES DE LOS FILTROS ---
                 df_ops_global = df_ops.copy()
                 tickers_global = df_ops_global['Ticker'].str.strip().str.upper().unique().tolist()
                 
@@ -1753,8 +1753,8 @@ with tab_cartera:
                 
                 if df_ops.empty: st.warning("No hay operaciones válidas con los filtros seleccionados.")
                 else:
-                    min_date = df_ops_global['Fecha'].min() # FECHA MINIMA GLOBAL
-                    tickers_unicos = df_ops['Ticker'].str.strip().str.upper().unique().tolist() # Tickers filtrados para la vista de arriba
+                    min_date = df_ops_global['Fecha'].min() # Fecha de inicio absoluta
+                    tickers_unicos = df_ops['Ticker'].str.strip().str.upper().unique().tolist()
                     
                     dict_historicos = {}
                     dict_dividendos = {}
@@ -1775,13 +1775,13 @@ with tab_cartera:
                                         if not divs_reales.empty:
                                             divs_reales.index = divs_reales.index.tz_localize(None).normalize()
                                             divs_reales = divs_reales[~divs_reales.index.duplicated(keep='last')]
-                                            divs_finales = divs_reales.reindex(hist.index).fillna(0.0)
+                                            divs_finales = divs_reales[divs_reales.index >= min_date]
                                         else:
                                             divs_finales = pd.Series(dtype=float)
                                             
                                     if tk.info.get('currency') == 'GBp': 
                                         hist['Close'] = hist['Close'] / 100.0
-                                        divs_finales = divs_finales / 100.0
+                                        if not divs_finales.empty: divs_finales = divs_finales / 100.0
                                         
                                     dict_historicos[t] = hist['Close']
                                     dict_dividendos[t] = divs_finales
@@ -1833,7 +1833,7 @@ with tab_cartera:
 
                         posiciones_activas = {t: current_shares[t] for t in tickers_unicos if current_shares[t] > 0.001}
                         if posiciones_activas:
-                            # FX y Resumen Global
+                            # TIPO DE CAMBIO
                             fx_rates_hoy = {'EUR': 1.0, 'USD': 1.0, 'GBP': 1.0, 'GBp': 1.0}
                             historico_fx = {}
                             try:
@@ -1917,7 +1917,7 @@ with tab_cartera:
                                 
                                 col_c1, col_c2 = st.columns([2.5, 1])
                                 with col_c1:
-                                    st.markdown("##### 📊 Ingresos Mensuales (Comparativa)")
+                                    st.markdown("##### 📊 Ingresos Mensuales (Comparativa Anual)")
                                     fig_meses = go.Figure()
                                     meses_str = {1: 'Ene', 2: 'Feb', 3: 'Mar', 4: 'Abr', 5: 'May', 6: 'Jun', 7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
                                     for año in sorted(agrup_meses['Año'].unique()):
@@ -1927,12 +1927,12 @@ with tab_cartera:
                                     st.plotly_chart(fig_meses, use_container_width=True)
                                 with col_c2:
                                     st.markdown("##### 📝 Resumen YoY")
-                                    st.dataframe(anual_divs.style.format({'Dividendo': '{:,.2f}', 'Crec. YoY (%)': '{:+.2f}%'}).map(lambda v: f"color: {'#21c354' if v>0 else ('#ff4b4b' if v<0 else '#aaaaaa')}; font-weight: bold;" if pd.notna(v) else "", subset=['Crec. YoY (%)']), use_container_width=True, hide_index=True)
+                                    st.dataframe(anual_divs.style.format({'Dividendo': '{:,.2f} €', 'Crec. YoY (%)': '{:+.2f}%'}).map(lambda v: f"color: {'#21c354' if v>0 else ('#ff4b4b' if v<0 else '#aaaaaa')}; font-weight: bold;" if pd.notna(v) else "", subset=['Crec. YoY (%)']), use_container_width=True, hide_index=True)
                                 
                                 st.markdown("<br>", unsafe_allow_html=True)
                                 st.markdown("##### 📈 Evolución Anual (Efecto Bola de Nieve)")
-                                fig_anual = go.Figure(go.Bar(x=anual_divs['Año'].astype(str), y=anual_divs['Dividendo'], name='Total Cobrado', marker_color='#00d4ff', text=[f"{val:,.2f}" for val in anual_divs['Dividendo']], textposition='auto'))
-                                fig_anual.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title="Dividendos Netos Totales"))
+                                fig_anual = go.Figure(go.Bar(x=anual_divs['Año'].astype(str), y=anual_divs['Dividendo'], name='Total Cobrado', marker_color='#00d4ff', text=[f"{val:,.2f} €" for val in anual_divs['Dividendo']], textposition='auto'))
+                                fig_anual.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title="Dividendos Netos Totales (€)"))
                                 st.plotly_chart(fig_anual, use_container_width=True)
 
                             st.markdown("---")
@@ -1945,16 +1945,18 @@ with tab_cartera:
                             st.plotly_chart(fig_comp, use_container_width=True)
 
                         # ==========================================
-                        # 2. NUEVO: RADIOGRAFÍA ANUAL (FOTO FIJA GLOBAL)
+                        # 2. RADIOGRAFÍA ANUAL (FOTO FIJA GLOBAL)
                         # ==========================================
                         st.markdown("---")
                         st.markdown("### 📸 Radiografía del Año Natural (Toda la Cartera)")
-                        st.markdown("> *Esta vista ignora los filtros de 'Modo Añada' y muestra cómo se comportó **toda tu cartera real** desde el 1 de enero hasta el 31 de diciembre del año que selecciones.*")
+                        st.markdown("> *Esta vista ignora los filtros de 'Modo Añada' de arriba. Muestra cómo se comportó **toda tu cartera real** (lo viejo y lo nuevo) desde el 1 de enero hasta el 31 de diciembre del año que selecciones.*")
                         
                         opciones_radio = [str(int(a)) for a in años_unicos]
-                        año_radio = st.selectbox("Selecciona Año a Inspeccionar:", opciones_radio, index=len(opciones_radio)-1)
+                        año_radio = st.selectbox("Selecciona Año a Inspeccionar:", opciones_radio, index=len(opciones_radio)-1, key="año_rad")
                         
                         if año_radio:
+                            año_int = int(año_radio)
+                            
                             daily_shares_g = pd.DataFrame(0.0, index=datos_historicos.index, columns=tickers_global)
                             daily_invested_g = pd.Series(0.0, index=datos_historicos.index)
                             
@@ -1976,34 +1978,40 @@ with tab_cartera:
                             daily_value_g = (daily_shares_g * datos_historicos[tickers_global]).sum(axis=1)
                             daily_net_divs_g = (daily_shares_g.shift(1).fillna(0) * datos_dividendos[tickers_global]).sum(axis=1) * (1 - (impuesto_cart / 100.0))
                             
-                            mask_y = daily_invested_g.index.year == int(año_radio)
-                            di_y, dv_y, dd_y = daily_invested_g[mask_y], daily_value_g[mask_y], daily_net_divs_g[mask_y]
+                            mask_y = daily_invested_g.index.year == año_int
+                            di_y = daily_invested_g[mask_y]
+                            dv_y = daily_value_g[mask_y]
+                            dd_y = daily_net_divs_g[mask_y]
                             
                             if not di_y.empty:
                                 acc_divs_y = dd_y.cumsum()
                                 tot_pat_y = dv_y + acc_divs_y
                                 
-                                inv_ini, inv_fin = di_y.iloc[0], di_y.iloc[-1]
-                                val_ini, val_fin = dv_y.iloc[0], dv_y.iloc[-1]
+                                inv_ini = di_y.iloc[0]
+                                inv_fin = di_y.iloc[-1]
+                                val_ini = dv_y.iloc[0]
+                                val_fin = dv_y.iloc[-1]
                                 div_tot = acc_divs_y.iloc[-1]
                                 
                                 aportaciones = inv_fin - inv_ini
-                                b_mercado = val_fin - val_ini - aportaciones
+                                b_mercado = (val_fin - val_ini) - aportaciones
                                 b_total = b_mercado + div_tot
                                 
                                 base_pct = val_ini + aportaciones if (val_ini + aportaciones) > 0 else 1.0
                                 
                                 c1, c2, c3, c4 = st.columns(4)
-                                c1.metric(f"Valor Inicial + Aportado ({año_radio})", f"{base_pct:,.2f}", f"Flujo de caja nuevo aportado: {aportaciones:+,.2f}")
+                                c1.metric(f"Valor Base ({año_radio})", f"{base_pct:,.2f}", f"Inversión nueva aportada: {aportaciones:+,.2f}")
                                 c2.metric("P/L de Mercado (Anual)", f"{b_mercado:+,.2f}", f"{(b_mercado/base_pct)*100:+.2f}%")
                                 c3.metric("Dividendos Netos (Anual)", f"{div_tot:,.2f}", f"{(div_tot/base_pct)*100:+.2f}% del Capital Base")
                                 c4.metric("Beneficio Total (Anual)", f"{b_total:+,.2f}", f"{(b_total/base_pct)*100:+.2f}%")
                                 
                                 fig_y = go.Figure()
                                 fig_y.add_trace(go.Scatter(x=di_y.index, y=di_y.values, mode='lines', line=dict(color='#faca2b', width=2, dash='dash'), name='Capital Global Invertido'))
-                                fig_y.add_trace(go.Scatter(x=dv_y.index, y=dv_y.values, mode='lines', line=dict(color='#21c354', width=2), name='Valor Mercado Global'))
-                                fig_y.add_trace(go.Scatter(x=acc_divs_y.index, y=acc_divs_y.values, fill='tozeroy', mode='lines', line=dict(color='#00d4ff', width=2), fillcolor='rgba(0, 212, 255, 0.15)', name=f'Dividendos Netos (solo en {año_radio})'))
-                                fig_y.add_trace(go.Scatter(x=tot_pat_y.index, y=tot_pat_y.values, mode='lines', line=dict(color='#e040fb', width=2.5), name='Patrimonio Total Global'))
+                                fig_y.add_trace(go.Scatter(x=dv_y.index, y=dv_y.values, mode='lines', line=dict(color='#21c354', width=2), name='Valor Mercado'))
+                                fig_y.add_trace(go.Scatter(x=acc_divs_y.index, y=acc_divs_y.values, fill='tozeroy', mode='lines', line=dict(color='#00d4ff', width=2), fillcolor='rgba(0, 212, 255, 0.15)', name=f'Divs Acumulados ({año_radio})'))
+                                
+                                tot_pat_y_viz = dv_y + acc_divs_y
+                                fig_y.add_trace(go.Scatter(x=tot_pat_y_viz.index, y=tot_pat_y_viz.values, mode='lines', line=dict(color='#e040fb', width=2.5), name='Patrimonio Total'))
                                 fig_y.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=400, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5))
                                 st.plotly_chart(fig_y, use_container_width=True)
                                 
