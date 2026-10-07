@@ -4,47 +4,27 @@ st.set_page_config(
     page_title="Sistema Geraldine Weiss",
     page_icon="🏛️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-st.title("🏛️ Sistema de Inversión DGI — Método Geraldine Weiss")
-
-st.markdown("""
-Bienvenido al panel central de valoración y gestión de dividendos crecientes (*Dividend Growth Investing*). 
-Esta plataforma automatiza los criterios de calidad y valoración histórica descritos por **Geraldine Weiss** para identificar empresas *Blue Chip* en zona de infravaloración fundamental.
-""")
+st.title("🏛️ Sistema de Inversión DGI")
+st.markdown("Selecciona el módulo al que deseas acceder:")
 
 st.divider()
 
-st.subheader("🧭 Módulos Disponibles")
-st.markdown("Selecciona la herramienta que necesitas desde el **menú lateral izquierdo**:")
+# Botones directos a pantalla completa para móvil
+st.page_link("pages/1_🔍_Analizar_Empresa.py", label="🔍 1. Analizar Empresa", icon="🔍", use_container_width=True)
+st.caption("Suelo fundamental, canales históricos de Weiss, Chowder y timing técnico MACD.")
 
-col1, col2, col3 = st.columns(3)
+st.markdown("<br>", unsafe_allow_html=True)
 
-with col1:
-    st.markdown("""
-    ### 🔍 1. Analizar Empresa
-    * **Canal Histórico de Rendimiento**: Detección de Suelo (Infravaloración) y Techo (Sobrevaloración).
-    * **Decálogo Blue Chip**: Score de solvencia, Payout FCF/BPA y consistencia de beneficios.
-    * **Lupa de Francotirador**: Análisis de timing técnico (MACD/Volumen) y proyecciones de YoC a 15 años.
-    """)
+st.page_link("pages/2_📡_Radar.py", label="📡 2. Radar Watchlist", icon="📡", use_container_width=True)
+st.caption("Escaneo masivo de múltiples acciones y ordenación automática por nivel de ganga.")
 
-with col2:
-    st.markdown("""
-    ### 📡 2. Radar Watchlist
-    * **Escaneo Masivo**: Rastreo simultáneo de múltiples acciones en tiempo real.
-    * **Detección de Gangas**: Tabla clasificada por distancia al Suelo Fundamental.
-    * **Exportación Rápida**: Descarga de datos en formato CSV para Google Sheets.
-    """)
+st.markdown("<br>", unsafe_allow_html=True)
 
-with col3:
-    st.markdown("""
-    ### 💼 3. Mi Cartera Privada
-    * **Rendimiento Real en Euros (€)**: Desglose entre revalorización de cotización y dividendos netos.
-    * **Impacto Divisa**: Ajuste por tipo de cambio histórico en compras internacionales.
-    * **Radiografía y Bola de Nieve**: Calendario de cobros mensuales y comparativa YoY.
-    """)
+st.page_link("pages/3_💼_Cartera.py", label="💼 3. Mi Cartera Privada", icon="💼", use_container_width=True)
+st.caption("Control de dividendos netos, rentabilidad en euros, impacto divisa y efecto bola de nieve.")
 
 st.divider()
-
-st.info("💡 **Rendimiento optimizado:** La aplicación ahora funciona de manera modular. Cada sección carga únicamente los datos que necesita al acceder a ella, reduciendo drásticamente los tiempos de espera.")
+st.info("💡 Consejo para móvil: Puedes volver a este menú en cualquier momento tocando la flecha superior o recargando la página de inicio.")
