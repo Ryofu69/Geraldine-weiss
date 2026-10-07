@@ -95,7 +95,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         yield_neto = yield_actual * (1 - (impuesto_pct / 100))
         div_neto_absoluto = forward_dividend * (1 - (impuesto_pct / 100))
 
-        # Extracción de métricas de calidad
+        # Extracción de métricas fundamentales
         payout_bpa = get_safe('payoutRatio') * 100
         fcf = get_safe('freeCashflow')
         shares = get_safe('sharesOutstanding')
@@ -120,7 +120,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         shares_yearly = pd.Series(dtype=float)
         variacion_acciones = None
 
-        # Motor 1: Income Statement
         try:
             inc_stmt = ticker.income_stmt
             if not inc_stmt.empty:
@@ -137,7 +136,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                                 break
         except Exception: pass
 
-        # Motor 2: get_shares_full
         if variacion_acciones is None or shares_yearly.empty:
             try:
                 fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
@@ -147,10 +145,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                     sy = sy[sy > 0]
                     if len(sy) >= 2:
                         shares_yearly = sy
-                        if len(shares_yearly) >= (años_analisis + 1):
-                            acc_ini = shares_yearly.iloc[-(años_analisis + 1)]
-                        else:
-                            acc_ini = shares_yearly.iloc[0]
+                        acc_ini = shares_yearly.iloc[-(años_analisis + 1)] if len(shares_yearly) >= (años_analisis + 1) else shares_yearly.iloc[0]
                         acc_fin = shares_yearly.iloc[-1]
                         if acc_ini > 0 and (acc_fin / acc_ini) > 0.10:
                             variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
@@ -199,10 +194,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         try:
             inc_stmt = ticker.income_stmt
             if not inc_stmt.empty:
-                if 'Diluted EPS' in inc_stmt.index: eps_data = inc_stmt.loc['Diluted EPS'].dropna()
-                elif 'Basic EPS' in inc_stmt.index: eps_data = inc_stmt.loc['Basic EPS'].dropna()
-                else: eps_data = []
-
+                eps_data = inc_stmt.loc['Diluted EPS'].dropna() if 'Diluted EPS' in inc_stmt.index else inc_stmt.loc['Basic EPS'].dropna()
                 if len(eps_data) >= 4:
                     eps_actual = eps_data.iloc[0] 
                     eps_pasado = eps_data.iloc[3] 
@@ -210,12 +202,12 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                         crecimiento_bpa_3y = (((eps_actual / eps_pasado) ** (1 / 3)) - 1) * 100
         except Exception: pass
 
-        # --- CÁLCULO DE SCORE CON RESCATE DEUDA / EBITDA ---
-        score = 0.0
+        # ==========================================
+        # 1. SCORE DE CALIDAD PURA (0 a 10 Puntos)
+        # ==========================================
+        score_calidad = 0.0
         
         cond_fcf = payout_fcf != -1 and payout_fcf <= payout_ama_fcf
-        cond_pfcf = p_fcf != -1 and 0 < p_fcf <= 20
-        
         if deuda_equity > 0:
             cond_deuda = deuda_equity <= 50.0
         else:
@@ -224,39 +216,54 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         cond_historial = años_pagando >= 25 and racha_sin_recortes >= 12
         cond_aumentos = incrementos_dividendo >= min(5, años_analisis)
         cond_acciones = variacion_acciones is not None and variacion_acciones < 0
-        cond_yield = yield_actual >= yield_medio
         cond_bpa = 0 < payout_bpa <= payout_ama_bpa
-        cond_per = 0 < per <= 20
         ratio_bpa_val = (años_crecimiento_bpa / total_años_bpa_datos) if total_años_bpa_datos > 0 else 0
         cond_consistencia = total_años_bpa_datos > 0 and ratio_bpa_val >= 0.65
 
-        if cond_fcf: score += 1.5
-        if cond_pfcf: score += 1.5
-        if cond_deuda: score += 1.5
-        if cond_historial: score += 1.5
-        if cond_aumentos: score += 1.0
-        if cond_acciones: score += 1.0
-        if cond_yield: score += 0.5
-        if cond_bpa: score += 0.5
-        if cond_per: score += 0.5
-        if cond_consistencia: score += 0.5
+        if cond_fcf: score_calidad += 2.0
+        if cond_deuda: score_calidad += 2.0
+        if cond_historial: score_calidad += 2.0
+        if cond_aumentos: score_calidad += 1.5
+        if cond_acciones: score_calidad += 1.0
+        if cond_bpa: score_calidad += 1.0
+        if cond_consistencia: score_calidad += 0.5
+
+        # ==========================================
+        # 2. SCORE DE VALORACIÓN (0 a 10 Puntos)
+        # ==========================================
+        score_val = 0.0
+        if yield_actual >= yield_infravalorado:
+            score_val += 4.0
+        elif yield_actual >= yield_medio:
+            score_val += 2.5
+
+        if 0 < p_fcf <= 20: 
+            score_val += 2.5
+        if 0 < per <= 20: 
+            score_val += 2.0
+
+        if pb > 0:
+            pb_optimo = 1.5 if es_fin_ind else (5.0 if es_tech else 2.5)
+            if pb <= pb_optimo:
+                score_val += 1.5
 
         # LÓGICA DE CHOWDER
-        if (es_utility_pura or es_telecom) and yield_actual > 4.0: chowder_target = 8.0
-        elif yield_actual >= 3.0: chowder_target = 12.0
-        else: chowder_target = 15.0
+        if (es_utility_pura or es_telecom) and yield_actual > 4.0: 
+            chowder_target = 8.0
+        elif yield_actual >= 3.0: 
+            chowder_target = 12.0
+        else: 
+            chowder_target = 15.0
 
         chowder_number = (yield_actual + dgr_5y) if dgr_5y is not None else -999.0
 
-        pts_fcf = "(+1.5p)" if cond_fcf else "(0p)"
-        pts_pfcf = "(+1.5p)" if cond_pfcf else "(0p)"
-        pts_deuda = "(+1.5p)" if cond_deuda else "(0p)"
-        pts_hist = "(+1.5p)" if cond_historial else "(0p)"
-        pts_aum = "(+1.0p)" if cond_aumentos else "(0p)"
+        # Etiquetas de desglose de calidad
+        pts_fcf = "(+2.0p)" if cond_fcf else "(0p)"
+        pts_deuda = "(+2.0p)" if cond_deuda else "(0p)"
+        pts_hist = "(+2.0p)" if cond_historial else "(0p)"
+        pts_aum = "(+1.5p)" if cond_aumentos else "(0p)"
         pts_acc = "(+1.0p)" if cond_acciones else "(0p)"
-        pts_yield = "(+0.5p)" if cond_yield else "(0p)"
-        pts_bpa = "(+0.5p)" if cond_bpa else "(0p)"
-        pts_per = "(+0.5p)" if cond_per else "(0p)"
+        pts_bpa = "(+1.0p)" if cond_bpa else "(0p)"
         pts_cons = "(+0.5p)" if cond_consistencia else "(0p)"
 
         dist_real_suelo = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 999.0
@@ -272,17 +279,18 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         return {
             "Estado": estado,
             "Ticker": ticker_symbol.strip().upper(),
-            "Score Weiss": f"{score:.1f}/10",
+            "Calidad": f"{score_calidad:.1f}/10",
+            "Valoración": f"{score_val:.1f}/10",
             "Chowder": f"{chowder_number:.1f} (Obj: {chowder_target:.0f})" if chowder_number != -999.0 else "N/D",
             "Cotización Actual": f"{precio_actual / divisor_uk:.2f}{sym_m} ({dist_real_suelo:+.2f}%)",
             "Suelo (Infra)": f"{precio_compra / divisor_uk:.2f}{sym_m} ({pct_infra_vs_media:+.2f}%)" if precio_compra > 0 else "N/D",
             "Precio Justo": f"{precio_justo / divisor_uk:.2f}{sym_m}",
             "Techo (Sobre)": f"{precio_venta / divisor_uk:.2f}{sym_m} ({pct_sobre_vs_media:+.2f}%)" if precio_venta > 0 else "N/D",
             "Div. Neto": f"{div_neto_absoluto / divisor_uk:.2f}{sym_m}",
-            "Yield Bruto": f"{yield_actual:.2f}% {pts_yield}",
+            "Yield Bruto": f"{yield_actual:.2f}%",
             "Yield Neto": f"{yield_neto:.2f}%",
-            "PER": f"{per:.2f} {pts_per}" if per > 0 else f"N/D {pts_per}",
-            "P/FCF": f"{p_fcf:.2f} {pts_pfcf}" if p_fcf != -1 else f"N/D {pts_pfcf}",
+            "PER": f"{per:.2f}" if per > 0 else "N/D",
+            "P/FCF": f"{p_fcf:.2f}" if p_fcf != -1 else "N/D",
             "P/B": f"{pb:.2f}x" if pb > 0 else "N/D",
             "Payout BPA": f"{payout_bpa:.2f}% {pts_bpa}",
             "Payout FCF": f"{payout_fcf:.2f}% {pts_fcf}" if payout_fcf != -1 else f"N/D {pts_fcf}",
@@ -309,7 +317,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "_aum": incrementos_dividendo,
             "_cbpa3": crecimiento_bpa_3y if crecimiento_bpa_3y is not None else -999,
             "_cons": 1 if cond_consistencia else 0,
-            "_score": score,
+            "_score_calidad": score_calidad,
+            "_score_val": score_val,
             "_chowder": chowder_number,
             "_chowder_target": chowder_target
         }
@@ -321,7 +330,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
 # ==========================================
 st.title("📡 Radar Fundamental Completo por Lotes")
 st.markdown("La tabla está ordenada matemáticamente enseñando primero las mayores **gangas** respecto al Suelo Fundamental.")
-st.markdown("> *Nota: El porcentaje de la 'Cotización Actual' indica a qué distancia exacta se encuentra de su **Suelo de Compra**. Las métricas de puntuación indican explícitamente cuánto aportan al Score global.*")
+st.markdown("> *Nota: **Calidad** evalúa la salud del negocio y la seguridad del dividendo (0-10). **Valoración** evalúa el descuento por múltiplos y el canal de Yield (0-10). El porcentaje de la 'Cotización Actual' indica la distancia exacta a su Suelo de Compra.*")
 
 tickers_masivos = st.text_area("Lista de Tickers (separados por comas):", "MKC, VIS.MC, MCD, GIS, WKL.AS, PEP, JNJ, HD")
 
@@ -352,9 +361,13 @@ if st.button("🚀 Escanear Watchlist", use_container_width=True):
                 styles = [''] * len(row)
                 est = row['Estado']
                 for idx, col_name in enumerate(row.index):
-                    if col_name == 'Score Weiss':
-                        if row['_score'] >= 8: styles[idx] = 'color: #21c354; font-weight: bold;'
-                        elif row['_score'] >= 5: styles[idx] = 'color: #faca2b; font-weight: bold;'
+                    if col_name == 'Calidad':
+                        if row['_score_calidad'] >= 8.0: styles[idx] = 'color: #21c354; font-weight: bold;'
+                        elif row['_score_calidad'] >= 5.0: styles[idx] = 'color: #faca2b; font-weight: bold;'
+                        else: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
+                    elif col_name == 'Valoración':
+                        if row['_score_val'] >= 7.0: styles[idx] = 'color: #21c354; font-weight: bold;'
+                        elif row['_score_val'] >= 4.0: styles[idx] = 'color: #faca2b; font-weight: bold;'
                         else: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
                     elif col_name == 'Cotización Actual':
                         if "COMPRA" in est: styles[idx] = 'color: #21c354; font-weight: bold;'
