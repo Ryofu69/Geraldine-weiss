@@ -49,7 +49,7 @@ def fmt_acciones(acc):
         return str(acc)
 
 # ==========================================
-# INYECCIÓN CSS PARA DISEÑO VISUAL
+# ESTILOS VISUALES PARA TARJETAS
 # ==========================================
 st.markdown("""
 <style>
@@ -81,10 +81,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# ENTRADA DE DATOS (100% PRIVADA EN MEMORIA)
+# ENTRADA DE DATOS (100% EN MEMORIA VOLÁTIL)
 # ==========================================
 st.title("💼 Panel de Rendimiento y Análisis DGI")
-st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. No se crea ni se guarda ningún archivo en el servidor ni en GitHub.*")
+st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. Ningún dato se guarda en el servidor ni en GitHub.*")
 
 col_c1, col_c2 = st.columns(2)
 with col_c1:
@@ -106,12 +106,12 @@ if metodo_carga == "📂 Subir Archivo":
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 else:
-    st.info("Pega directamente tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio (admite comas europeas y tabuladores de Excel).")
+    st.info("Pega tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio (admite comas europeas y tabuladores de Excel).")
     texto_csv = st.text_area(
         "Pega aquí tus transacciones:",
         value="",
         height=140,
-        placeholder="Fecha,Ticker,Operacion,Acciones,Precio"
+        placeholder="Fecha,Ticker,Operacion,Acciones,Precio\n01/01/2024,TICKER,Compra,10,25.50"
     )
     if texto_csv and texto_csv.strip():
         try:
@@ -413,7 +413,7 @@ if df_ops is not None and not df_ops.empty:
                                 r['Peso Renta Pct'] = (r['Renta Anual Proyectada Neto'] / total_forward_div_neto_eur * 100) if total_forward_div_neto_eur > 0 else 0.0
 
                             # ==========================================
-                            # 1. TARJETAS KPIS CON BRUTO Y NETO
+                            # 1. TARJETAS KPIS CON BRUTO Y NETO COMPLETOS
                             # ==========================================
                             st.markdown(f"#### 🌐 Resumen de Rendimiento ({año_filtro})")
                             
@@ -442,8 +442,8 @@ if df_ops is not None and not df_ops.empty:
                                 st.markdown(f"""
                                 <div class="metric-box">
                                     <div class="metric-title">💵 Dividendos Cobrados</div>
-                                    <div class="metric-val" style="color: #00d4ff;">{fmt_es(global_divs_net_eur, 2, sufijo=" €")} <span style="font-size: 0.85rem; color: #aaa;">Neto</span></div>
-                                    <div class="metric-sub" style="color: #aaa;">Bruto: {fmt_es(global_divs_gross_eur, 2, sufijo=" €")} ({fmt_es(pct_divs_net_global, 2, sufijo="% recup.")})</div>
+                                    <div class="metric-val" style="color: #00d4ff;">{fmt_es(global_divs_net_eur, 2, sufijo=" €")} <span style="font-size: 0.82rem; color: #aaa;">Neto</span></div>
+                                    <div class="metric-sub" style="color: #aaa;"><b>{fmt_es(pct_divs_net_global, 2, sufijo="%")} Neto</b> | Bruto: {fmt_es(global_divs_gross_eur, 2, sufijo=" €")} ({fmt_es(pct_divs_gross_global, 2, sufijo="%)")}</div>
                                 </div>
                                 """, unsafe_allow_html=True)
 
@@ -451,23 +451,23 @@ if df_ops is not None and not df_ops.empty:
                                 col_tot = "#21c354" if ret_tot_global_neto_eur >= 0 else "#ff4b4b"
                                 st.markdown(f"""
                                 <div class="metric-box" style="border-color: rgba(33, 195, 84, 0.35); background: rgba(33, 195, 84, 0.05);">
-                                    <div class="metric-title" style="color: #21c354;">🚀 Retorno Total Real</div>
-                                    <div class="metric-val" style="color: {col_tot};">{fmt_es(ret_tot_global_neto_eur, 2, signo=True, sufijo=" €")} <span style="font-size: 0.85rem;">Neto</span></div>
-                                    <div class="metric-sub" style="color: {col_tot};"><b>{fmt_es(pct_ret_neto_global, 2, signo=True, sufijo="%")}</b> | Bruto: {fmt_es(pct_ret_bruto_global, 2, signo=True, sufijo="%")}</div>
+                                    <div class="metric-title" style="color: #21c354;">🚀 Retorno Total (Ganancia)</div>
+                                    <div class="metric-val" style="color: {col_tot};">{fmt_es(ret_tot_global_neto_eur, 2, signo=True, sufijo=" €")} <span style="font-size: 0.82rem;">Neto</span></div>
+                                    <div class="metric-sub" style="color: {col_tot};"><b>{fmt_es(pct_ret_neto_global, 2, signo=True, sufijo="% Neto")}</b> | Bruto: {fmt_es(pct_ret_bruto_global, 2, signo=True, sufijo="%")} ({fmt_es(ret_tot_global_bruto_eur, 2, signo=True, sufijo=" €")})</div>
                                 </div>
                                 """, unsafe_allow_html=True)
 
                             with k5:
                                 st.markdown(f"""
                                 <div class="metric-box">
-                                    <div class="metric-title">⏳ Renta Futura Proyectada</div>
-                                    <div class="metric-val" style="color: #faca2b;">{fmt_es(total_forward_div_neto_eur, 2, sufijo=" €/año")}</div>
-                                    <div class="metric-sub" style="color: #21c354;"><b>~{fmt_es(sueldo_pasivo_mes_neto, 2, sufijo=" €/mes")}</b> | YoC: {fmt_es(yoc_global_neto, 2, sufijo="%")}</div>
+                                    <div class="metric-title">⏳ Rendimientos DGI (Yields)</div>
+                                    <div class="metric-val" style="color: #faca2b;">{fmt_es(yoc_global_neto, 2, sufijo="%")} <span style="font-size: 0.82rem; color: #aaa;">YoC Neto</span></div>
+                                    <div class="metric-sub" style="color: #aaa;">YoC Bruto: <b>{fmt_es(yoc_global_bruto, 2, sufijo="%")}</b> | Yield Mkt: <b>{fmt_es(yield_global_neto, 2, sufijo="%")} Neto</b> ({fmt_es(yield_global_bruto, 2, sufijo="%")} Bruto)</div>
                                 </div>
                                 """, unsafe_allow_html=True)
 
                             # ==========================================
-                            # 2. GRÁFICOS ANALÍTICOS DGI (SIN BARRAS DE YOC)
+                            # 2. HERRAMIENTAS GRÁFICAS DE ESTRATEGIA DGI
                             # ==========================================
                             st.divider()
                             col_g1, col_g2 = st.columns(2)
@@ -630,7 +630,7 @@ if df_ops is not None and not df_ops.empty:
                             st.plotly_chart(fig_cartera, use_container_width=True)
 
                             # ==========================================
-                            # 4. TABLA DETALLADA DE POSICIONES
+                            # 4. TABLA DETALLADA DE POSICIONES (BRUTO Y NETO)
                             # ==========================================
                             st.divider()
                             st.markdown("#### 📋 Desglose Detallado de Posiciones (Bruto y Neto)")
@@ -655,10 +655,10 @@ if df_ops is not None and not df_ops.empty:
                                     "Ret. Total Neto (€)": fmt_es(r['Total Neto EUR'], 2, signo=True, sufijo=" €"),
                                     "Ret. Bruto (%)": fmt_es(r['Rent Tot Bruto Pct'], 2, signo=True, sufijo="%"),
                                     "Ret. Neto (%)": fmt_es(r['Rent Tot Neto Pct'], 2, signo=True, sufijo="%"),
-                                    "YoC Bruto": fmt_es(r['YoC Bruto'], 2, sufijo="%"),
-                                    "YoC Neto": fmt_es(r['YoC Neto'], 2, sufijo="%"),
-                                    "Yield Act. Bruto": fmt_es(r['Yield Act Bruto'], 2, sufijo="%"),
-                                    "Yield Act. Neto": fmt_es(r['Yield Act Neto'], 2, sufijo="%"),
+                                    "YoC Bruto (%)": fmt_es(r['YoC Bruto'], 2, sufijo="%"),
+                                    "YoC Neto (%)": fmt_es(r['YoC Neto'], 2, sufijo="%"),
+                                    "Yield Act. Bruto (%)": fmt_es(r['Yield Act Bruto'], 2, sufijo="%"),
+                                    "Yield Act. Neto (%)": fmt_es(r['Yield Act Neto'], 2, sufijo="%"),
                                     "Peso Cap. (%)": fmt_es(r['Peso Capital Pct'], 1, sufijo="%"),
                                     "Peso Renta (%)": fmt_es(r['Peso Renta Pct'], 1, sufijo="%")
                                 })
