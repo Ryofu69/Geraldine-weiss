@@ -15,7 +15,7 @@ st.set_page_config(page_title="Control de Cartera DGI", page_icon="💼", layout
 ARCHIVO_CARTERA = "cartera.csv"
 
 # ==========================================
-# UTILIDADES DE LIMPIEZA Y PERSISTENCIA
+# UTILIDADES DE LIMPIEZA Y FORMATEO ESPAÑOL
 # ==========================================
 def limpiar_numero_europeo(val):
     if pd.isna(val) or val is None:
@@ -29,6 +29,27 @@ def limpiar_numero_europeo(val):
         return float(val_str)
     except (ValueError, TypeError):
         return 0.0
+
+def fmt_es(val, dec=2, signo=False, sufijo=""):
+    """Convierte números a formato español: 1.234,56 € o +5,20%"""
+    if pd.isna(val) or val is None:
+        return f"0,{dec * '0'}{sufijo}"
+    try:
+        val = float(val)
+    except (ValueError, TypeError):
+        return str(val)
+    s = f"{val:{'+' if signo else ''},.{dec}f}"
+    s_es = s.replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{s_es}{sufijo}"
+
+def fmt_acciones(acc):
+    try:
+        acc_fl = float(acc)
+        if acc_fl.is_integer():
+            return f"{int(acc_fl)}"
+        return fmt_es(acc_fl, 4).rstrip('0').rstrip(',')
+    except Exception:
+        return str(acc)
 
 def cargar_cartera_guardada():
     if os.path.exists(ARCHIVO_CARTERA):
@@ -50,10 +71,10 @@ def guardar_cartera_archivo(texto):
         return False
 
 # ==========================================
-# INTERFAZ DE ENTRADA Y CONTROL
+# ENTRADA DE DATOS Y GESTIÓN
 # ==========================================
 st.title("💼 Control de Rentabilidad y Añadas en Tiempo Real")
-st.markdown("> *Privacidad garantizada: Tus transacciones se procesan localmente sin exponerse en GitHub.*")
+st.markdown("> *Privacidad garantizada: Procesamiento seguro en tu navegador y servidor local.*")
 
 col_c1, col_c2 = st.columns(2)
 with col_c1:
@@ -75,7 +96,7 @@ if metodo_carga == "📂 Subir Archivo":
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 else:
-    st.info("Pega directamente tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio.")
+    st.info("Pega tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio (admite comas europeas y tabuladores de Excel).")
     texto_csv = st.text_area("Pega aquí tus transacciones:", value=texto_guardado, height=140)
     col_btn_cart, _ = st.columns([1, 4])
     with col_btn_cart:
@@ -91,11 +112,10 @@ else:
             st.error(f"Error al leer el texto pegado: {e}")
 
 # ==========================================
-# PROCESAMIENTO Y MOTOR DE CÁLCULO
+# PROCESAMIENTO Y FILTRADO POR AÑADA
 # ==========================================
 if df_ops is not None and not df_ops.empty:
     try:
-        # Mapeo universal de cabeceras
         col_map = {}
         for col in df_ops.columns:
             c_clean = col.strip().lower()
@@ -110,7 +130,6 @@ if df_ops is not None and not df_ops.empty:
         if not all(col in df_ops.columns for col in columnas_requeridas):
             st.error(f"❌ Error de formato. Faltan columnas: {', '.join(columnas_requeridas)}")
         else:
-            # Limpieza universal de números
             df_ops['Acciones'] = df_ops['Acciones'].apply(limpiar_numero_europeo)
             df_ops['Precio'] = df_ops['Precio'].apply(limpiar_numero_europeo)
             df_ops['Fecha'] = pd.to_datetime(df_ops['Fecha'], errors='coerce', dayfirst=True)
@@ -122,7 +141,7 @@ if df_ops is not None and not df_ops.empty:
             df_ops = df_ops.sort_values('Fecha')
 
             if df_ops.empty:
-                st.warning("No hay transacciones válidas que procesar.")
+                st.warning("No hay transacciones válidas registradas.")
             else:
                 df_ops_global = df_ops.copy()
                 tickers_global = sorted(df_ops_global['Ticker'].unique().tolist())
@@ -137,7 +156,6 @@ if df_ops is not None and not df_ops.empty:
                 with col_f1: año_filtro = st.selectbox("📅 Selecciona Año de Compra (Modo Añada):", opciones_año)
                 with col_f2: ticker_filtro = st.selectbox("🏢 Selecciona Empresa a Inspeccionar:", opciones_ticker)
 
-                # Aplicación de filtros
                 if año_filtro != "Todo el Historial":
                     df_ops = df_ops[(df_ops['Fecha'].dt.year == int(año_filtro)) & (df_ops['Operacion'] == 'Compra')]
                 if ticker_filtro != "Todas las Empresas":
@@ -146,7 +164,7 @@ if df_ops is not None and not df_ops.empty:
                 if df_ops.empty:
                     st.warning("No hay operaciones válidas con los filtros seleccionados.")
                 else:
-                    min_date = df_ops_global['Fecha'].min()
+                    min_date_global = df_ops_global['Fecha'].min()
                     tickers_unicos = df_ops['Ticker'].unique().tolist()
 
                     dict_historicos = {}
@@ -157,7 +175,7 @@ if df_ops is not None and not df_ops.empty:
                         for t in tickers_global:
                             try:
                                 tk = yf.Ticker(t)
-                                hist = tk.history(start=min_date, auto_adjust=False)
+                                hist = tk.history(start=min_date_global, auto_adjust=False)
                                 if not hist.empty:
                                     hist.index = hist.index.tz_localize(None).normalize()
                                     hist = hist[~hist.index.duplicated(keep='last')]
@@ -169,7 +187,7 @@ if df_ops is not None and not df_ops.empty:
                                         if not divs_reales.empty:
                                             divs_reales.index = divs_reales.index.tz_localize(None).normalize()
                                             divs_reales = divs_reales[~divs_reales.index.duplicated(keep='last')]
-                                            divs_finales = divs_reales[divs_reales.index >= min_date]
+                                            divs_finales = divs_reales[divs_reales.index >= min_date_global]
                                         else:
                                             divs_finales = pd.Series(dtype=float)
 
@@ -194,12 +212,12 @@ if df_ops is not None and not df_ops.empty:
                     if dict_historicos:
                         datos_historicos = pd.DataFrame(dict_historicos)
                         datos_dividendos = pd.DataFrame(dict_dividendos)
-                        rango_fechas = pd.date_range(start=min_date.normalize(), end=pd.Timestamp.today().normalize())
+                        rango_fechas = pd.date_range(start=min_date_global.normalize(), end=pd.Timestamp.today().normalize())
                         datos_historicos = datos_historicos.reindex(rango_fechas).ffill().fillna(0)
                         datos_dividendos = datos_dividendos.reindex(rango_fechas).fillna(0)
 
                         # ==========================================
-                        # 1. LÓGICA LOCAL (MODO AÑADA / FILTRADA)
+                        # 1. CÁLCULO PATRIMONIAL DIARIO
                         # ==========================================
                         daily_shares = pd.DataFrame(0.0, index=datos_historicos.index, columns=tickers_unicos)
                         daily_invested = pd.Series(0.0, index=datos_historicos.index)
@@ -233,12 +251,24 @@ if df_ops is not None and not df_ops.empty:
                         accumulated_divs = daily_net_divs.cumsum()
                         total_patrimonio = daily_value + accumulated_divs
 
+                        # RECORTE DEL EJE TEMPORAL SEGÚN AÑADA
+                        if año_filtro != "Todo el Historial":
+                            fecha_corte_inicio = pd.Timestamp(f"{int(año_filtro)}-01-01")
+                        else:
+                            fecha_corte_inicio = min_date_global
+
+                        mask_chart = daily_invested.index >= fecha_corte_inicio
+                        di_plot = daily_invested[mask_chart]
+                        dv_plot = daily_value[mask_chart]
+                        ad_plot = accumulated_divs[mask_chart]
+                        tp_plot = total_patrimonio[mask_chart]
+
                         st.markdown("#### 📈 Evolución de tu Patrimonio")
                         fig_cartera = go.Figure()
-                        fig_cartera.add_trace(go.Scatter(x=daily_invested.index, y=daily_invested.values, mode='lines', line=dict(color='#faca2b', width=2, dash='dash'), name='Capital Aportado'))
-                        fig_cartera.add_trace(go.Scatter(x=daily_value.index, y=daily_value.values, mode='lines', line=dict(color='#21c354', width=2), name='Valor Mercado'))
-                        fig_cartera.add_trace(go.Scatter(x=accumulated_divs.index, y=accumulated_divs.values, fill='tozeroy', mode='lines', line=dict(color='#00d4ff', width=2), fillcolor='rgba(0, 212, 255, 0.15)', name='Divs Netos Acumulados'))
-                        fig_cartera.add_trace(go.Scatter(x=total_patrimonio.index, y=total_patrimonio.values, mode='lines', line=dict(color='#e040fb', width=2.5), name='Patrimonio Total'))
+                        fig_cartera.add_trace(go.Scatter(x=di_plot.index, y=di_plot.values, mode='lines', line=dict(color='#faca2b', width=2, dash='dash'), name='Capital Aportado'))
+                        fig_cartera.add_trace(go.Scatter(x=dv_plot.index, y=dv_plot.values, mode='lines', line=dict(color='#21c354', width=2), name='Valor Mercado'))
+                        fig_cartera.add_trace(go.Scatter(x=ad_plot.index, y=ad_plot.values, fill='tozeroy', mode='lines', line=dict(color='#00d4ff', width=2), fillcolor='rgba(0, 212, 255, 0.15)', name='Divs Netos Acumulados'))
+                        fig_cartera.add_trace(go.Scatter(x=tp_plot.index, y=tp_plot.values, mode='lines', line=dict(color='#e040fb', width=2.5), name='Patrimonio Total'))
                         fig_cartera.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=420, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5))
                         st.plotly_chart(fig_cartera, use_container_width=True)
 
@@ -247,12 +277,12 @@ if df_ops is not None and not df_ops.empty:
                             fx_rates_hoy = {'EUR': 1.0, 'USD': 1.0, 'GBP': 1.0, 'GBp': 1.0}
                             historico_fx = {}
                             try:
-                                fx_usd = yf.Ticker("EURUSD=X").history(start=min_date)['Close']
+                                fx_usd = yf.Ticker("EURUSD=X").history(start=min_date_global)['Close']
                                 fx_usd.index = fx_usd.index.tz_localize(None).normalize()
                                 historico_fx['USD'] = fx_usd
                                 fx_rates_hoy['USD'] = float(fx_usd.iloc[-1]) if not fx_usd.empty else 1.0
 
-                                fx_gbp = yf.Ticker("EURGBP=X").history(start=min_date)['Close']
+                                fx_gbp = yf.Ticker("EURGBP=X").history(start=min_date_global)['Close']
                                 fx_gbp.index = fx_gbp.index.tz_localize(None).normalize()
                                 historico_fx['GBP'] = fx_gbp
                                 historico_fx['GBp'] = fx_gbp
@@ -327,51 +357,97 @@ if df_ops is not None and not df_ops.empty:
                                 total_div_anual_eur += (acc * div_anual_unitario) / fx_hoy
 
                                 resultados_tabla.append({
-                                    "Ticker": t, "Acciones": round(acc, 4),
-                                    "Precio Medio": f"{p_medio:.2f} {sym_divisa}", "Precio Actual": f"{p_actual:.2f} {sym_divisa}",
-                                    "Valor Mercado": v_mercado_orig, "P/L Latente": b_abs_orig, "Divs. Cobrados": divs_orig, "Bº Total (Abs)": b_total_orig,
-                                    "Rent. Precio (€)": rent_precio_eur, "Rent. Total (€)": rent_total_eur,
-                                    "YoC Bruto": yoc_bruto, "YoC Neto": yoc_neto,
-                                    "Yield Act. Bruto": yield_act_bruto, "Yield Act. Neto": yield_act_neto
+                                    "Ticker": t,
+                                    "Acciones": acc,
+                                    "Precio Medio": p_medio,
+                                    "Precio Actual": p_actual,
+                                    "Moneda": sym_divisa,
+                                    "Valor Mercado": v_mercado_orig,
+                                    "P/L Latente": b_abs_orig,
+                                    "Divs. Cobrados": divs_orig,
+                                    "Bº Total (Abs)": b_total_orig,
+                                    "Rent. Precio (€)": rent_precio_eur,
+                                    "Rent. Total (€)": rent_total_eur,
+                                    "YoC Bruto": yoc_bruto,
+                                    "YoC Neto": yoc_neto,
+                                    "Yield Act. Bruto": yield_act_bruto,
+                                    "Yield Act. Neto": yield_act_neto
                                 })
 
                             b_l_mercado_eur = global_mercado_eur - global_inversion_eur
-                            b_total_global_eur = b_l_mercado_eur + global_divs_eur
-
                             yoc_global_bruto = (total_div_anual_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0.0
                             yoc_global_neto = yoc_global_bruto * (1 - (impuesto_cart / 100.0))
                             yield_global_bruto = (total_div_anual_eur / global_mercado_eur * 100) if global_mercado_eur > 0 else 0.0
                             yield_global_neto = yield_global_bruto * (1 - (impuesto_cart / 100.0))
 
+                            # ==========================================
+                            # KPIS EJECUTIVOS (FORMATO ESPAÑOL)
+                            # ==========================================
                             st.markdown("#### 🌐 Resumen Global Hoy (Convertido a Euros €)")
                             c1, c2, c3, c4, c5 = st.columns(5)
-                            c1.metric("Capital Invertido", f"{global_inversion_eur:,.2f} €")
-                            c2.metric("Valor Mercado", f"{global_mercado_eur:,.2f} €", f"{(b_l_mercado_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0:+.2f}%")
-                            c3.metric("Dividendos Cobrados", f"{global_divs_eur:,.2f} €", f"{(global_divs_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0:+.2f}% del Cap")
-                            c4.metric("YoC (s/ Coste)", f"{yoc_global_neto:.2f}% Neto", f"Bruto: {yoc_global_bruto:.2f}%")
-                            c5.metric("Yield Actual", f"{yield_global_neto:.2f}% Neto", f"Bruto: {yield_global_bruto:.2f}%")
+                            c1.metric("Capital Invertido", fmt_es(global_inversion_eur, 2, sufijo=" €"))
+                            c2.metric("Valor Mercado", fmt_es(global_mercado_eur, 2, sufijo=" €"), fmt_es((b_l_mercado_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0, 2, signo=True, sufijo="%"))
+                            c3.metric("Dividendos Cobrados", fmt_es(global_divs_eur, 2, sufijo=" €"), f"{fmt_es((global_divs_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0, 2, signo=True, sufijo='%')} del Cap")
+                            c4.metric("YoC (s/ Coste)", f"{fmt_es(yoc_global_neto, 2, sufijo='%')} Neto", f"Bruto: {fmt_es(yoc_global_bruto, 2, sufijo='%')}")
+                            c5.metric("Yield Actual", f"{fmt_es(yield_global_neto, 2, sufijo='%')} Neto", f"Bruto: {fmt_es(yield_global_bruto, 2, sufijo='%')}")
 
+                            # ==========================================
+                            # TABLA DE POSICIONES
+                            # ==========================================
                             st.markdown("#### 📋 Posiciones Abiertas (Con Rendimientos Brutos y Netos)")
                             resultados_tabla_ordenados = sorted(resultados_tabla, key=lambda k: k['Rent. Total (€)'], reverse=True)
-                            df_mostrar = pd.DataFrame(resultados_tabla_ordenados)
-                            styled_df = df_mostrar.style.format({
-                                "Valor Mercado": "{:,.2f}", "P/L Latente": "{:+.2f}", "Divs. Cobrados": "{:,.2f}", "Bº Total (Abs)": "{:+.2f}",
-                                "Rent. Precio (€)": "{:+.2f}%", "Rent. Total (€)": "{:+.2f}%",
-                                "YoC Bruto": "{:.2f}%", "YoC Neto": "{:.2f}%",
-                                "Yield Act. Bruto": "{:.2f}%", "Yield Act. Neto": "{:.2f}%"
-                            }).map(lambda val: f"color: {'#21c354' if val > 0 else '#ff4b4b'}; font-weight: bold;", subset=['P/L Latente', 'Bº Total (Abs)', 'Rent. Precio (€)', 'Rent. Total (€)']).map(lambda val: f"color: {'#00d4ff' if val > 0 else '#aaaaaa'};", subset=['Divs. Cobrados']).map(lambda val: "color: #faca2b; font-weight: bold;", subset=['YoC Neto'])
-                            st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
+                            rows_display = []
+                            for r in resultados_tabla_ordenados:
+                                sym = r['Moneda']
+                                rows_display.append({
+                                    "Ticker": r['Ticker'],
+                                    "Acciones": fmt_acciones(r['Acciones']),
+                                    "Precio Medio": f"{fmt_es(r['Precio Medio'], 2)} {sym}",
+                                    "Precio Actual": f"{fmt_es(r['Precio Actual'], 2)} {sym}",
+                                    "Valor Mercado": fmt_es(r['Valor Mercado'], 2, sufijo=f" {sym}"),
+                                    "P/L Latente": fmt_es(r['P/L Latente'], 2, signo=True, sufijo=f" {sym}"),
+                                    "Divs. Cobrados": fmt_es(r['Divs. Cobrados'], 2, sufijo=f" {sym}"),
+                                    "Bº Total (Abs)": fmt_es(r['Bº Total (Abs)'], 2, signo=True, sufijo=f" {sym}"),
+                                    "Rent. Precio (€)": fmt_es(r['Rent. Precio (€)'], 2, signo=True, sufijo="%"),
+                                    "Rent. Total (€)": fmt_es(r['Rent. Total (€)'], 2, signo=True, sufijo="%"),
+                                    "YoC Bruto": fmt_es(r['YoC Bruto'], 2, sufijo="%"),
+                                    "YoC Neto": fmt_es(r['YoC Neto'], 2, sufijo="%"),
+                                    "Yield Act. Bruto": fmt_es(r['Yield Act. Bruto'], 2, sufijo="%"),
+                                    "Yield Act. Neto": fmt_es(r['Yield Act. Neto'], 2, sufijo="%")
+                                })
+
+                            df_display = pd.DataFrame(rows_display)
+
+                            def colorear_celdas(val):
+                                if isinstance(val, str) and (val.startswith('+') or val.startswith(' +')):
+                                    return 'color: #21c354; font-weight: bold;'
+                                elif isinstance(val, str) and (val.startswith('-') or val.startswith(' -')):
+                                    return 'color: #ff4b4b; font-weight: bold;'
+                                return ''
+
+                            st.dataframe(
+                                df_display.style.applymap(colorear_celdas, subset=['P/L Latente', 'Bº Total (Abs)', 'Rent. Precio (€)', 'Rent. Total (€)']),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+
+                            # ==========================================
+                            # GRÁFICO COMPARATIVO DGI
+                            # ==========================================
                             st.markdown("#### 📊 YoC vs Yield Actual por Empresa (Selección Actual)")
                             fig_yocs = go.Figure()
                             tickers_bars = [r['Ticker'] for r in resultados_tabla_ordenados]
-                            fig_yocs.add_trace(go.Bar(x=tickers_bars, y=[r['YoC_Bruto'] for r in resultados_tabla_ordenados], name='YoC Bruto', marker_color='#faca2b'))
-                            fig_yocs.add_trace(go.Bar(x=tickers_bars, y=[r['YoC_Neto'] for r in resultados_tabla_ordenados], name='YoC Neto', marker_color='#ff9800'))
-                            fig_yocs.add_trace(go.Bar(x=tickers_bars, y=[r['Yield_Act. Bruto'] for r in resultados_tabla_ordenados], name='Yield Act. Bruto', marker_color='#00d4ff'))
-                            fig_yocs.add_trace(go.Bar(x=tickers_bars, y=[r['Yield_Act. Neto'] for r in resultados_tabla_ordenados], name='Yield Act. Neto', marker_color='#0088cc'))
+                            fig_yocs.add_trace(go.Bar(x=tickers_bars, y=[r['YoC Bruto'] for r in resultados_tabla_ordenados], name='YoC Bruto', marker_color='#faca2b'))
+                            fig_yocs.add_trace(go.Bar(x=tickers_bars, y=[r['YoC Neto'] for r in resultados_tabla_ordenados], name='YoC Neto', marker_color='#ff9800'))
+                            fig_yocs.add_trace(go.Bar(x=tickers_bars, y=[r['Yield Act. Bruto'] for r in resultados_tabla_ordenados], name='Yield Act. Bruto', marker_color='#00d4ff'))
+                            fig_yocs.add_trace(go.Bar(x=tickers_bars, y=[r['Yield Act. Neto'] for r in resultados_tabla_ordenados], name='Yield Act. Neto', marker_color='#0088cc'))
                             fig_yocs.update_layout(barmode='group', template='plotly_dark', height=350, margin=dict(l=0, r=0, t=20, b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
                             st.plotly_chart(fig_yocs, use_container_width=True)
 
+                            # ==========================================
+                            # CALENDARIO DE DIVIDENDOS
+                            # ==========================================
                             df_divs_hist = pd.DataFrame({'Fecha': daily_net_divs.index, 'Dividendo': daily_net_divs.values})
                             df_divs_hist = df_divs_hist[df_divs_hist['Dividendo'] > 0]
                             if not df_divs_hist.empty:
@@ -394,11 +470,15 @@ if df_ops is not None and not df_ops.empty:
                                     st.plotly_chart(fig_meses, use_container_width=True)
                                 with col_m2:
                                     st.markdown("##### 📝 Resumen YoY")
-                                    st.dataframe(anual_divs.style.format({'Dividendo': '{:,.2f} €', 'Crec. YoY (%)': '{:+.2f}%'}).map(lambda v: f"color: {'#21c354' if v>0 else ('#ff4b4b' if v<0 else '#aaaaaa')}; font-weight: bold;" if pd.notna(v) else "", subset=['Crec. YoY (%)']), use_container_width=True, hide_index=True)
+                                    df_anual_disp = anual_divs.copy()
+                                    df_anual_disp['Dividendo'] = df_anual_disp['Dividendo'].apply(lambda v: fmt_es(v, 2, sufijo=" €"))
+                                    df_anual_disp['Crec. YoY (%)'] = df_anual_disp['Crec. YoY (%)'].apply(lambda v: fmt_es(v, 2, signo=True, sufijo="%") if pd.notna(v) else "-")
+                                    st.dataframe(df_anual_disp, use_container_width=True, hide_index=True)
 
                                 st.markdown("<br>", unsafe_allow_html=True)
                                 st.markdown("##### 📈 Evolución Anual (Efecto Bola de Nieve)")
-                                fig_anual = go.Figure(go.Bar(x=anual_divs['Año'].astype(str), y=anual_divs['Dividendo'], name='Total Cobrado', marker_color='#00d4ff', text=[f"{val:,.2f} €" for val in anual_divs['Dividendo']], textposition='auto'))
+                                text_bolanieve = [fmt_es(val, 2, sufijo=" €") for val in anual_divs['Dividendo']]
+                                fig_anual = go.Figure(go.Bar(x=anual_divs['Año'].astype(str), y=anual_divs['Dividendo'], name='Total Cobrado', marker_color='#00d4ff', text=text_bolanieve, textposition='auto'))
                                 fig_anual.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=350, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title="Dividendos Netos Totales (€)"))
                                 st.plotly_chart(fig_anual, use_container_width=True)
 
@@ -408,8 +488,8 @@ if df_ops is not None and not df_ops.empty:
                             x_t = [r['Ticker'] for r in resultados_tabla_ordenados]
                             y_rp = [r['Rent. Precio (€)'] for r in resultados_tabla_ordenados]
                             y_rt = [r['Rent. Total (€)'] for r in resultados_tabla_ordenados]
-                            fig_comp.add_trace(go.Bar(x=x_t, y=y_rp, name='Solo Cotización (€)', marker_color=['#21c354' if r >= 0 else '#ff4b4b' for r in y_rp], text=[f"{v:+.1f}%" for v in y_rp], textposition='auto'))
-                            fig_comp.add_trace(go.Bar(x=x_t, y=y_rt, name='Total (Cotización + Divs €)', marker_color='#00d4ff', text=[f"{v:+.1f}%" for v in y_rt], textposition='auto'))
+                            fig_comp.add_trace(go.Bar(x=x_t, y=y_rp, name='Solo Cotización (€)', marker_color=['#21c354' if r >= 0 else '#ff4b4b' for r in y_rp], text=[fmt_es(v, 1, signo=True, sufijo="%") for v in y_rp], textposition='auto'))
+                            fig_comp.add_trace(go.Bar(x=x_t, y=y_rt, name='Total (Cotización + Divs €)', marker_color='#00d4ff', text=[fmt_es(v, 1, signo=True, sufijo="%") for v in y_rt], textposition='auto'))
                             fig_comp.update_layout(barmode='group', template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=400, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
                             st.plotly_chart(fig_comp, use_container_width=True)
 
@@ -475,16 +555,11 @@ if df_ops is not None and not df_ops.empty:
 
                                 base_pct = val_ini + aportaciones if (val_ini + aportaciones) > 0 else 1.0
 
-                                def fmt_es(num, signo=False):
-                                    if pd.isna(num): return "0,00"
-                                    s = f"{num:+,.2f}" if signo else f"{num:,.2f}"
-                                    return s.replace(",", "X").replace(".", ",").replace("X", ".")
-
                                 c1, c2, c3, c4 = st.columns(4)
-                                c1.metric(f"Valor Base ({año_radio})", f"{fmt_es(base_pct)} €", f"Aportación nueva: {fmt_es(aportaciones, True)} €")
-                                c2.metric("P/L de Mercado (Anual)", f"{fmt_es(b_mercado, True)} €", f"{(b_mercado/base_pct)*100:+.2f}%")
-                                c3.metric("Dividendos Netos (Anual)", f"{fmt_es(div_tot)} €", f"{(div_tot/base_pct)*100:+.2f}% del Capital Base")
-                                c4.metric("Beneficio Total (Anual)", f"{fmt_es(b_total, True)} €", f"{(b_total/base_pct)*100:+.2f}%")
+                                c1.metric(f"Valor Base ({año_radio})", fmt_es(base_pct, 2, sufijo=" €"), f"Aportación nueva: {fmt_es(aportaciones, 2, signo=True, sufijo=' €')}")
+                                c2.metric("P/L de Mercado (Anual)", fmt_es(b_mercado, 2, signo=True, sufijo=" €"), fmt_es((b_mercado/base_pct)*100, 2, signo=True, sufijo="%"))
+                                c3.metric("Dividendos Netos (Anual)", fmt_es(div_tot, 2, sufijo=" €"), f"{fmt_es((div_tot/base_pct)*100, 2, signo=True, sufijo='%')} s/ Base")
+                                c4.metric("Beneficio Total (Anual)", fmt_es(b_total, 2, signo=True, sufijo=" €"), fmt_es((b_total/base_pct)*100, 2, signo=True, sufijo="%"))
 
                                 fig_y = go.Figure()
                                 fig_y.add_trace(go.Scatter(x=di_y.index, y=di_y.values, mode='lines', line=dict(color='#faca2b', width=2, dash='dash'), name='Capital Global Invertido'))
@@ -501,7 +576,7 @@ if df_ops is not None and not df_ops.empty:
                                     df_d_y['Mes'] = df_d_y['Fecha'].dt.month
                                     agrup_m = df_d_y.groupby('Mes')['Dividendo'].sum()
                                     y_vals = [agrup_m.get(m, 0.0) for m in range(1, 13)]
-                                    text_vals = [f"{fmt_es(v)} €" if v > 0 else "" for v in y_vals]
+                                    text_vals = [fmt_es(v, 2, sufijo=" €") if v > 0 else "" for v in y_vals]
 
                                     fig_d = go.Figure(go.Bar(x=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'], y=y_vals, marker_color='#00d4ff', text=text_vals, textposition='auto'))
                                     fig_d.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=300, yaxis_title="Dividendos Netos (€)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
