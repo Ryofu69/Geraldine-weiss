@@ -203,6 +203,7 @@ if df_ops is not None and not df_ops.empty:
                     dict_dividendos = {}
                     dict_forward_div = {}
                     dict_dgr_sugerido = {}
+                    dict_meses_pago = {}
 
                     with st.spinner("Descargando precios de mercado, dividendos e historial FX..."):
                         for t in tickers_global:
@@ -240,12 +241,19 @@ if df_ops is not None and not df_ops.empty:
                                         f_div = f_div / 100.0
                                     dict_forward_div[t] = f_div
 
-                                    # ============================================================
-                                    # CÁLCULO DGR PURO: MÍNIMO ENTRE 5 Y 12 AÑOS SIN TOPES
-                                    # ============================================================
+                                    # Detección de meses habituales de pago
                                     div_hist_full = tk.dividends
-                                    dgr_calc = 0.0
+                                    if not div_hist_full.empty:
+                                        div_recientes = div_hist_full[div_hist_full.index >= (pd.Timestamp.now() - pd.DateOffset(years=2))]
+                                        if div_recientes.empty:
+                                            div_recientes = div_hist_full.tail(4)
+                                        meses_detectados = sorted(div_recientes.index.month.unique().tolist())
+                                        dict_meses_pago[t] = meses_detectados if meses_detectados else [1, 7]
+                                    else:
+                                        dict_meses_pago[t] = [1, 7]
 
+                                    # Cálculo de DGR de referencia
+                                    dgr_calc = 0.0
                                     if not div_hist_full.empty and len(div_hist_full) >= 2:
                                         divs_anuales = div_hist_full.groupby(div_hist_full.index.year).sum()
                                         año_act = datetime.now().year
@@ -258,14 +266,12 @@ if df_ops is not None and not df_ops.empty:
                                         dgr_5y = None
                                         dgr_12y = None
 
-                                        # 5 años
                                         año_5 = año_act - 5
                                         if año_5 in divs_anuales.index and divs_anuales[año_5] > 0 and div_actual > 0:
                                             dgr_5y = ((div_actual / divs_anuales[año_5]) ** (1.0 / 5.0) - 1.0) * 100.0
                                         elif len(divs_anuales) >= 6 and divs_anuales.iloc[-6] > 0 and div_actual > 0:
                                             dgr_5y = ((div_actual / divs_anuales.iloc[-6]) ** (1.0 / 5.0) - 1.0) * 100.0
 
-                                        # 12 años
                                         año_12 = año_act - 12
                                         if año_12 in divs_anuales.index and divs_anuales[año_12] > 0 and div_actual > 0:
                                             dgr_12y = ((div_actual / divs_anuales[año_12]) ** (1.0 / 12.0) - 1.0) * 100.0
@@ -443,7 +449,8 @@ if df_ops is not None and not df_ops.empty:
                                     "YoC Neto": yoc_neto,
                                     "Yield Act Bruto": yield_act_bruto,
                                     "Yield Act Neto": yield_act_neto,
-                                    "DGR_Sugerido": dict_dgr_sugerido.get(t, 0.0)
+                                    "DGR_Sugerido": dict_dgr_sugerido.get(t, 0.0),
+                                    "Meses_Pago": dict_meses_pago.get(t, [1, 7])
                                 })
 
                             plusvalia_global_eur = global_mercado_eur - global_inversion_eur
@@ -602,7 +609,6 @@ if df_ops is not None and not df_ops.empty:
 
                             dgr_guardados = cargar_dgr_guardados()
                             
-                            # Inicializar claves de session_state si no existen
                             for r in resultados_tabla:
                                 tk = r['Ticker']
                                 key_name = f"dgr_ctrl_{tk}"
@@ -612,7 +618,6 @@ if df_ops is not None and not df_ops.empty:
                                     else:
                                         st.session_state[key_name] = round(float(r['DGR_Sugerido']), 1)
 
-                            # Identificar cuántas posiciones tienen valores modificados
                             modificados_count = sum(
                                 1 for r in resultados_tabla
                                 if abs(float(st.session_state.get(f"dgr_ctrl_{r['Ticker']}", r['DGR_Sugerido'])) - round(float(r['DGR_Sugerido']), 1)) > 0.05
@@ -696,7 +701,7 @@ if df_ops is not None and not df_ops.empty:
                                         st.toast("🔄 Valores restablecidos a los cálculos originales.", icon="🔄")
                                         st.rerun()
 
-                            # Aplicar valores al modelo analítico
+                            # Aplicar valores finales al modelo analítico
                             for r in resultados_tabla:
                                 tk = r['Ticker']
                                 val_f = float(st.session_state.get(f"dgr_ctrl_{tk}", r['DGR_Sugerido']))
@@ -708,8 +713,9 @@ if df_ops is not None and not df_ops.empty:
                                 weights=[r['Renta Anual Proyectada Neto'] for r in resultados_tabla]
                             )) if total_forward_div_neto_eur > 0 else 0.0
 
+                            año_base = datetime.now().year
                             años_futuros = list(range(1, 11))
-                            labels_futuros = [str(datetime.now().year + y) for y in años_futuros]
+                            labels_futuros = [str(año_base + y) for y in años_futuros]
 
                             renta_proy_conservadora = [total_forward_div_neto_eur * ((1 + 0.04) ** y) for y in años_futuros]
                             
@@ -751,6 +757,107 @@ if df_ops is not None and not df_ops.empty:
                                 yaxis=dict(title="Renta Pasiva Neta / Año (€)")
                             )
                             st.plotly_chart(fig_snow, use_container_width=True)
+
+                            # ============================================================
+                            # NUEVO: PREVISIÓN DE DIVIDENDOS MENSUALES (AÑO SELECCIONABLE)
+                            # ============================================================
+                            st.divider()
+                            st.markdown("#### 🗓️ Previsión Mensual de Cobros Futuros (Mes a Mes)")
+                            st.caption("Visualiza el calendario detallado de cobros según los meses en que paga cada empresa y su crecimiento previsto.")
+
+                            lista_años_futuros = [año_base + i for i in range(11)]
+                            col_sel_yr, col_info_yr = st.columns([1.5, 3.5])
+                            with col_sel_yr:
+                                año_mensual_sel = st.selectbox(
+                                    "📅 Selecciona Año a Prever:",
+                                    lista_años_futuros,
+                                    index=0,
+                                    key="sel_año_mensual_proy"
+                                )
+
+                            delta_años = año_mensual_sel - año_base
+                            meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+                            cobros_matriz = {m: 0.0 for m in range(1, 13)}
+                            cobros_por_ticker_mes = {r['Ticker']: {m: 0.0 for m in range(1, 13)} for r in resultados_tabla}
+
+                            total_neto_año_sel = 0.0
+
+                            for r in resultados_tabla:
+                                tk = r['Ticker']
+                                renta_base_t = float(r['Renta Anual Proyectada Neto'])
+                                dgr_t = float(r['DGR_Final'])
+                                factor_t = max(0.0, (1.0 + (dgr_t / 100.0)) ** delta_años)
+                                renta_futura_t = renta_base_t * factor_t
+                                total_neto_año_sel += renta_futura_t
+
+                                meses_p = r.get('Meses_Pago', [1, 7])
+                                if not meses_p:
+                                    meses_p = [1, 7]
+                                cuota_mes = renta_futura_t / len(meses_p)
+                                for m in meses_p:
+                                    if 1 <= m <= 12:
+                                        cobros_por_ticker_mes[tk][m] += cuota_mes
+                                        cobros_matriz[m] += cuota_mes
+
+                            promedio_mes_neto = total_neto_año_sel / 12.0
+                            dif_pct_respecto_base = ((total_neto_año_sel - total_forward_div_neto_eur) / total_forward_div_neto_eur * 100.0) if total_forward_div_neto_eur > 0 else 0.0
+
+                            with col_info_yr:
+                                st.markdown(f"""
+                                <div style="display: flex; gap: 15px; margin-top: 5px;">
+                                    <div class="metric-box" style="flex: 1; padding: 10px 14px; margin-bottom: 0;">
+                                        <div class="metric-title">Renta Neta {año_mensual_sel}</div>
+                                        <div class="metric-val" style="font-size: 1.3rem; color: #00d4ff;">{fmt_es(total_neto_año_sel, 2, sufijo=" €")}</div>
+                                    </div>
+                                    <div class="metric-box" style="flex: 1; padding: 10px 14px; margin-bottom: 0;">
+                                        <div class="metric-title">Media Mensual Limpia</div>
+                                        <div class="metric-val" style="font-size: 1.3rem; color: #21c354;">~{fmt_es(promedio_mes_neto, 2, sufijo=" €/mes")}</div>
+                                    </div>
+                                    <div class="metric-box" style="flex: 1; padding: 10px 14px; margin-bottom: 0;">
+                                        <div class="metric-title">Crecimiento vs Actual</div>
+                                        <div class="metric-val" style="font-size: 1.3rem; color: #faca2b;">{fmt_es(dif_pct_respecto_base, 1, signo=True, sufijo="%")}</div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                            # Gráfico mensual detallado por empresa
+                            fig_mes_futuro = go.Figure()
+                            for r in resultados_tabla:
+                                tk = r['Ticker']
+                                y_vals = [cobros_por_ticker_mes[tk][m] for m in range(1, 13)]
+                                fig_mes_futuro.add_trace(go.Bar(
+                                    x=meses_nombres,
+                                    y=y_vals,
+                                    name=tk,
+                                    hovertemplate=f"<b>{tk}</b>: %{{y:.2f}} € netos<extra></extra>"
+                                ))
+
+                            # Anotaciones con el importe total mensual arriba de cada barra
+                            totales_mensuales = [cobros_matriz[m] for m in range(1, 13)]
+                            texto_totales = [fmt_es(v, 0, sufijo="€") if v > 0.5 else "" for v in totales_mensuales]
+
+                            fig_mes_futuro.add_trace(go.Scatter(
+                                x=meses_nombres,
+                                y=[v * 1.02 for v in totales_mensuales],
+                                mode='text',
+                                text=texto_totales,
+                                textposition='top center',
+                                textfont=dict(color='#00d4ff', size=11, weight='bold'),
+                                showlegend=False,
+                                hoverinfo='skip'
+                            ))
+
+                            fig_mes_futuro.update_layout(
+                                barmode='stack',
+                                template='plotly_dark',
+                                height=360,
+                                margin=dict(l=0, r=0, t=20, b=10),
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                yaxis=dict(title="Dividendos Netos (€)"),
+                                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+                            )
+                            st.plotly_chart(fig_mes_futuro, use_container_width=True)
 
                             # ==========================================
                             # 3. EVOLUCIÓN PATRIMONIAL ADAPTADA A LA AÑADA
@@ -848,13 +955,13 @@ if df_ops is not None and not df_ops.empty:
                             st.dataframe(styler, use_container_width=True, hide_index=True)
 
                             # ==========================================
-                            # 5. CALENDARIO DE DIVIDENDOS NETOS
+                            # 5. CALENDARIO DE DIVIDENDOS HISTÓRICOS
                             # ==========================================
                             df_divs_hist = pd.DataFrame({'Fecha': daily_net_divs.index, 'Dividendo': daily_net_divs.values})
                             df_divs_hist = df_divs_hist[df_divs_hist['Dividendo'] > 0]
                             if not df_divs_hist.empty:
                                 st.divider()
-                                st.markdown("#### 🗓️ Calendario Histórico de Cobros y Crecimiento")
+                                st.markdown("#### 📜 Histórico Real de Cobros Pasados y Crecimiento")
                                 df_divs_hist['Año'], df_divs_hist['Mes'] = df_divs_hist['Fecha'].dt.year, df_divs_hist['Fecha'].dt.month
                                 agrup_meses = df_divs_hist.groupby(['Año', 'Mes'])['Dividendo'].sum().reset_index()
                                 anual_divs = df_divs_hist.groupby('Año')['Dividendo'].sum().reset_index()
@@ -862,7 +969,7 @@ if df_ops is not None and not df_ops.empty:
 
                                 col_m1, col_m2 = st.columns([2.5, 1])
                                 with col_m1:
-                                    st.markdown("##### 📊 Ingresos Mensuales por Año")
+                                    st.markdown("##### 📊 Ingresos Mensuales por Año Cobrado")
                                     fig_meses = go.Figure()
                                     meses_str = {1: 'Ene', 2: 'Feb', 3: 'Mar', 4: 'Abr', 5: 'May', 6: 'Jun', 7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
                                     for año in sorted(agrup_meses['Año'].unique()):
@@ -878,7 +985,7 @@ if df_ops is not None and not df_ops.empty:
                                     st.dataframe(df_anual_disp, use_container_width=True, hide_index=True)
 
                                 st.markdown("<br>", unsafe_allow_html=True)
-                                st.markdown("##### 📈 Efecto Bola de Nieve (Dividendos Anuales Totales)")
+                                st.markdown("##### 📈 Efecto Bola de Nieve Real (Dividendos Pasados Cobrados)")
                                 text_bolanieve = [fmt_es(val, 2, sufijo=" €") for val in anual_divs['Dividendo']]
                                 fig_anual = go.Figure(go.Bar(x=anual_divs['Año'].astype(str), y=anual_divs['Dividendo'], name='Total Cobrado', marker_color='#00d4ff', text=text_bolanieve, textposition='auto'))
                                 fig_anual.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=320, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis=dict(title="Dividendos Netos (€)"))
