@@ -424,15 +424,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         else: 
             st.error(f"🏷️ **VALORACIÓN DGI: {score_val:.1f}/10** — Sobrevalorada o Exigente. Poco o nulo margen de seguridad fundamental.")
 
-    if chowder_number is not None:
-        if chowder_pass:
-            st.success(f"🥣 **REGLA DE CHOWDER: APROBADA ({chowder_number:.1f})** — Supera el objetivo exigido de {chowder_target:.0f}.")
-        else:
-            txt_precio_c = f" Cotiza a {precio_actual / divisor_uk:.2f}{sym} y debería cotizar a {precio_obj_chowder / divisor_uk:.2f}{sym} para cumplir." if (precio_obj_chowder is not None and yield_req_chowder > 0) else ""
-            st.error(f"🥣 **REGLA DE CHOWDER: SUSPENSA ({chowder_number:.1f})** — No alcanza el objetivo exigido de {chowder_target:.0f}.{txt_precio_c}")
-    else:
-        st.info("🥣 **REGLA DE CHOWDER: N/D** — No hay datos de crecimiento a 5 años suficientes para su cálculo.")
-
     if precio_actual <= precio_compra: st.success("💡 ESTADO: En zona de COMPRA CLARA (Infravalorada).")
     elif precio_actual >= precio_venta: st.error("💡 ESTADO: En zona de VENTA (Sobrevalorada).")
     else: st.info("💡 ESTADO: En zona de MANTENER (Precio Justo / Transición).")
@@ -981,36 +972,96 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
     else: st.error(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Capitalización pequeña)")
 
+    # ==========================================
+    # SECCIÓN CHOWDER REDISEÑADA (VISUAL Y MÓVIL)
+    # ==========================================
     st.divider()
-    st.subheader("🥣 La Regla de Chowder")
-    st.markdown("> **Filtro de Rentabilidad Total:** Diseñado por 'Chowder' en Seeking Alpha, busca unificar el dilema entre rentabilidad inicial y crecimiento del dividendo. La premisa establece que si una empresa paga poco dividendo hoy, debe compensarlo subiéndolo a un ritmo vertiginoso para asegurar un retorno que bata al mercado a largo plazo.")
-    
-    col_c1, col_c2, col_c3, col_c4 = st.columns(4)
-    col_c1.metric("Yield Actual", f"{yield_actual:.2f}%")
-    col_c2.metric("Crecimiento (DGR 5A)", f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D")
-    
-    if dgr_5y is not None:
-        c_color = "normal" if chowder_pass else "inverse"
-        col_c3.metric("Número Chowder", f"{chowder_number:.2f}", delta=f"Objetivo mínimo: {chowder_target:.0f}", delta_color=c_color)
-        
-        if yield_req_chowder <= 0:
-            col_c4.metric("Precio Obj. Chowder", "Ya lo cumple", help="El crecimiento del dividendo a 5 años ya supera por sí solo el objetivo de Chowder.")
-        else:
-            dist_chowder = ((precio_actual - precio_obj_chowder) / precio_obj_chowder) * 100
-            col_c4.metric("Precio Obj. Chowder", f"{precio_obj_chowder / divisor_uk:.2f}{sym}", delta=f"{dist_chowder:+.1f}% vs Actual", delta_color="inverse")
-    else:
-        col_c3.metric("Número Chowder", "N/D")
-        col_c4.metric("Precio Obj. Chowder", "N/D")
-    
-    st.markdown("#### 📐 Criterios de Aprobación de esta empresa")
+    st.subheader("🥣 La Regla de Chowder (Retorno Compuesto)")
+
+    # Determinar texto del criterio sectorial
     if (es_utility_pura or es_telecom) and yield_actual > 4.0:
-        st.info("Al pertenecer a un sector hiper-estable regulado (Utilities/Telecom) y tener un Yield inicial > 4%, se le aplica la **excepción de Chowder**, bajando el objetivo de puntuación a **≥ 8**.")
+        criterio_txt = "Sector Regulado/Utility con Yield > 4.0% (Exige ≥ 8.0)"
     elif yield_actual >= 3.0:
-        st.info("Al ofrecer un Yield inicial atractivo (≥ 3.0%), se le exige un objetivo Chowder estándar de **≥ 12**.")
+        criterio_txt = "Yield Inicial Alto ≥ 3.0% (Exige ≥ 12.0 para batir al mercado)"
     else:
-        st.info("Al ofrecer un Yield inicial bajo (< 3.0%), se le exige mayor crecimiento para compensar, con un objetivo Chowder estricto de **≥ 15**.")
-    
-    st.markdown("*Nota: Los números mágicos de 12 y 15 buscan emular o superar la media histórica del S&P 500 (8%), permitiendo que la rentabilidad sobre coste (YoC) de tu cartera se duplique cíclicamente.*")
+        criterio_txt = "Yield Inicial Bajo < 3.0% (Exige ≥ 15.0 por alto crecimiento)"
+
+    col_chow1, col_chow2 = st.columns(2)
+
+    with col_chow1:
+        if chowder_number is not None:
+            pct_progreso = min(100.0, (chowder_number / chowder_target) * 100)
+            diff_chowder = chowder_number - chowder_target
+            
+            if chowder_pass:
+                ch_badge = "badge-verde"
+                ch_estado = f"🟢 Aprobada (+{diff_chowder:.1f} pts)"
+                color_barra = "#21c354"
+            elif chowder_number >= (chowder_target - 1.5):
+                ch_badge = "badge-ambar"
+                ch_estado = f"🟡 Cerca ({diff_chowder:.1f} pts)"
+                color_barra = "#faca2b"
+            else:
+                ch_badge = "badge-rojo"
+                ch_estado = f"🔴 Suspensa ({diff_chowder:.1f} pts)"
+                color_barra = "#ff4b4b"
+
+            st.markdown(f"""
+            <div class="card-dgi">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="color: #aaa; font-size: 0.85rem;">Ecuación: Yield + DGR 5A</span>
+                    <span class="{ch_badge}">{ch_estado}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+                    <span style="font-size: 1.1rem; color: #ccc;">
+                        <span style="color: #00d4ff; font-weight: bold;">{yield_actual:.2f}%</span> + 
+                        <span style="color: #faca2b; font-weight: bold;">{dgr_5y:.2f}%</span> = 
+                        <span style="font-size: 1.6rem; font-weight: bold; color: white;"> {chowder_number:.1f}</span>
+                    </span>
+                    <span style="font-size: 0.9rem; color: #888;">Meta: <strong>≥ {chowder_target:.0f}</strong></span>
+                </div>
+                <!-- Barra de progreso visual -->
+                <div style="background: rgba(255,255,255,0.1); border-radius: 6px; height: 8px; width: 100%; overflow: hidden; margin-bottom: 6px;">
+                    <div style="background: {color_barra}; width: {pct_progreso:.1f}%; height: 100%;"></div>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">{criterio_txt}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("🥣 Datos insuficientes de crecimiento a 5 años para calcular Chowder.")
+
+    with col_chow2:
+        if chowder_number is not None:
+            if chowder_pass or yield_req_chowder <= 0:
+                st.markdown(f"""
+                <div class="card-dgi">
+                    <span style="color: #aaa; font-size: 0.85rem;">🎯 Precio Objetivo por Regla de Chowder</span>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; margin-bottom: 8px;">
+                        <span style="font-size: 1.5rem; font-weight: bold; color: #21c354;">Ya Cumple la Regla</span>
+                        <span class="badge-verde">En Precio</span>
+                    </div>
+                    <span style="font-size: 0.75rem; color: #888;">El dividendo actual y su crecimiento ya baten el objetivo sin requerir mayor descuento.</span>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                p_obj_val = precio_obj_chowder / divisor_uk
+                p_act_val = precio_actual / divisor_uk
+                dist_chow = ((p_act_val - p_obj_val) / p_obj_val) * 100
+                st.markdown(f"""
+                <div class="card-dgi">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="color: #aaa; font-size: 0.85rem;">🎯 Precio Objetivo por Chowder</span>
+                        <span class="badge-rojo">+{dist_chow:.1f}% sobre meta</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
+                        <span style="font-size: 1.5rem; font-weight: bold;">{p_obj_val:.2f}{sym}</span>
+                        <span style="font-size: 0.85rem; color: #888;">Cotiza a {p_act_val:.2f}{sym}</span>
+                    </div>
+                    <span style="font-size: 0.75rem; color: #888;">Precio necesario para que el Yield ({yield_req_chowder:.2f}%) compense el crecimiento y alcance {chowder_target:.0f}.</span>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.metric("Precio Obj. Chowder", "N/D")
 
     st.divider()
     
