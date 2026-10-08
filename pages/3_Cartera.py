@@ -12,7 +12,7 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Control de Cartera DGI", page_icon="💼", layout="wide")
 
 # ==========================================
-# UTILIDADES DE LIMPIEZA Y FORMATEO ESPAÑOL
+# FORMATEO NUMÉRICO ESPAÑOL
 # ==========================================
 def limpiar_numero_europeo(val):
     if pd.isna(val) or val is None:
@@ -28,7 +28,6 @@ def limpiar_numero_europeo(val):
         return 0.0
 
 def fmt_es(val, dec=2, signo=False, sufijo=""):
-    """Convierte números a formato español: 1.234,56 € o +5,20%"""
     if pd.isna(val) or val is None:
         return f"0,{dec * '0'}{sufijo}"
     try:
@@ -49,7 +48,7 @@ def fmt_acciones(acc):
         return str(acc)
 
 # ==========================================
-# ESTILOS VISUALES PARA TARJETAS
+# ESTILOS CSS DE TARJETAS
 # ==========================================
 st.markdown("""
 <style>
@@ -84,7 +83,7 @@ st.markdown("""
 # ENTRADA DE DATOS (100% EN MEMORIA VOLÁTIL)
 # ==========================================
 st.title("💼 Panel de Rendimiento y Análisis DGI")
-st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. Ningún dato se guarda en el servidor ni en GitHub.*")
+st.markdown("> *Privacidad garantizada: Procesamiento exclusivo en memoria de sesión temporal. Ningún dato se guarda en el servidor ni en GitHub.*")
 
 col_c1, col_c2 = st.columns(2)
 with col_c1:
@@ -216,7 +215,6 @@ if df_ops is not None and not df_ops.empty:
                                         f_div = f_div / 100.0
                                     dict_forward_div[t] = f_div
 
-                                    # Estimación del crecimiento del dividendo a 5 años (DGR)
                                     div_hist_full = tk.dividends
                                     if not div_hist_full.empty and len(div_hist_full) >= 8:
                                         divs_anuales = div_hist_full.groupby(div_hist_full.index.year).sum()
@@ -413,7 +411,7 @@ if df_ops is not None and not df_ops.empty:
                                 r['Peso Renta Pct'] = (r['Renta Anual Proyectada Neto'] / total_forward_div_neto_eur * 100) if total_forward_div_neto_eur > 0 else 0.0
 
                             # ==========================================
-                            # 1. TARJETAS KPIS CON BRUTO Y NETO COMPLETOS
+                            # 1. TARJETAS KPIS ESTRATÉGICAS (BRUTO Y NETO)
                             # ==========================================
                             st.markdown(f"#### 🌐 Resumen de Rendimiento ({año_filtro})")
                             
@@ -451,7 +449,7 @@ if df_ops is not None and not df_ops.empty:
                                 col_tot = "#21c354" if ret_tot_global_neto_eur >= 0 else "#ff4b4b"
                                 st.markdown(f"""
                                 <div class="metric-box" style="border-color: rgba(33, 195, 84, 0.35); background: rgba(33, 195, 84, 0.05);">
-                                    <div class="metric-title" style="color: #21c354;">🚀 Retorno Total (Ganancia)</div>
+                                    <div class="metric-title" style="color: #21c354;">🚀 Retorno Total Real</div>
                                     <div class="metric-val" style="color: {col_tot};">{fmt_es(ret_tot_global_neto_eur, 2, signo=True, sufijo=" €")} <span style="font-size: 0.82rem;">Neto</span></div>
                                     <div class="metric-sub" style="color: {col_tot};"><b>{fmt_es(pct_ret_neto_global, 2, signo=True, sufijo="% Neto")}</b> | Bruto: {fmt_es(pct_ret_bruto_global, 2, signo=True, sufijo="%")} ({fmt_es(ret_tot_global_bruto_eur, 2, signo=True, sufijo=" €")})</div>
                                 </div>
@@ -467,7 +465,7 @@ if df_ops is not None and not df_ops.empty:
                                 """, unsafe_allow_html=True)
 
                             # ==========================================
-                            # 2. HERRAMIENTAS GRÁFICAS DE ESTRATEGIA DGI
+                            # 2. HERRAMIENTAS GRÁFICAS DGI (CERO BARRAS DE YOC)
                             # ==========================================
                             st.divider()
                             col_g1, col_g2 = st.columns(2)
