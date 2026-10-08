@@ -426,8 +426,15 @@ if df_ops is not None and not df_ops.empty:
                                     return 'color: #ff4b4b; font-weight: bold;'
                                 return ''
 
+                            styler = df_display.style
+                            cols_colorear = ['P/L Latente', 'Bº Total (Abs)', 'Rent. Precio (€)', 'Rent. Total (€)']
+                            if hasattr(styler, 'map'):
+                                styler = styler.map(colorear_celdas, subset=cols_colorear)
+                            else:
+                                styler = styler.applymap(colorear_celdas, subset=cols_colorear)
+
                             st.dataframe(
-                                df_display.style.applymap(colorear_celdas, subset=['P/L Latente', 'Bº Total (Abs)', 'Rent. Precio (€)', 'Rent. Total (€)']),
+                                styler,
                                 use_container_width=True,
                                 hide_index=True
                             )
