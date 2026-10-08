@@ -5,15 +5,11 @@ import numpy as np
 from datetime import datetime
 import warnings
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import io
-import os
 
 warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="Control de Cartera DGI", page_icon="💼", layout="wide")
-
-ARCHIVO_CARTERA = "cartera.csv"
 
 # ==========================================
 # UTILIDADES DE LIMPIEZA Y FORMATEO ESPAÑOL
@@ -52,27 +48,8 @@ def fmt_acciones(acc):
     except Exception:
         return str(acc)
 
-def cargar_cartera_guardada():
-    if os.path.exists(ARCHIVO_CARTERA):
-        try:
-            with open(ARCHIVO_CARTERA, "r", encoding="utf-8") as f:
-                c = f.read().strip()
-                if c:
-                    return c
-        except Exception:
-            pass
-    return "Fecha,Ticker,Operacion,Acciones,Precio\n"
-
-def guardar_cartera_archivo(texto):
-    try:
-        with open(ARCHIVO_CARTERA, "w", encoding="utf-8") as f:
-            f.write(texto.strip())
-        return True
-    except Exception:
-        return False
-
 # ==========================================
-# INYECCIÓN CSS PARA DISEÑO PREMIUM
+# INYECCIÓN CSS PARA DISEÑO VISUAL
 # ==========================================
 st.markdown("""
 <style>
@@ -104,19 +81,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# ENTRADA DE DATOS Y GESTIÓN
+# ENTRADA DE DATOS (100% EN MEMORIA VOLÁTIL)
 # ==========================================
 st.title("💼 Panel de Rendimiento y Retorno Total DGI")
-st.markdown("> *Privacidad garantizada: Procesamiento seguro en tu navegador y servidor local.*")
+st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. No se crea ni se guarda ningún archivo en el servidor ni en GitHub.*")
 
 col_c1, col_c2 = st.columns(2)
 with col_c1:
-    metodo_carga = st.radio("¿Cómo quieres cargar tu cartera?", ["📝 Pegar / Editar Texto", "📂 Subir Archivo"], horizontal=True)
+    metodo_carga = st.radio("¿Cómo quieres cargar tu cartera?", ["📝 Pegar Texto", "📂 Subir Archivo"], horizontal=True)
 with col_c2:
     impuesto_cart = st.number_input("Retención media de dividendos (%)", value=19.0, step=0.5, key="imp_cart_p3")
 
 df_ops = None
-texto_guardado = cargar_cartera_guardada()
 
 if metodo_carga == "📂 Subir Archivo":
     archivo_subido = st.file_uploader("Sube tu historial de operaciones (CSV o Excel)", type=["csv", "xlsx"])
@@ -129,15 +105,12 @@ if metodo_carga == "📂 Subir Archivo":
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 else:
-    st.info("Pega tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio (admite comas europeas y tabuladores de Excel).")
-    texto_csv = st.text_area("Pega aquí tus transacciones:", value=texto_guardado, height=130)
-    col_btn_cart, _ = st.columns([1, 4])
-    with col_btn_cart:
-        if st.button("💾 Guardar Cartera en Archivo"):
-            if guardar_cartera_archivo(texto_csv):
-                st.success("Cartera guardada correctamente en `cartera.csv`.")
-            else:
-                st.error("Error al guardar el archivo.")
+    st.info("Pega directamente tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio (admite comas europeas y tabuladores de Excel).")
+    texto_csv = st.text_area(
+        "Pega aquí tus transacciones:",
+        height=140,
+        placeholder="Fecha,Ticker,Operacion,Acciones,Precio\n29/03/2016,REP.MC,Compra,764,13,0704\n11/04/2025,REP.MC,Compra,87,9,58"
+    )
     if texto_csv and texto_csv.strip():
         try:
             df_ops = pd.read_csv(io.StringIO(texto_csv.strip()), sep=None, engine='python', dtype=str)
@@ -249,7 +222,6 @@ if df_ops is not None and not df_ops.empty:
                         datos_historicos = datos_historicos.reindex(rango_fechas).ffill().fillna(0)
                         datos_dividendos = datos_dividendos.reindex(rango_fechas).fillna(0)
 
-                        # CÁLCULO PATRIMONIAL DIARIO
                         daily_shares = pd.DataFrame(0.0, index=datos_historicos.index, columns=tickers_unicos)
                         daily_invested = pd.Series(0.0, index=datos_historicos.index)
 
@@ -752,5 +724,20 @@ if df_ops is not None and not df_ops.empty:
                                 fig_y.add_trace(go.Scatter(x=tot_pat_y.index, y=tot_pat_y.values, mode='lines', line=dict(color='#e040fb', width=2.5), name='Patrimonio Total'))
                                 fig_y.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=380, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5))
                                 st.plotly_chart(fig_y, use_container_width=True)
+
+                                st.markdown(f"#### 📊 Cobros Mensuales en {año_radio}")
+                                df_d_y = pd.DataFrame({'Fecha': dd_y.index, 'Dividendo': dd_y.values})
+                                df_d_y = df_d_y[df_d_y['Dividendo'] > 0]
+                                if not df_d_y.empty:
+                                    df_d_y['Mes'] = df_d_y['Fecha'].dt.month
+                                    agrup_m = df_d_y.groupby('Mes')['Dividendo'].sum()
+                                    y_vals = [agrup_m.get(m, 0.0) for m in range(1, 13)]
+                                    text_vals = [fmt_es(v, 2, sufijo=" €") if v > 0 else "" for v in y_vals]
+
+                                    fig_d = go.Figure(go.Bar(x=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'], y=y_vals, marker_color='#00d4ff', text=text_vals, textposition='auto'))
+                                    fig_d.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=300, yaxis_title="Dividendos Netos (€)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                                    st.plotly_chart(fig_d, use_container_width=True)
+                                else:
+                                    st.info(f"No se cobraron dividendos en {año_radio}.")
     except Exception as e:
         st.error(f"No se pudo procesar la cartera. Detalle: {e}")
