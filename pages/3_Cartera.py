@@ -12,7 +12,7 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Control de Cartera DGI", page_icon="💼", layout="wide")
 
 # ==========================================
-# FORMATEO NUMÉRICO ESPAÑOL
+# UTILIDADES DE LIMPIEZA Y FORMATEO ESPAÑOL
 # ==========================================
 def limpiar_numero_europeo(val):
     if pd.isna(val) or val is None:
@@ -28,6 +28,7 @@ def limpiar_numero_europeo(val):
         return 0.0
 
 def fmt_es(val, dec=2, signo=False, sufijo=""):
+    """Convierte números a formato español: 1.234,56 € o +5,20%"""
     if pd.isna(val) or val is None:
         return f"0,{dec * '0'}{sufijo}"
     try:
@@ -48,7 +49,7 @@ def fmt_acciones(acc):
         return str(acc)
 
 # ==========================================
-# ESTILOS CSS DE TARJETAS
+# ESTILOS CSS PARA TARJETAS KPI
 # ==========================================
 st.markdown("""
 <style>
@@ -83,7 +84,7 @@ st.markdown("""
 # ENTRADA DE DATOS (100% EN MEMORIA VOLÁTIL)
 # ==========================================
 st.title("💼 Panel de Rendimiento y Análisis DGI")
-st.markdown("> *Privacidad garantizada: Procesamiento exclusivo en memoria de sesión temporal. Ningún dato se guarda en el servidor ni en GitHub.*")
+st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. No se guarda ningún dato en disco ni en GitHub.*")
 
 col_c1, col_c2 = st.columns(2)
 with col_c1:
@@ -105,7 +106,7 @@ if metodo_carga == "📂 Subir Archivo":
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 else:
-    st.info("Pega tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio (admite comas europeas y tabuladores de Excel).")
+    st.info("Pega directamente tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio (admite comas europeas y tabuladores de Excel).")
     texto_csv = st.text_area(
         "Pega aquí tus transacciones:",
         value="",
@@ -177,9 +178,9 @@ if df_ops is not None and not df_ops.empty:
                     dict_historicos = {}
                     dict_dividendos = {}
                     dict_forward_div = {}
-                    dict_dgr5 = {}
+                    dict_dgr_conservador = {}
 
-                    with st.spinner("Descargando precios de mercado, dividendos e historial FX..."):
+                    with st.spinner("Descargando fundamentales, dividendos e historial FX..."):
                         for t in tickers_global:
                             try:
                                 tk = yf.Ticker(t)
@@ -215,16 +216,54 @@ if df_ops is not None and not df_ops.empty:
                                         f_div = f_div / 100.0
                                     dict_forward_div[t] = f_div
 
+                                    # ============================================================
+                                    # CÁLCULO DGI ROBUSTO: MÍNIMO ENTRE 5 Y 12 AÑOS
+                                    # ============================================================
                                     div_hist_full = tk.dividends
-                                    if not div_hist_full.empty and len(div_hist_full) >= 8:
+                                    dgr_final = 4.0
+
+                                    if not div_hist_full.empty and len(div_hist_full) >= 4:
                                         divs_anuales = div_hist_full.groupby(div_hist_full.index.year).sum()
-                                        if len(divs_anuales) >= 6 and divs_anuales.iloc[-6] > 0:
-                                            dgr = ((divs_anuales.iloc[-1] / divs_anuales.iloc[-6]) ** (1/5) - 1) * 100
-                                            dict_dgr5[t] = max(0.0, min(dgr, 15.0))
+                                        año_act = datetime.now().year
+                                        if año_act in divs_anuales.index:
+                                            divs_anuales[año_act] = max(divs_anuales[año_act], f_div)
                                         else:
-                                            dict_dgr5[t] = 5.0
-                                    else:
-                                        dict_dgr5[t] = 5.0
+                                            divs_anuales.loc[año_act] = f_div
+
+                                        divs_anuales = divs_anuales.sort_index()
+                                        div_actual = divs_anuales.iloc[-1]
+
+                                        dgr_5y = None
+                                        dgr_12y = None
+
+                                        # 1. Tasa a 5 años
+                                        if len(divs_anuales) >= 6:
+                                            div_5y = divs_anuales.iloc[-6]
+                                            if div_5y > 0 and div_actual > 0:
+                                                dgr_5y = ((div_actual / div_5y) ** (1 / 5) - 1) * 100
+
+                                        # 2. Tasa a 12 años (o periodo largo disponible)
+                                        if len(divs_anuales) >= 13:
+                                            div_12y = divs_anuales.iloc[-13]
+                                            if div_12y > 0 and div_actual > 0:
+                                                dgr_12y = ((div_actual / div_12y) ** (1 / 12) - 1) * 100
+                                        elif len(divs_anuales) >= 8:
+                                            años_disp = len(divs_anuales) - 1
+                                            div_inicio = divs_anuales.iloc[0]
+                                            if div_inicio > 0 and div_actual > 0:
+                                                dgr_12y = ((div_actual / div_inicio) ** (1 / años_disp) - 1) * 100
+
+                                        # 3. Selección del más bajo (conservador)
+                                        if dgr_5y is not None and dgr_12y is not None:
+                                            dgr_final = min(dgr_5y, dgr_12y)
+                                        elif dgr_5y is not None:
+                                            dgr_final = dgr_5y
+                                        elif dgr_12y is not None:
+                                            dgr_final = dgr_12y
+
+                                        dgr_final = max(0.0, min(dgr_final, 12.0))
+
+                                    dict_dgr_conservador[t] = dgr_final
                             except Exception:
                                 pass
 
@@ -385,7 +424,7 @@ if df_ops is not None and not df_ops.empty:
                                     "YoC Neto": yoc_neto,
                                     "Yield Act Bruto": yield_act_bruto,
                                     "Yield Act Neto": yield_act_neto,
-                                    "DGR5": dict_dgr5.get(t, 5.0)
+                                    "DGR_Cons": dict_dgr_conservador.get(t, 4.0)
                                 })
 
                             plusvalia_global_eur = global_mercado_eur - global_inversion_eur
@@ -411,7 +450,7 @@ if df_ops is not None and not df_ops.empty:
                                 r['Peso Renta Pct'] = (r['Renta Anual Proyectada Neto'] / total_forward_div_neto_eur * 100) if total_forward_div_neto_eur > 0 else 0.0
 
                             # ==========================================
-                            # 1. TARJETAS KPIS ESTRATÉGICAS (BRUTO Y NETO)
+                            # 1. TARJETAS KPIS CON BRUTO Y NETO
                             # ==========================================
                             st.markdown(f"#### 🌐 Resumen de Rendimiento ({año_filtro})")
                             
@@ -465,7 +504,7 @@ if df_ops is not None and not df_ops.empty:
                                 """, unsafe_allow_html=True)
 
                             # ==========================================
-                            # 2. HERRAMIENTAS GRÁFICAS DGI (CERO BARRAS DE YOC)
+                            # 2. HERRAMIENTAS GRÁFICAS DE ESTRATEGIA DGI
                             # ==========================================
                             st.divider()
                             col_g1, col_g2 = st.columns(2)
@@ -536,27 +575,30 @@ if df_ops is not None and not df_ops.empty:
                                 )
                                 st.plotly_chart(fig_conc, use_container_width=True)
 
-                            # Proyección Compuesta Bola de Nieve a 10 Años
+                            # ============================================================
+                            # PROYECCIÓN COMPUESTA BOLA DE NIEVE (DGR CONSERVADOR)
+                            # ============================================================
                             st.divider()
                             st.markdown("#### 🔮 Proyección a 10 Años: Efecto Bola de Nieve (Sin Aportar Más Capital)")
+                            
+                            # Media ponderada por renta del DGR conservador (min 5A y 12A)
                             dgr_medio_cartera = float(np.average(
-                                [r['DGR5'] for r in resultados_tabla],
+                                [r['DGR_Cons'] for r in resultados_tabla],
                                 weights=[r['Renta Anual Proyectada Neto'] for r in resultados_tabla]
-                            )) if total_forward_div_neto_eur > 0 else 6.0
+                            )) if total_forward_div_neto_eur > 0 else 4.0
 
                             años_futuros = list(range(1, 11))
-                            año_base = datetime.now().year
-                            labels_futuros = [str(año_base + y) for y in años_futuros]
+                            labels_futuros = [str(datetime.now().year + y) for y in años_futuros]
 
                             renta_proy_conservadora = [total_forward_div_neto_eur * ((1 + 0.04) ** y) for y in años_futuros]
-                            renta_proy_cartera = [total_forward_div_neto_eur * ((1 + (dgr_medio_cartera/100)) ** y) for y in años_futuros]
+                            renta_proy_cartera = [total_forward_div_neto_eur * ((1 + (dgr_medio_cartera / 100)) ** y) for y in años_futuros]
                             renta_proy_fuerte = [total_forward_div_neto_eur * ((1 + 0.09) ** y) for y in años_futuros]
 
                             fig_snow = go.Figure()
                             fig_snow.add_trace(go.Bar(
                                 x=labels_futuros,
                                 y=renta_proy_cartera,
-                                name=f'Ritmo de tu Cartera (DGR: {dgr_medio_cartera:.1f}%)',
+                                name=f'Ritmo Conservador Cartera (DGR: {dgr_medio_cartera:.1f}%)',
                                 marker_color='#21c354',
                                 text=[fmt_es(val, 0, sufijo=" €") for val in renta_proy_cartera],
                                 textposition='auto'
@@ -565,7 +607,7 @@ if df_ops is not None and not df_ops.empty:
                                 x=labels_futuros,
                                 y=renta_proy_conservadora,
                                 mode='lines+markers',
-                                name='Escenario Conservador (+4%)',
+                                name='Escenario Base (+4%)',
                                 line=dict(color='#ff9800', width=2, dash='dot')
                             ))
                             fig_snow.add_trace(go.Scatter(
@@ -628,7 +670,7 @@ if df_ops is not None and not df_ops.empty:
                             st.plotly_chart(fig_cartera, use_container_width=True)
 
                             # ==========================================
-                            # 4. TABLA DETALLADA DE POSICIONES (BRUTO Y NETO)
+                            # 4. TABLA DETALLADA DE POSICIONES
                             # ==========================================
                             st.divider()
                             st.markdown("#### 📋 Desglose Detallado de Posiciones (Bruto y Neto)")
@@ -657,6 +699,7 @@ if df_ops is not None and not df_ops.empty:
                                     "YoC Neto (%)": fmt_es(r['YoC Neto'], 2, sufijo="%"),
                                     "Yield Act. Bruto (%)": fmt_es(r['Yield Act Bruto'], 2, sufijo="%"),
                                     "Yield Act. Neto (%)": fmt_es(r['Yield Act Neto'], 2, sufijo="%"),
+                                    "DGR Cons. (%)": fmt_es(r['DGR_Cons'], 1, sufijo="%"),
                                     "Peso Cap. (%)": fmt_es(r['Peso Capital Pct'], 1, sufijo="%"),
                                     "Peso Renta (%)": fmt_es(r['Peso Renta Pct'], 1, sufijo="%")
                                 })
