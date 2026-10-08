@@ -623,108 +623,210 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         else: st.info("No hay suficientes datos recientes en Yahoo Finance para dibujar el panel de 2 meses.")
     else: st.info("No hay suficientes datos históricos en Yahoo Finance para calcular el panel técnico (MACD/Volumen).")
 
+    # ==========================================
+    # BLOQUE VISUAL MEJORADO: BENEFICIOS, PROYECCIONES Y SOLVENCIA
+    # ==========================================
     st.divider()
-    st.subheader("📊 Beneficios, Proyecciones y Acciones")
+    st.subheader("📊 Radiografía Financiera y Proyecciones")
+
+    # Inyección CSS para tarjetas tipo app fintech
+    st.markdown("""
+    <style>
+    .card-dgi {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 10px;
+    }
+    .badge-verde { background: rgba(33, 195, 84, 0.2); color: #21c354; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85rem; }
+    .badge-rojo { background: rgba(255, 75, 75, 0.2); color: #ff4b4b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85rem; }
+    .badge-ambar { background: rgba(250, 202, 43, 0.2); color: #faca2b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85rem; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # 1. TARJETAS DE BPA Y PER (PRESENTE VS FUTURO)
+    col_bpa1, col_bpa2 = st.columns(2)
     
-    delta_bpa = None
-    if bpa_trailing != 0 and bpa_forward != 0:
-        var_bpa = ((bpa_forward - bpa_trailing) / abs(bpa_trailing)) * 100
-        delta_bpa = f"{var_bpa:.2f}%"
+    with col_bpa1:
+        if bpa_trailing != 0 and bpa_forward != 0:
+            var_bpa = ((bpa_forward - bpa_trailing) / abs(bpa_trailing)) * 100
+            b_class = "badge-verde" if var_bpa >= 0 else "badge-rojo"
+            b_sign = "+" if var_bpa > 0 else ""
+            st.markdown(f"""
+            <div class="card-dgi">
+                <span style="color: #aaa; font-size: 0.85rem;">💵 Beneficio por Acción (BPA)</span>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                    <span style="font-size: 1.5rem; font-weight: bold;">{bpa_trailing:.2f}{sym} <span style="font-size: 1rem; color: #888;">➔</span> {bpa_forward:.2f}{sym}</span>
+                    <span class="{b_class}">{b_sign}{var_bpa:.1f}%</span>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">Actual ➔ Estimado a 12 meses</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.metric("BPA Actual", f"{bpa_trailing:.2f}{sym}" if bpa_trailing != 0 else "N/D")
 
-    delta_per = None
-    if per_actual > 0 and per_forward > 0:
-        var_per = ((per_forward - per_actual) / per_actual) * 100
-        signo_per = "+" if var_per > 0 else ""
-        delta_per = f"{signo_per}{var_per:.2f}%"
+    with col_bpa2:
+        if per_actual > 0 and per_forward > 0:
+            var_per = ((per_forward - per_actual) / per_actual) * 100
+            p_class = "badge-verde" if var_per <= 0 else "badge-rojo"
+            p_sign = "+" if var_per > 0 else ""
+            st.markdown(f"""
+            <div class="card-dgi">
+                <span style="color: #aaa; font-size: 0.85rem;">🏷️ Múltiplo de Valoración (PER)</span>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                    <span style="font-size: 1.5rem; font-weight: bold;">{per_actual:.1f}x <span style="font-size: 1rem; color: #888;">➔</span> {per_forward:.1f}x</span>
+                    <span class="{p_class}">{p_sign}{var_per:.1f}%</span>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">PER Actual ➔ PER Futuro</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.metric("PER Actual", f"{per_actual:.1f}x" if per_actual > 0 else "N/D")
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("BPA Actual", f"{bpa_trailing / divisor_uk:.2f}{sym}" if bpa_trailing != 0 else "N/D")
-    c2.metric("BPA Esperado", f"{bpa_forward / divisor_uk:.2f}{sym}" if bpa_forward != 0 else "N/D", delta=delta_bpa)
-    c3.metric("PER Actual", f"{per_actual:.2f}" if per_actual > 0 else "N/D")
-    c4.metric("PER Futuro", f"{per_forward:.2f}" if per_forward > 0 else "N/D", delta=delta_per, delta_color="inverse")
-    c5.metric("Crecimiento BPA (3Y)", f"{crecimiento_bpa_3y:.2f}%" if crecimiento_bpa_3y is not None else "N/D")
-    
-    if variacion_acciones is not None:
-        signo = "+" if variacion_acciones > 0 else ""
-        if variacion_acciones < -0.5: estado_acc, color_acc = "- Recomprando", "inverse"
-        elif variacion_acciones <= 1.0: estado_acc, color_acc = "Estable", "off"
-        else: estado_acc, color_acc = "+ Diluyendo", "inverse"
-        c6.metric(f"Acciones ({años_analisis}Y)", f"{signo}{variacion_acciones:.2f}%", delta=estado_acc, delta_color=color_acc)
-    else: c6.metric(f"Acciones ({años_analisis}Y)", "N/D")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("#### ⚖️ Valoración Contable y Solvencia Real")
-    cv1, cv2, cv3, cv4 = st.columns(4)
-    
-    if price_to_book > 0:
-        if es_financiera or es_industrial: pb_optimo, pb_max = 1.5, 2.5; txt_opt = "Óptimo < 1.5x (Fin/Ind)"
-        elif es_tecnologica: pb_optimo, pb_max = 5.0, 10.0; txt_opt = "Óptimo < 5.0x (Tech/Soft)"
-        else: pb_optimo, pb_max = 2.5, 5.0; txt_opt = "Óptimo < 2.5x (General)"
-        pb_color = "off" if price_to_book <= pb_optimo else "inverse"
-        cv1.metric("Precio / Valor en Libros (P/B)", f"{price_to_book:.2f}x", txt_opt, delta_color=pb_color)
-    else: cv1.metric("Precio / Valor en Libros (P/B)", "N/D")
-        
-    if fcf_yield > 0:
-        fcf_color = "normal" if fcf_yield > yield_actual else "inverse"
-        cv2.metric("FCF Yield (Rentabilidad de Caja)", f"{fcf_yield:.2f}%", f"Óptimo > {yield_actual:.2f}% (Div. Bruto)", delta_color=fcf_color)
-    else: cv2.metric("FCF Yield (Rentabilidad de Caja)", "N/D")
-
-    # Métrica DGI Moderna: Deuda Neta / EBITDA
-    if deuda_ebitda < 900:
-        if deuda_ebitda <= lim_deuda_optima: d_eb_est, d_eb_col = f"Óptimo ≤ {lim_deuda_optima:.1f}x", "normal"
-        elif deuda_ebitda <= lim_deuda_aceptable: d_eb_est, d_eb_col = f"Aceptable ≤ {lim_deuda_aceptable:.1f}x", "off"
-        else: d_eb_est, d_eb_col = f"Peligro > {lim_deuda_aceptable:.1f}x", "inverse"
-        cv3.metric("Deuda Neta / EBITDA", f"{deuda_ebitda:.2f}x", delta=d_eb_est, delta_color=d_eb_col)
-    else:
-        cv3.metric("Deuda Neta / EBITDA", "N/D" if total_debt == 0 else "EBITDA ≤ 0")
-        
-    if deuda_fcf > 0:
-        if deuda_fcf < 3: d_estado, d_color = "Óptimo < 3.0 Años", "normal"
-        elif deuda_fcf < 5: d_estado, d_color = "Aceptable < 5.0 Años", "off"
-        else: d_estado, d_color = "Peligro > 5.0 Años", "inverse"
-        cv4.metric("Deuda Total / FCF", f"{deuda_fcf:.2f} Años", delta=d_estado, delta_color=d_color)
-    else: cv4.metric("Deuda Total / FCF", "N/D" if total_debt == 0 else "FCF Negativo")
-
-    if variacion_acciones is not None and variacion_acciones < -1.0:
-        if price_to_book > 5.0 or deuda_fcf > 4.0:
-            mensajes_alerta = []
-            if price_to_book > 5.0: mensajes_alerta.append("un **P/B muy elevado** (distorsión del patrimonio contable)")
-            if deuda_fcf > 4.0: mensajes_alerta.append("una **Deuda/FCF en zona de aviso** (apalancamiento mantenido)")
-            motivos = " y ".join(mensajes_alerta)
-            st.info(f"🕵️‍♂️ **Aviso Analítico Avanzado:** La empresa presenta {motivos}. Al tener un historial agresivo de destrucción de acciones ({variacion_acciones:.2f}%), **revisa si estos datos son fruto de la ingeniería financiera (recompras masivas)** más que de un deterioro real del negocio.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("#### 📈 Crecimiento Anual Compuesto del Dividendo (CAGR / DGR)")
-    
-    def get_dgr_color(val):
-        if val is None: return "#aaa"
-        if val >= 10.0: return "#21c354"
-        elif val >= 7.5: return "#faca2b"
-        elif val >= 5.0: return "#ff9800"
-        elif val >= 2.5: return "#ff7043"
-        else: return "#ff4b4b"
-
-    c_dgr5 = get_dgr_color(dgr_5y)
-    c_dgrp = get_dgr_color(dgr_periodo)
-
-    v_dgr5 = f"{dgr_5y:.2f}%" if dgr_5y is not None else "N/D"
-    v_dgrp = f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D"
-
-    cd1, cd2 = st.columns(2)
-    with cd1:
+    # 2. CRECIMIENTO BPA Y GESTIÓN DE ACCIONES
+    col_acc1, col_acc2 = st.columns(2)
+    with col_acc1:
+        c_bpa_val = f"{crecimiento_bpa_3y:+.2f}%" if crecimiento_bpa_3y is not None else "N/D"
+        c_badge = "badge-verde" if (crecimiento_bpa_3y is not None and crecimiento_bpa_3y > 0) else "badge-rojo"
         st.markdown(f"""
-        <div style="display: flex; flex-direction: column; margin-bottom: 1rem;">
-        <span style="font-size: 1rem; color: #c4c4cc;">DGR 5 Años (Medio Plazo)</span>
-        <span style="font-size: 2.2rem; font-weight: 700; color: {c_dgr5}; margin-top: 0.2rem; margin-bottom: 0.1rem;">{v_dgr5}</span>
+        <div class="card-dgi">
+            <span style="color: #aaa; font-size: 0.85rem;">📈 Crecimiento BPA (3 Años)</span>
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                <span style="font-size: 1.5rem; font-weight: bold;">{c_bpa_val}</span>
+                <span class="{c_badge}">{'Sólido' if (crecimiento_bpa_3y is not None and crecimiento_bpa_3y > 0) else 'Débil'}</span>
+            </div>
+            <span style="font-size: 0.75rem; color: #888;">Tasa anual compuesta de beneficios</span>
         </div>
         """, unsafe_allow_html=True)
-    with cd2:
-        st.markdown(f"""
-        <div style="display: flex; flex-direction: column; margin-bottom: 1rem;">
-        <span style="font-size: 1rem; color: #c4c4cc;">DGR {años_analisis} Años (Periodo Actual)</span>
-        <span style="font-size: 2.2rem; font-weight: 700; color: {c_dgrp}; margin-top: 0.2rem; margin-bottom: 0.1rem;">{v_dgrp}</span>
-        </div>
-        """, unsafe_allow_html=True)
+
+    with col_acc2:
+        if variacion_acciones is not None:
+            if variacion_acciones < -0.5:
+                t_acc, c_acc_b = "🟢 Recomprando", "badge-verde"
+                sub_acc = "Destruye acciones (Genera valor)"
+            elif variacion_acciones <= 2.0:
+                t_acc, c_acc_b = "🟡 Estable", "badge-ambar"
+                sub_acc = "Capital social constante"
+            else:
+                t_acc, c_acc_b = "🔴 Diluyendo", "badge-rojo"
+                sub_acc = "Emisión de títulos o fusiones"
+            st.markdown(f"""
+            <div class="card-dgi">
+                <span style="color: #aaa; font-size: 0.85rem;">🔄 Acciones ({años_analisis} Años)</span>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                    <span style="font-size: 1.5rem; font-weight: bold;">{variacion_acciones:+.1f}%</span>
+                    <span class="{c_acc_b}">{t_acc}</span>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">{sub_acc}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.metric("Acciones", "N/D")
+
+    # 3. SEMÁFORO DE SOLVENCIA Y CAJA REAL
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("#### ⚖️ Solvencia Operativa y Rentabilidad de Caja")
+    col_sol1, col_sol2 = st.columns(2)
+
+    with col_sol1:
+        if deuda_ebitda < 900:
+            if deuda_ebitda <= lim_deuda_optima:
+                badge_d_eb, txt_d_eb = "badge-verde", f"Óptimo (≤ {lim_deuda_optima:.1f}x)"
+            elif deuda_ebitda <= lim_deuda_aceptable:
+                badge_d_eb, txt_d_eb = "badge-ambar", f"Aceptable (≤ {lim_deuda_aceptable:.1f}x)"
+            else:
+                badge_d_eb, txt_d_eb = "badge-rojo", "Apalancada"
+            st.markdown(f"""
+            <div class="card-dgi">
+                <span style="color: #aaa; font-size: 0.85rem;">🛡️ Deuda Neta / EBITDA</span>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                    <span style="font-size: 1.5rem; font-weight: bold;">{deuda_ebitda:.2f}x</span>
+                    <span class="{badge_d_eb}">{txt_d_eb}</span>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">Años de EBITDA para extinguir deuda neta</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if price_to_book > 0:
+            pb_badge = "badge-verde" if price_to_book <= 2.5 else "badge-ambar"
+            st.markdown(f"""
+            <div class="card-dgi">
+                <span style="color: #aaa; font-size: 0.85rem;">📚 Precio / Valor Contable (P/B)</span>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                    <span style="font-size: 1.5rem; font-weight: bold;">{price_to_book:.2f}x</span>
+                    <span class="{pb_badge}">Múltiplo</span>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">Patrimonio contable sobre cotización</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with col_sol2:
+        if deuda_fcf > 0:
+            if deuda_fcf <= 3.0: badge_dfcf, txt_dfcf = "badge-verde", "Excelente (≤ 3.0A)"
+            elif deuda_fcf <= 5.0: badge_dfcf, txt_dfcf = "badge-ambar", "Normal (≤ 5.0A)"
+            else: badge_dfcf, txt_dfcf = "badge-rojo", "Atención (> 5.0A)"
+            st.markdown(f"""
+            <div class="card-dgi">
+                <span style="color: #aaa; font-size: 0.85rem;">⏳ Deuda Total / Flujo de Caja (FCF)</span>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                    <span style="font-size: 1.5rem; font-weight: bold;">{deuda_fcf:.1f} Años</span>
+                    <span class="{badge_dfcf}">{txt_dfcf}</span>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">Años de caja libre íntegra para liquidar deuda</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if fcf_yield > 0:
+            fcf_b_class = "badge-verde" if fcf_yield >= yield_actual else "badge-ambar"
+            st.markdown(f"""
+            <div class="card-dgi">
+                <span style="color: #aaa; font-size: 0.85rem;">💵 FCF Yield (Generación de Efectivo)</span>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                    <span style="font-size: 1.5rem; font-weight: bold;">{fcf_yield:.2f}%</span>
+                    <span class="{fcf_b_class}">Div: {yield_actual:.2f}%</span>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">Debe ser superior a la rentabilidad por dividendo</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # 4. VELOCÍMETRO DEL CRECIMIENTO DEL DIVIDENDO (DGR)
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("#### 🚀 Crecimiento del Dividendo e Inflación (DGR)")
+    
+    col_dgr1, col_dgr2 = st.columns(2)
+    with col_dgr1:
+        if dgr_5y is not None:
+            inf_diff = dgr_5y - 2.5
+            b_inf = "badge-verde" if inf_diff >= 2.0 else ("badge-ambar" if inf_diff >= 0 else "badge-rojo")
+            st.markdown(f"""
+            <div class="card-dgi">
+                <span style="color: #aaa; font-size: 0.85rem;">DGR 5 Años (Medio Plazo)</span>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                    <span style="font-size: 1.6rem; font-weight: bold; color: #faca2b;">{dgr_5y:.2f}%</span>
+                    <span class="{b_inf}">+{inf_diff:.1f}% vs Inflación</span>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">Poder adquisitivo ganado anualmente</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with col_dgr2:
+        if dgr_periodo is not None and dgr_5y is not None:
+            aceleracion = dgr_5y - dgr_periodo
+            if aceleracion >= 0.5: t_inercia, b_iner = "⚡ Acelerando", "badge-verde"
+            elif aceleracion <= -0.5: t_inercia, b_iner = "⚠️ Frenando", "badge-ambar"
+            else: t_inercia, b_iner = "➡️ Estable", "badge-verde"
+
+            st.markdown(f"""
+            <div class="card-dgi">
+                <span style="color: #aaa; font-size: 0.85rem;">DGR {años_analisis} Años (Histórico)</span>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+                    <span style="font-size: 1.6rem; font-weight: bold; color: #faca2b;">{dgr_periodo:.2f}%</span>
+                    <span class="{b_iner}">{t_inercia}</span>
+                </div>
+                <span style="font-size: 0.75rem; color: #888;">Tendencia respecto a la media de largo plazo</span>
+            </div>
+            """, unsafe_allow_html=True)
 
     if not shares_yearly.empty and len(shares_yearly) > 1:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -761,7 +863,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     st.divider()
     st.subheader(f"📋 Decálogo Detallado DGI — Geraldine Weiss Moderno ({años_analisis} Años)")
     
-    # Etiquetas informativas con asignación de puntos
     t_yield = f"[🏷️ Val: +{pts_yield:.1f} / 4.0 pts]"
     t_pfcf = f"[🏷️ Val: +{pts_pfcf:.2f} / 2.5 pts]"
     t_per_t = f"[🏷️ Val: +{pts_per:.1f} / 2.0 pts]"
