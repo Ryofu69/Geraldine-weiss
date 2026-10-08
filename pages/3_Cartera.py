@@ -68,23 +68,23 @@ st.markdown("""
     letter-spacing: 0.5px;
 }
 .metric-val {
-    font-size: 1.65rem;
+    font-size: 1.6rem;
     font-weight: 700;
     margin-top: 4px;
     margin-bottom: 2px;
 }
 .metric-sub {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 500;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# ENTRADA DE DATOS (100% PRIVADA Y EN MEMORIA)
+# ENTRADA DE DATOS (100% PRIVADA EN MEMORIA)
 # ==========================================
 st.title("💼 Panel de Rendimiento y Análisis DGI")
-st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. No se guarda ningún dato en servidor ni en GitHub.*")
+st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. No se crea ni se guarda ningún archivo en el servidor ni en GitHub.*")
 
 col_c1, col_c2 = st.columns(2)
 with col_c1:
@@ -111,7 +111,7 @@ else:
         "Pega aquí tus transacciones:",
         value="",
         height=140,
-        placeholder="Fecha,Ticker,Operacion,Acciones,Precio\n01/01/2024,TICKER,Compra,10,25.50"
+        placeholder="Fecha,Ticker,Operacion,Acciones,Precio"
     )
     if texto_csv and texto_csv.strip():
         try:
@@ -180,7 +180,7 @@ if df_ops is not None and not df_ops.empty:
                     dict_forward_div = {}
                     dict_dgr5 = {}
 
-                    with st.spinner("Descargando fundamentales, dividendos y tipos de cambio..."):
+                    with st.spinner("Descargando precios de mercado, dividendos e historial FX..."):
                         for t in tickers_global:
                             try:
                                 tk = yf.Ticker(t)
@@ -216,7 +216,7 @@ if df_ops is not None and not df_ops.empty:
                                         f_div = f_div / 100.0
                                     dict_forward_div[t] = f_div
 
-                                    # Estimación de crecimiento DGR a 5 años
+                                    # Estimación del crecimiento del dividendo a 5 años (DGR)
                                     div_hist_full = tk.dividends
                                     if not div_hist_full.empty and len(div_hist_full) >= 8:
                                         divs_anuales = div_hist_full.groupby(div_hist_full.index.year).sum()
@@ -408,13 +408,12 @@ if df_ops is not None and not df_ops.empty:
                             yield_global_bruto = (total_forward_div_bruto_eur / global_mercado_eur * 100) if global_mercado_eur > 0 else 0.0
                             yield_global_neto = yield_global_bruto * net_factor
 
-                            # Asignar Pesos de Capital vs Pesos de Dividendo
                             for r in resultados_tabla:
                                 r['Peso Capital Pct'] = (r['Valor EUR'] / global_mercado_eur * 100) if global_mercado_eur > 0 else 0.0
                                 r['Peso Renta Pct'] = (r['Renta Anual Proyectada Neto'] / total_forward_div_neto_eur * 100) if total_forward_div_neto_eur > 0 else 0.0
 
                             # ==========================================
-                            # 1. TARJETAS KPIS ESTRATÉGICAS DGI
+                            # 1. TARJETAS KPIS CON BRUTO Y NETO
                             # ==========================================
                             st.markdown(f"#### 🌐 Resumen de Rendimiento ({año_filtro})")
                             
@@ -463,12 +462,12 @@ if df_ops is not None and not df_ops.empty:
                                 <div class="metric-box">
                                     <div class="metric-title">⏳ Renta Futura Proyectada</div>
                                     <div class="metric-val" style="color: #faca2b;">{fmt_es(total_forward_div_neto_eur, 2, sufijo=" €/año")}</div>
-                                    <div class="metric-sub" style="color: #21c354;"><b>~{fmt_es(sueldo_pasivo_mes_neto, 2, sufijo=" €/mes limpios")}</b> | YoC: {fmt_es(yoc_global_neto, 2, sufijo="%")}</div>
+                                    <div class="metric-sub" style="color: #21c354;"><b>~{fmt_es(sueldo_pasivo_mes_neto, 2, sufijo=" €/mes")}</b> | YoC: {fmt_es(yoc_global_neto, 2, sufijo="%")}</div>
                                 </div>
                                 """, unsafe_allow_html=True)
 
                             # ==========================================
-                            # 2. HERRAMIENTAS GRÁFICAS DE ESTRATEGIA DGI
+                            # 2. GRÁFICOS ANALÍTICOS DGI (SIN BARRAS DE YOC)
                             # ==========================================
                             st.divider()
                             col_g1, col_g2 = st.columns(2)
@@ -634,7 +633,7 @@ if df_ops is not None and not df_ops.empty:
                             # 4. TABLA DETALLADA DE POSICIONES
                             # ==========================================
                             st.divider()
-                            st.markdown("#### 📋 Desglose Detallado de Posiciones")
+                            st.markdown("#### 📋 Desglose Detallado de Posiciones (Bruto y Neto)")
                             
                             df_pos_sorted = pd.DataFrame(resultados_tabla).sort_values(by="Total Neto EUR", ascending=False)
 
@@ -650,11 +649,16 @@ if df_ops is not None and not df_ops.empty:
                                     "Valor (€)": fmt_es(r['Valor EUR'], 2, sufijo=" €"),
                                     "Plusvalía (€)": fmt_es(r['Plusvalia EUR'], 2, signo=True, sufijo=" €"),
                                     "Plusvalía (%)": fmt_es(r['Rent Plusvalia Pct'], 2, signo=True, sufijo="%"),
-                                    "Divs Cobrados (€)": fmt_es(r['Divs Net EUR'], 2, sufijo=" €"),
+                                    "Divs Brutos (€)": fmt_es(r['Divs Gross EUR'], 2, sufijo=" €"),
+                                    "Divs Netos (€)": fmt_es(r['Divs Net EUR'], 2, sufijo=" €"),
+                                    "Ret. Total Bruto (€)": fmt_es(r['Total Bruto EUR'], 2, signo=True, sufijo=" €"),
                                     "Ret. Total Neto (€)": fmt_es(r['Total Neto EUR'], 2, signo=True, sufijo=" €"),
-                                    "Ret. Total Neto (%)": fmt_es(r['Rent Tot Neto Pct'], 2, signo=True, sufijo="%"),
-                                    "YoC Neto (%)": fmt_es(r['YoC Neto'], 2, sufijo="%"),
-                                    "Yield Act. Neto (%)": fmt_es(r['Yield Act Neto'], 2, sufijo="%"),
+                                    "Ret. Bruto (%)": fmt_es(r['Rent Tot Bruto Pct'], 2, signo=True, sufijo="%"),
+                                    "Ret. Neto (%)": fmt_es(r['Rent Tot Neto Pct'], 2, signo=True, sufijo="%"),
+                                    "YoC Bruto": fmt_es(r['YoC Bruto'], 2, sufijo="%"),
+                                    "YoC Neto": fmt_es(r['YoC Neto'], 2, sufijo="%"),
+                                    "Yield Act. Bruto": fmt_es(r['Yield Act Bruto'], 2, sufijo="%"),
+                                    "Yield Act. Neto": fmt_es(r['Yield Act Neto'], 2, sufijo="%"),
                                     "Peso Cap. (%)": fmt_es(r['Peso Capital Pct'], 1, sufijo="%"),
                                     "Peso Renta (%)": fmt_es(r['Peso Renta Pct'], 1, sufijo="%")
                                 })
@@ -669,7 +673,7 @@ if df_ops is not None and not df_ops.empty:
                                 return ''
 
                             styler = df_disp.style
-                            cols_target = ['Plusvalía (€)', 'Plusvalía (%)', 'Ret. Total Neto (€)', 'Ret. Total Neto (%)']
+                            cols_target = ['Plusvalía (€)', 'Plusvalía (%)', 'Ret. Total Bruto (€)', 'Ret. Total Neto (€)', 'Ret. Bruto (%)', 'Ret. Neto (%)']
                             if hasattr(styler, 'map'):
                                 styler = styler.map(estilo_positivo_negativo, subset=cols_target)
                             else:
