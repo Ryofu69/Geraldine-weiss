@@ -92,7 +92,7 @@ st.markdown("""
     letter-spacing: 0.5px;
 }
 .metric-val {
-    font-size: 1.6rem;
+    font-size: 1.55rem;
     font-weight: 700;
     margin-top: 4px;
     margin-bottom: 2px;
@@ -241,7 +241,6 @@ if df_ops is not None and not df_ops.empty:
                                         f_div = f_div / 100.0
                                     dict_forward_div[t] = f_div
 
-                                    # Detección de meses habituales de pago
                                     div_hist_full = tk.dividends
                                     if not div_hist_full.empty:
                                         div_recientes = div_hist_full[div_hist_full.index >= (pd.Timestamp.now() - pd.DateOffset(years=2))]
@@ -252,7 +251,6 @@ if df_ops is not None and not df_ops.empty:
                                     else:
                                         dict_meses_pago[t] = [1, 7]
 
-                                    # Cálculo de DGR de referencia
                                     dgr_calc = 0.0
                                     if not div_hist_full.empty and len(div_hist_full) >= 2:
                                         divs_anuales = div_hist_full.groupby(div_hist_full.index.year).sum()
@@ -701,7 +699,6 @@ if df_ops is not None and not df_ops.empty:
                                         st.toast("🔄 Valores restablecidos a los cálculos originales.", icon="🔄")
                                         st.rerun()
 
-                            # Aplicar valores finales al modelo analítico
                             for r in resultados_tabla:
                                 tk = r['Ticker']
                                 val_f = float(st.session_state.get(f"dgr_ctrl_{tk}", r['DGR_Sugerido']))
@@ -759,7 +756,7 @@ if df_ops is not None and not df_ops.empty:
                             st.plotly_chart(fig_snow, use_container_width=True)
 
                             # ============================================================
-                            # NUEVO: PREVISIÓN DE DIVIDENDOS MENSUALES (AÑO SELECCIONABLE)
+                            # PREVISIÓN DE DIVIDENDOS MENSUALES (AÑO SELECCIONABLE)
                             # ============================================================
                             st.divider()
                             st.markdown("#### 🗓️ Previsión Mensual de Cobros Futuros (Mes a Mes)")
@@ -820,7 +817,6 @@ if df_ops is not None and not df_ops.empty:
                                 </div>
                                 """, unsafe_allow_html=True)
 
-                            # Gráfico mensual detallado por empresa
                             fig_mes_futuro = go.Figure()
                             for r in resultados_tabla:
                                 tk = r['Ticker']
@@ -832,7 +828,6 @@ if df_ops is not None and not df_ops.empty:
                                     hovertemplate=f"<b>{tk}</b>: %{{y:.2f}} € netos<extra></extra>"
                                 ))
 
-                            # Anotaciones con el importe total mensual arriba de cada barra
                             totales_mensuales = [cobros_matriz[m] for m in range(1, 13)]
                             texto_totales = [fmt_es(v, 0, sufijo="€") if v > 0.5 else "" for v in totales_mensuales]
 
@@ -992,7 +987,7 @@ if df_ops is not None and not df_ops.empty:
                                 st.plotly_chart(fig_anual, use_container_width=True)
 
                         # ==========================================
-                        # 6. RADIOGRAFÍA ANUAL FIJA
+                        # 6. RADIOGRAFÍA ANUAL FIJA (REDISENADA)
                         # ==========================================
                         st.divider()
                         st.markdown("### 📸 Radiografía del Año Natural (Toda la Cartera)")
@@ -1052,12 +1047,61 @@ if df_ops is not None and not df_ops.empty:
                                 b_total = b_mercado + div_tot
 
                                 base_pct = val_ini + aportaciones if (val_ini + aportaciones) > 0 else 1.0
+                                
+                                # CÁLCULO SOLICITADO: TOTAL CIERRE = PRECIO FINAL MERCADO + DIVIDENDOS NETOS
+                                total_cierre_anual = val_fin + div_tot
 
-                                c1, c2, c3, c4 = st.columns(4)
-                                c1.metric(f"Valor Base ({año_radio})", fmt_es(base_pct, 2, sufijo=" €"), f"Aportación nueva: {fmt_es(aportaciones, 2, signo=True, sufijo=' €')}")
-                                c2.metric("P/L Mercado (Anual)", fmt_es(b_mercado, 2, signo=True, sufijo=" €"), fmt_es((b_mercado/base_pct)*100, 2, signo=True, sufijo="%"))
-                                c3.metric("Dividendos Netos (Anual)", fmt_es(div_tot, 2, sufijo=" €"), f"{fmt_es((div_tot/base_pct)*100, 2, signo=True, sufijo='%')} s/ Base")
-                                c4.metric("Beneficio Total (Anual)", fmt_es(b_total, 2, signo=True, sufijo=" €"), fmt_es((b_total/base_pct)*100, 2, signo=True, sufijo="%"))
+                                # ==========================================
+                                # TARJETAS VISUALES ESTILIZADAS CON CSS
+                                # ==========================================
+                                c1, c2, c3, c4, c5 = st.columns(5)
+                                
+                                with c1:
+                                    st.markdown(f"""
+                                    <div class="metric-box">
+                                        <div class="metric-title">💰 Base Inicial ({año_radio})</div>
+                                        <div class="metric-val" style="color: #00d4ff;">{fmt_es(base_pct, 2, sufijo=" €")}</div>
+                                        <div class="metric-sub" style="color: #aaa;">Aportación: {fmt_es(aportaciones, 2, signo=True, sufijo=" €")}</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                with c2:
+                                    col_pm = "#21c354" if b_mercado >= 0 else "#ff4b4b"
+                                    st.markdown(f"""
+                                    <div class="metric-box">
+                                        <div class="metric-title">📈 P/L Cotización</div>
+                                        <div class="metric-val" style="color: {col_pm};">{fmt_es(b_mercado, 2, signo=True, sufijo=" €")}</div>
+                                        <div class="metric-sub" style="color: {col_pm};">{fmt_es((b_mercado/base_pct)*100, 2, signo=True, sufijo="% s/ Base")}</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                with c3:
+                                    st.markdown(f"""
+                                    <div class="metric-box">
+                                        <div class="metric-title">💵 Dividendos Netos</div>
+                                        <div class="metric-val" style="color: #00d4ff;">{fmt_es(div_tot, 2, sufijo=" €")}</div>
+                                        <div class="metric-sub" style="color: #00d4ff;">+{fmt_es((div_tot/base_pct)*100, 2, sufijo="% s/ Base")}</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+
+                                with c4:
+                                    col_bt = "#21c354" if b_total >= 0 else "#ff4b4b"
+                                    st.markdown(f"""
+                                    <div class="metric-box">
+                                        <div class="metric-title">🚀 Beneficio Neto Anual</div>
+                                        <div class="metric-val" style="color: {col_bt};">{fmt_es(b_total, 2, signo=True, sufijo=" €")}</div>
+                                        <div class="metric-sub" style="color: {col_bt}; font-weight: bold;">{fmt_es((b_total/base_pct)*100, 2, signo=True, sufijo="% Ganancia")}</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+
+                                with c5:
+                                    st.markdown(f"""
+                                    <div class="metric-box" style="border-color: rgba(224, 64, 251, 0.45); background: rgba(224, 64, 251, 0.08);">
+                                        <div class="metric-title" style="color: #e040fb;">🏁 Total al Cierre (Precio + Divs)</div>
+                                        <div class="metric-val" style="color: #e040fb;">{fmt_es(total_cierre_anual, 2, sufijo=" €")}</div>
+                                        <div class="metric-sub" style="color: #aaa;">Mercado: {fmt_es(val_fin, 2, sufijo=" €")} + Divs</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
 
                                 fig_y = go.Figure()
                                 fig_y.add_trace(go.Scatter(x=di_y.index, y=di_y.values, mode='lines', line=dict(color='#faca2b', width=2, dash='dash'), name='Capital Global Invertido'))
