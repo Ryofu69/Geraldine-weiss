@@ -6,10 +6,34 @@ from datetime import datetime
 import warnings
 import plotly.graph_objects as go
 import io
+import json
+import os
 
 warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="Control de Cartera DGI", page_icon="💼", layout="wide")
+
+# ==========================================
+# GESTIÓN DE CONFIGURACIÓN DGR GUARDADA
+# ==========================================
+DGR_FILE = "dgr_config.json"
+
+def cargar_dgr_guardados():
+    if os.path.exists(DGR_FILE):
+        try:
+            with open(DGR_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def guardar_dgr_archivo(data):
+    try:
+        with open(DGR_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+        return True
+    except Exception:
+        return False
 
 # ==========================================
 # UTILIDADES DE LIMPIEZA Y FORMATEO ESPAÑOL
@@ -49,7 +73,7 @@ def fmt_acciones(acc):
         return str(acc)
 
 # ==========================================
-# ESTILOS CSS PARA TARJETAS KPI
+# ESTILOS VISUALES DE TARJETAS
 # ==========================================
 st.markdown("""
 <style>
@@ -84,7 +108,7 @@ st.markdown("""
 # ENTRADA DE DATOS (100% EN MEMORIA VOLÁTIL)
 # ==========================================
 st.title("💼 Panel de Rendimiento y Análisis DGI")
-st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. No se guarda ningún dato en disco ni en GitHub.*")
+st.markdown("> *Privacidad garantizada: Historial y operaciones procesados exclusivamente en memoria temporal de sesión.*")
 
 col_c1, col_c2 = st.columns(2)
 with col_c1:
@@ -178,9 +202,9 @@ if df_ops is not None and not df_ops.empty:
                     dict_historicos = {}
                     dict_dividendos = {}
                     dict_forward_div = {}
-                    dict_dgr_conservador = {}
+                    dict_dgr_sugerido = {}
 
-                    with st.spinner("Descargando fundamentales, dividendos e historial FX..."):
+                    with st.spinner("Descargando precios de mercado, dividendos e historial FX..."):
                         for t in tickers_global:
                             try:
                                 tk = yf.Ticker(t)
@@ -217,53 +241,48 @@ if df_ops is not None and not df_ops.empty:
                                     dict_forward_div[t] = f_div
 
                                     # ============================================================
-                                    # CÁLCULO DGI ROBUSTO: MÍNIMO ENTRE 5 Y 12 AÑOS
+                                    # CÁLCULO DGR PURO: MÍNIMO ENTRE 5 Y 12 AÑOS SIN TOPES
                                     # ============================================================
                                     div_hist_full = tk.dividends
-                                    dgr_final = 4.0
+                                    dgr_calc = 0.0
 
-                                    if not div_hist_full.empty and len(div_hist_full) >= 4:
+                                    if not div_hist_full.empty and len(div_hist_full) >= 2:
                                         divs_anuales = div_hist_full.groupby(div_hist_full.index.year).sum()
                                         año_act = datetime.now().year
-                                        if año_act in divs_anuales.index:
-                                            divs_anuales[año_act] = max(divs_anuales[año_act], f_div)
-                                        else:
-                                            divs_anuales.loc[año_act] = f_div
+                                        if f_div > 0:
+                                            divs_anuales[año_act] = f_div
 
                                         divs_anuales = divs_anuales.sort_index()
-                                        div_actual = divs_anuales.iloc[-1]
+                                        div_actual = divs_anuales.get(año_act, divs_anuales.iloc[-1])
 
                                         dgr_5y = None
                                         dgr_12y = None
 
-                                        # 1. Tasa a 5 años
-                                        if len(divs_anuales) >= 6:
-                                            div_5y = divs_anuales.iloc[-6]
-                                            if div_5y > 0 and div_actual > 0:
-                                                dgr_5y = ((div_actual / div_5y) ** (1 / 5) - 1) * 100
+                                        # 5 años
+                                        año_5 = año_act - 5
+                                        if año_5 in divs_anuales.index and divs_anuales[año_5] > 0 and div_actual > 0:
+                                            dgr_5y = ((div_actual / divs_anuales[año_5]) ** (1.0 / 5.0) - 1.0) * 100.0
+                                        elif len(divs_anuales) >= 6 and divs_anuales.iloc[-6] > 0 and div_actual > 0:
+                                            dgr_5y = ((div_actual / divs_anuales.iloc[-6]) ** (1.0 / 5.0) - 1.0) * 100.0
 
-                                        # 2. Tasa a 12 años (o periodo largo disponible)
-                                        if len(divs_anuales) >= 13:
-                                            div_12y = divs_anuales.iloc[-13]
-                                            if div_12y > 0 and div_actual > 0:
-                                                dgr_12y = ((div_actual / div_12y) ** (1 / 12) - 1) * 100
-                                        elif len(divs_anuales) >= 8:
-                                            años_disp = len(divs_anuales) - 1
-                                            div_inicio = divs_anuales.iloc[0]
-                                            if div_inicio > 0 and div_actual > 0:
-                                                dgr_12y = ((div_actual / div_inicio) ** (1 / años_disp) - 1) * 100
+                                        # 12 años
+                                        año_12 = año_act - 12
+                                        if año_12 in divs_anuales.index and divs_anuales[año_12] > 0 and div_actual > 0:
+                                            dgr_12y = ((div_actual / divs_anuales[año_12]) ** (1.0 / 12.0) - 1.0) * 100.0
+                                        elif len(divs_anuales) >= 13 and divs_anuales.iloc[-13] > 0 and div_actual > 0:
+                                            dgr_12y = ((div_actual / divs_anuales.iloc[-13]) ** (1.0 / 12.0) - 1.0) * 100.0
+                                        elif len(divs_anuales) >= 8 and divs_anuales.iloc[0] > 0 and div_actual > 0:
+                                            n_disp = len(divs_anuales) - 1
+                                            dgr_12y = ((div_actual / divs_anuales.iloc[0]) ** (1.0 / n_disp) - 1.0) * 100.0
 
-                                        # 3. Selección del más bajo (conservador)
                                         if dgr_5y is not None and dgr_12y is not None:
-                                            dgr_final = min(dgr_5y, dgr_12y)
+                                            dgr_calc = min(dgr_5y, dgr_12y)
                                         elif dgr_5y is not None:
-                                            dgr_final = dgr_5y
+                                            dgr_calc = dgr_5y
                                         elif dgr_12y is not None:
-                                            dgr_final = dgr_12y
+                                            dgr_calc = dgr_12y
 
-                                        dgr_final = max(0.0, min(dgr_final, 12.0))
-
-                                    dict_dgr_conservador[t] = dgr_final
+                                    dict_dgr_sugerido[t] = dgr_calc
                             except Exception:
                                 pass
 
@@ -424,7 +443,7 @@ if df_ops is not None and not df_ops.empty:
                                     "YoC Neto": yoc_neto,
                                     "Yield Act Bruto": yield_act_bruto,
                                     "Yield Act Neto": yield_act_neto,
-                                    "DGR_Cons": dict_dgr_conservador.get(t, 4.0)
+                                    "DGR_Sugerido": dict_dgr_sugerido.get(t, 0.0)
                                 })
 
                             plusvalia_global_eur = global_mercado_eur - global_inversion_eur
@@ -576,30 +595,135 @@ if df_ops is not None and not df_ops.empty:
                                 st.plotly_chart(fig_conc, use_container_width=True)
 
                             # ============================================================
-                            # PROYECCIÓN COMPUESTA BOLA DE NIEVE (DGR CONSERVADOR)
+                            # PROYECCIÓN COMPUESTA BOLA DE NIEVE (CON CONTROL Y GUARDADO)
                             # ============================================================
                             st.divider()
                             st.markdown("#### 🔮 Proyección a 10 Años: Efecto Bola de Nieve (Sin Aportar Más Capital)")
+
+                            dgr_guardados = cargar_dgr_guardados()
                             
-                            # Media ponderada por renta del DGR conservador (min 5A y 12A)
+                            # Inicializar claves de session_state si no existen
+                            for r in resultados_tabla:
+                                tk = r['Ticker']
+                                key_name = f"dgr_ctrl_{tk}"
+                                if key_name not in st.session_state:
+                                    if tk in dgr_guardados:
+                                        st.session_state[key_name] = float(dgr_guardados[tk])
+                                    else:
+                                        st.session_state[key_name] = round(float(r['DGR_Sugerido']), 1)
+
+                            # Identificar cuántas posiciones tienen valores modificados
+                            modificados_count = sum(
+                                1 for r in resultados_tabla
+                                if abs(float(st.session_state.get(f"dgr_ctrl_{r['Ticker']}", r['DGR_Sugerido'])) - round(float(r['DGR_Sugerido']), 1)) > 0.05
+                            )
+
+                            titulo_expander = f"⚙️ Ajustar Crecimiento del Dividendo (DGR %) por Empresa — ✏️ {modificados_count} manual(es)" if modificados_count > 0 else "⚙️ Ajustar Crecimiento del Dividendo (DGR %) por Empresa — Todo en automático"
+
+                            with st.expander(titulo_expander, expanded=True):
+                                st.caption("Modifica manualmente la tasa anual estimada de cada empresa. Las casillas modificadas se marcan con la insignia dorada.")
+                                
+                                num_cols = min(max(len(resultados_tabla), 1), 4)
+                                grid_cols = st.columns(num_cols)
+                                
+                                for idx, r in enumerate(resultados_tabla):
+                                    t = r['Ticker']
+                                    val_sugerido = round(float(r['DGR_Sugerido']), 1)
+                                    val_actual = float(st.session_state.get(f"dgr_ctrl_{t}", val_sugerido))
+                                    es_modificado = abs(val_actual - val_sugerido) > 0.05
+                                    col_target = grid_cols[idx % num_cols]
+                                    
+                                    with col_target:
+                                        if es_modificado:
+                                            st.markdown(
+                                                f"""<div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;'>
+                                                    <b style='color: #00d4ff;'>{t}</b>
+                                                    <span style='background: rgba(250, 202, 43, 0.2); color: #faca2b; border: 1px solid #faca2b; padding: 1px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: bold;'>✏️ MODIFICADO</span>
+                                                </div>
+                                                <div style='color: #888; font-size: 0.75rem; margin-bottom: 4px;'>Calculado: {fmt_es(val_sugerido, 1, signo=True, sufijo='%')}</div>
+                                                """,
+                                                unsafe_allow_html=True
+                                            )
+                                        else:
+                                            st.markdown(
+                                                f"""<div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;'>
+                                                    <b style='color: #fff;'>{t}</b>
+                                                    <span style='color: #777; font-size: 0.72rem;'>⚙️ Automático</span>
+                                                </div>
+                                                <div style='color: #888; font-size: 0.75rem; margin-bottom: 4px;'>Calculado: {fmt_es(val_sugerido, 1, signo=True, sufijo='%')}</div>
+                                                """,
+                                                unsafe_allow_html=True
+                                            )
+                                        
+                                        st.number_input(
+                                            label=f"DGR {t}",
+                                            value=val_actual,
+                                            step=0.5,
+                                            format="%.1f",
+                                            key=f"dgr_ctrl_{t}",
+                                            label_visibility="collapsed"
+                                        )
+
+                                st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+                                col_b1, col_b2, col_b3 = st.columns([1.3, 1.6, 2])
+                                
+                                with col_b1:
+                                    if st.button("💾 Guardar Cambios DGR", key="btn_save_dgr", use_container_width=True):
+                                        guardados_actuales = cargar_dgr_guardados()
+                                        for r in resultados_tabla:
+                                            tk = r['Ticker']
+                                            guardados_actuales[tk] = float(st.session_state.get(f"dgr_ctrl_{tk}", r['DGR_Sugerido']))
+                                        guardar_dgr_archivo(guardados_actuales)
+                                        st.toast("✅ Configuración de DGR guardada con éxito.", icon="💾")
+                                        st.rerun()
+
+                                with col_b2:
+                                    if st.button("🔄 Restablecer a Calculados", key="btn_reset_dgr", use_container_width=True):
+                                        if os.path.exists(DGR_FILE):
+                                            try:
+                                                guardados_actuales = cargar_dgr_guardados()
+                                                for r in resultados_tabla:
+                                                    guardados_actuales.pop(r['Ticker'], None)
+                                                if guardados_actuales:
+                                                    guardar_dgr_archivo(guardados_actuales)
+                                                else:
+                                                    os.remove(DGR_FILE)
+                                            except Exception:
+                                                pass
+                                        for r in resultados_tabla:
+                                            tk = r['Ticker']
+                                            st.session_state[f"dgr_ctrl_{tk}"] = round(float(r['DGR_Sugerido']), 1)
+                                        st.toast("🔄 Valores restablecidos a los cálculos originales.", icon="🔄")
+                                        st.rerun()
+
+                            # Aplicar valores al modelo analítico
+                            for r in resultados_tabla:
+                                tk = r['Ticker']
+                                val_f = float(st.session_state.get(f"dgr_ctrl_{tk}", r['DGR_Sugerido']))
+                                r['DGR_Final'] = val_f
+                                r['DGR_Modificado'] = abs(val_f - round(float(r['DGR_Sugerido']), 1)) > 0.05
+
                             dgr_medio_cartera = float(np.average(
-                                [r['DGR_Cons'] for r in resultados_tabla],
+                                [r['DGR_Final'] for r in resultados_tabla],
                                 weights=[r['Renta Anual Proyectada Neto'] for r in resultados_tabla]
-                            )) if total_forward_div_neto_eur > 0 else 4.0
+                            )) if total_forward_div_neto_eur > 0 else 0.0
 
                             años_futuros = list(range(1, 11))
                             labels_futuros = [str(datetime.now().year + y) for y in años_futuros]
 
                             renta_proy_conservadora = [total_forward_div_neto_eur * ((1 + 0.04) ** y) for y in años_futuros]
-                            renta_proy_cartera = [total_forward_div_neto_eur * ((1 + (dgr_medio_cartera / 100)) ** y) for y in años_futuros]
+                            
+                            factor_crec = max(0.0, 1.0 + (dgr_medio_cartera / 100.0))
+                            renta_proy_cartera = [total_forward_div_neto_eur * (factor_crec ** y) for y in años_futuros]
                             renta_proy_fuerte = [total_forward_div_neto_eur * ((1 + 0.09) ** y) for y in años_futuros]
 
                             fig_snow = go.Figure()
+                            etiqueta_ritmo = f'Ritmo Cartera (DGR: {fmt_es(dgr_medio_cartera, 1, signo=True, sufijo="%")}{" ✏️" if modificados_count > 0 else ""})'
                             fig_snow.add_trace(go.Bar(
                                 x=labels_futuros,
                                 y=renta_proy_cartera,
-                                name=f'Ritmo Conservador Cartera (DGR: {dgr_medio_cartera:.1f}%)',
-                                marker_color='#21c354',
+                                name=etiqueta_ritmo,
+                                marker_color='#21c354' if dgr_medio_cartera >= 0 else '#ff4b4b',
                                 text=[fmt_es(val, 0, sufijo=" €") for val in renta_proy_cartera],
                                 textposition='auto'
                             ))
@@ -680,6 +804,7 @@ if df_ops is not None and not df_ops.empty:
                             rows_display = []
                             for _, r in df_pos_sorted.iterrows():
                                 sym = r['Moneda']
+                                dgr_str = f"{fmt_es(r['DGR_Final'], 1, signo=True, sufijo='%')} ✏️" if r.get('DGR_Modificado', False) else fmt_es(r['DGR_Final'], 1, signo=True, sufijo='%')
                                 rows_display.append({
                                     "Ticker": r['Ticker'],
                                     "Acciones": fmt_acciones(r['Acciones']),
@@ -699,7 +824,7 @@ if df_ops is not None and not df_ops.empty:
                                     "YoC Neto (%)": fmt_es(r['YoC Neto'], 2, sufijo="%"),
                                     "Yield Act. Bruto (%)": fmt_es(r['Yield Act Bruto'], 2, sufijo="%"),
                                     "Yield Act. Neto (%)": fmt_es(r['Yield Act Neto'], 2, sufijo="%"),
-                                    "DGR Cons. (%)": fmt_es(r['DGR_Cons'], 1, sufijo="%"),
+                                    "DGR Aplicado (%)": dgr_str,
                                     "Peso Cap. (%)": fmt_es(r['Peso Capital Pct'], 1, sufijo="%"),
                                     "Peso Renta (%)": fmt_es(r['Peso Renta Pct'], 1, sufijo="%")
                                 })
@@ -714,7 +839,7 @@ if df_ops is not None and not df_ops.empty:
                                 return ''
 
                             styler = df_disp.style
-                            cols_target = ['Plusvalía (€)', 'Plusvalía (%)', 'Ret. Total Bruto (€)', 'Ret. Total Neto (€)', 'Ret. Bruto (%)', 'Ret. Neto (%)']
+                            cols_target = ['Plusvalía (€)', 'Plusvalía (%)', 'Ret. Total Bruto (€)', 'Ret. Total Neto (€)', 'Ret. Bruto (%)', 'Ret. Neto (%)', 'DGR Aplicado (%)']
                             if hasattr(styler, 'map'):
                                 styler = styler.map(estilo_positivo_negativo, subset=cols_target)
                             else:
