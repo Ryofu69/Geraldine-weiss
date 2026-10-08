@@ -3,12 +3,38 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import os
 import warnings
 
 # Ignorar advertencias menores
 warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="Radar Watchlist - Weiss DGI", page_icon="📡", layout="wide")
+
+ARCHIVO_WATCHLIST = "watchlist.txt"
+
+# ==========================================
+# GESTIÓN DEL ARCHIVO PERSISTENTE
+# ==========================================
+def cargar_watchlist():
+    if os.path.exists(ARCHIVO_WATCHLIST):
+        try:
+            with open(ARCHIVO_WATCHLIST, "r", encoding="utf-8") as f:
+                contenido = f.read().strip()
+                if contenido:
+                    return contenido
+        except Exception:
+            pass
+    # Lista predeterminada si el archivo no existe aún
+    return "MKC, VIS.MC, MCD, GIS, WKL.AS, PEP, JNJ, HD"
+
+def guardar_watchlist(texto):
+    try:
+        with open(ARCHIVO_WATCHLIST, "w", encoding="utf-8") as f:
+            f.write(texto.strip())
+        return True
+    except Exception:
+        return False
 
 # ==========================================
 # FUNCIÓN DE ANÁLISIS RÁPIDO PARA RADAR
@@ -43,10 +69,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         industry_en = info.get('industry', '')
         es_regulada = 'utility' in sector_en.lower() or 'utilities' in sector_en.lower() or 'reit' in industry_en.lower() or 'real estate' in sector_en.lower()
         es_tech = 'technology' in sector_en.lower() or 'software' in industry_en.lower()
-        es_fin_ind = ('financial' in sector_en.lower() or 'bank' in industry_en.lower() or 
-                      'industrial' in sector_en.lower() or 'basic materials' in sector_en.lower())
         es_defensivo = 'consumer defensive' in sector_en.lower() or 'healthcare' in sector_en.lower()
-        
         es_telecom = 'communication' in sector_en.lower() or 'telecom' in industry_en.lower()
         es_utility_pura = 'utility' in sector_en.lower() or 'utilities' in sector_en.lower()
 
@@ -96,7 +119,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         yield_neto = yield_actual * (1 - (impuesto_pct / 100))
         div_neto_absoluto = forward_dividend * (1 - (impuesto_pct / 100))
 
-        # Extracción de métricas fundamentales
+        # Fundamentales
         payout_bpa = get_safe('payoutRatio') * 100
         fcf = get_safe('freeCashflow')
         shares = get_safe('sharesOutstanding')
@@ -106,7 +129,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         per = get_safe('trailingPE', get_safe('forwardPE'))
         pb = get_safe('priceToBook', -1.0)
 
-        # Deuda Neta / EBITDA Operativa
         deuda_neta = max(0.0, total_debt - total_cash)
         if ebitda > 0:
             deuda_ebitda = deuda_neta / ebitda
@@ -122,10 +144,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                 payout_fcf = (forward_dividend / fcf_per_share) * 100
                 p_fcf = precio_actual / fcf_per_share
 
-        # Cálculo de recompras/dilución (Doble motor)
-        shares_yearly = pd.Series(dtype=float)
         variacion_acciones = None
-
         try:
             inc_stmt = ticker.income_stmt
             if not inc_stmt.empty:
@@ -134,30 +153,14 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                         sh_data = inc_stmt.loc[key].dropna().sort_index()
                         sh_data = sh_data[sh_data > 0]
                         if len(sh_data) >= 2:
-                            shares_yearly = sh_data.groupby(sh_data.index.year).last()
-                            acc_ini = shares_yearly.iloc[0]
-                            acc_fin = shares_yearly.iloc[-1]
+                            sy = sh_data.groupby(sh_data.index.year).last()
+                            acc_ini = sy.iloc[0]
+                            acc_fin = sy.iloc[-1]
                             if acc_ini > 0 and (acc_fin / acc_ini) > 0.10: 
                                 variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
                                 break
         except Exception: pass
 
-        if variacion_acciones is None or shares_yearly.empty:
-            try:
-                fecha_corte_shares = pd.Timestamp.now().normalize() - pd.DateOffset(years=años_analisis + 3)
-                shares_hist = ticker.get_shares_full(start=fecha_corte_shares.strftime('%Y-%m-%d'), end=None)
-                if shares_hist is not None and len(shares_hist) > 1:
-                    sy = shares_hist.groupby(shares_hist.index.year).last()
-                    sy = sy[sy > 0]
-                    if len(sy) >= 2:
-                        shares_yearly = sy
-                        acc_ini = shares_yearly.iloc[-(años_analisis + 1)] if len(shares_yearly) >= (años_analisis + 1) else shares_yearly.iloc[0]
-                        acc_fin = shares_yearly.iloc[-1]
-                        if acc_ini > 0 and (acc_fin / acc_ini) > 0.10: 
-                            variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-            except Exception: pass
-
-        # Crecimiento histórico de dividendos (DGR)
         dgr_5y = None
         if len(dividendos_barras) >= 6:
             div_actual = dividendos_barras.iloc[-1]
@@ -187,75 +190,41 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                     crecimiento_bpa_3y = (((eps_data.iloc[0] / eps_data.iloc[3]) ** (1 / 3)) - 1) * 100
         except Exception: pass
 
-        # ==========================================
-        # 1. SCORE DE CALIDAD DGI MODERNA (0 a 10 Pts)
-        # ==========================================
+        # 1. Score Calidad DGI (0 a 10)
         score_calidad = 0.0
-
-        # Solvencia Operativa Real (2.5 pts)
         lim_deuda_optima = 4.0 if (es_regulada or es_defensivo or es_telecom) else 3.0
         lim_deuda_aceptable = 5.0 if (es_regulada or es_defensivo or es_telecom) else 4.0
-        if deuda_ebitda <= lim_deuda_optima:
-            score_calidad += 2.5
-        elif deuda_ebitda <= lim_deuda_aceptable:
-            score_calidad += 1.5
+        if deuda_ebitda <= lim_deuda_optima: score_calidad += 2.5
+        elif deuda_ebitda <= lim_deuda_aceptable: score_calidad += 1.5
 
-        # Seguridad del Dividendo en Efectivo - FCF (2.5 pts)
-        if 0 <= payout_fcf <= payout_lim_fcf:
-            score_calidad += 2.5
-        elif payout_fcf <= payout_ama_fcf:
-            score_calidad += 1.25
+        if 0 <= payout_fcf <= payout_lim_fcf: score_calidad += 2.5
+        elif payout_fcf <= payout_ama_fcf: score_calidad += 1.25
 
-        # Resiliencia y Compromiso Histórico (2.0 pts)
-        if (años_pagando >= 20 and racha_sin_recortes >= 10) or racha_sin_recortes >= 15:
-            score_calidad += 2.0
-        elif (años_pagando >= 10 and racha_sin_recortes >= 8) or racha_sin_recortes >= 10:
-            score_calidad += 1.25
-        elif racha_sin_recortes >= 5:
-            score_calidad += 0.75
+        if (años_pagando >= 20 and racha_sin_recortes >= 10) or racha_sin_recortes >= 15: score_calidad += 2.0
+        elif (años_pagando >= 10 and racha_sin_recortes >= 8) or racha_sin_recortes >= 10: score_calidad += 1.25
+        elif racha_sin_recortes >= 5: score_calidad += 0.75
 
-        # Crecimiento Real por encima de inflación DGR 5A (1.5 pts)
-        if dgr_5y is not None and dgr_5y >= 5.0:
-            score_calidad += 1.5
-        elif dgr_5y is not None and dgr_5y >= 2.5:
-            score_calidad += 0.75
+        if dgr_5y is not None and dgr_5y >= 5.0: score_calidad += 1.5
+        elif dgr_5y is not None and dgr_5y >= 2.5: score_calidad += 0.75
 
-        # Asignación de Capital: Recompras o Crecimiento de BPA (1.5 pts)
         cond_recompras = variacion_acciones is not None and variacion_acciones < -0.5
         cond_bpa_pos = crecimiento_bpa_3y is not None and crecimiento_bpa_3y > 0
-        if cond_recompras or cond_bpa_pos:
-            score_calidad += 1.5
+        if cond_recompras or cond_bpa_pos: score_calidad += 1.5
 
-        # ==========================================
-        # 2. SCORE DE VALORACIÓN DGI (0 a 10 Pts)
-        # ==========================================
+        # 2. Score Valoración DGI (0 a 10)
         score_val = 0.0
+        if yield_actual >= yield_infravalorado: score_val += 4.0
+        elif yield_actual >= yield_medio: score_val += 2.5
 
-        # Canal de Rendimiento Histórico Weiss (4.0 pts máx)
-        if yield_actual >= yield_infravalorado:
-            score_val += 4.0
-        elif yield_actual >= yield_medio:
-            score_val += 2.5
+        if 0 < p_fcf <= 20.0: score_val += 2.5
+        elif 0 < p_fcf <= 25.0: score_val += 1.25
 
-        # Múltiplo de Flujo de Caja Libre (2.5 pts)
-        if 0 < p_fcf <= 20.0:
-            score_val += 2.5
-        elif 0 < p_fcf <= 25.0:
-            score_val += 1.25
+        if 0 < per <= 20.0: score_val += 2.0
+        elif 0 < per <= 25.0: score_val += 1.0
 
-        # Múltiplo de Beneficio PER (2.0 pts)
-        if 0 < per <= 20.0:
-            score_val += 2.0
-        elif 0 < per <= 25.0:
-            score_val += 1.0
-
-        # Regla de Chowder (1.5 pts)
-        if (es_utility_pura or es_telecom) and yield_actual > 4.0:
-            chowder_target = 8.0
-        elif yield_actual >= 3.0:
-            chowder_target = 12.0
-        else:
-            chowder_target = 15.0
+        if (es_utility_pura or es_telecom) and yield_actual > 4.0: chowder_target = 8.0
+        elif yield_actual >= 3.0: chowder_target = 12.0
+        else: chowder_target = 15.0
 
         chowder_number = (yield_actual + dgr_5y) if dgr_5y is not None else -999.0
         if chowder_number != -999.0 and chowder_number >= chowder_target:
@@ -265,9 +234,15 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
         pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
 
-        if precio_actual <= precio_compra: estado = "🎯 COMPRA"
-        elif precio_actual >= precio_venta: estado = "🔴 SOBREVALORADA"
-        else: estado = "🟡 MANTENER"
+        if precio_actual <= precio_compra:
+            estado = "🎯 COMPRA"
+            orden_estado = 1
+        elif precio_actual >= precio_venta:
+            estado = "🔴 SOBREVALORADA"
+            orden_estado = 3
+        else:
+            estado = "🟡 MANTENER"
+            orden_estado = 2
 
         sym_m = "€" if currency == "EUR" else ("£" if currency in ["GBP", "GBp"] else "$")
 
@@ -276,6 +251,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             "Estado": estado,
             "Calidad": f"{score_calidad:.1f}/10",
             "Valoración": f"{score_val:.1f}/10",
+            "Score Total": f"{score_calidad + score_val:.1f}/20",
             "Chowder": f"{chowder_number:.1f} (Obj: {chowder_target:.0f})" if chowder_number != -999.0 else "N/D",
             "Cotización Actual": f"{precio_actual / divisor_uk:.2f}{sym_m} ({dist_real_suelo:+.2f}%)",
             "Suelo (Infra)": f"{precio_compra / divisor_uk:.2f}{sym_m} ({pct_infra_vs_media:+.2f}%)" if precio_compra > 0 else "N/D",
@@ -296,6 +272,9 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
             f"DGR {años_analisis}A": f"{dgr_periodo:.2f}%" if dgr_periodo is not None else "N/D",
             "Años Pag.": f"{años_pagando}A (R: {racha_sin_recortes}A)",
             
+            # Variables ocultas para ordenación y coloreado
+            "_orden_estado": orden_estado,
+            "_score_total": score_calidad + score_val,
             "_Dist_Suelo": dist_real_suelo,
             "_y_act": yield_actual, "_y_inf": yield_infravalorado, "_y_med": yield_medio,
             "_per": per, "_p_fcf": p_fcf, "_pb": pb, 
@@ -318,17 +297,30 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
 # INTERFAZ DIRECTA DE LA PÁGINA (RADAR)
 # ==========================================
 st.title("📡 Radar Watchlist DGI — Geraldine Weiss Moderno")
-st.markdown("La tabla prioriza oportunidades ordenando primero las empresas con mayor descuento respecto a su **Suelo Fundamental**.")
-st.markdown("> *Nota: La columna **Ticker** permanece fija a la izquierda al desplazarte en la pantalla para poder seguir las métricas sin perder de vista la empresa.*")
 
-tickers_masivos = st.text_area("Lista de Tickers (separados por comas):", "MKC, VIS.MC, MCD, GIS, WKL.AS, PEP, JNJ, HD")
+with st.expander("📁 Lista Persistente (`watchlist.txt`)", expanded=True):
+    lista_almacenada = cargar_watchlist()
+    tickers_masivos = st.text_area(
+        "Edita o consulta los tickers guardados (separados por comas o saltos de línea):",
+        value=lista_almacenada,
+        height=90
+    )
+    col_btn_guardar, _ = st.columns([1, 4])
+    with col_btn_guardar:
+        if st.button("💾 Guardar Lista en Archivo"):
+            if guardar_watchlist(tickers_masivos):
+                st.success("¡Lista guardada correctamente en `watchlist.txt`!")
+            else:
+                st.error("Error al escribir el archivo.")
 
 col_m1, col_m2 = st.columns(2)
 with col_m1: años_masivos = st.selectbox("Periodo para canal histórico:", [5, 10, 12, 15, 20], index=2, key="años_mas")
 with col_m2: impuesto_masivo = st.number_input("Retención (%)", value=19.0, key="imp_mas")
 
 if st.button("🚀 Escanear Watchlist", use_container_width=True):
-    lista_tickers = [t.strip() for t in tickers_masivos.split(",") if t.strip()]
+    # Formatear lista aceptando comas y saltos de línea
+    raw_tickers = tickers_masivos.replace("\n", ",").split(",")
+    lista_tickers = [t.strip().upper() for t in raw_tickers if t.strip()]
     
     if len(lista_tickers) > 0:
         barra_progreso = st.progress(0)
@@ -341,12 +333,22 @@ if st.button("🚀 Escanear Watchlist", use_container_width=True):
             if datos: resultados.append(datos)
             barra_progreso.progress((idx + 1) / len(lista_tickers))
         
-        texto_estado.text("¡Escaneo masivo completado!")
+        texto_estado.text("¡Escaneo completado!")
         
         if resultados:
-            df_res = pd.DataFrame(resultados).sort_values(by="_Dist_Suelo")
+            df_res = pd.DataFrame(resultados)
             
-            # Fijar el Ticker como índice para bloquearlo en la vista móvil
+            # ORDENACIÓN MULTINIVEL:
+            # 1. Estado (COMPRA -> MANTENER -> SOBREVALORADA)
+            # 2. Score Total (Mayor a menor)
+            # 3. Score Calidad (Mayor a menor)
+            # 4. Distancia al Suelo (Mayor descuento primero)
+            df_res = df_res.sort_values(
+                by=["_orden_estado", "_score_total", "_score_calidad", "_Dist_Suelo"],
+                ascending=[True, False, False, True]
+            )
+            
+            # Fijar el Ticker como índice para anclarlo en la vista móvil
             df_res = df_res.set_index("Ticker")
             
             def color_row(row):
@@ -360,6 +362,10 @@ if st.button("🚀 Escanear Watchlist", use_container_width=True):
                     elif col_name == 'Valoración':
                         if row['_score_val'] >= 7.0: styles[idx] = 'color: #21c354; font-weight: bold;'
                         elif row['_score_val'] >= 4.0: styles[idx] = 'color: #faca2b; font-weight: bold;'
+                        else: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
+                    elif col_name == 'Score Total':
+                        if row['_score_total'] >= 15.0: styles[idx] = 'color: #21c354; font-weight: bold;'
+                        elif row['_score_total'] >= 11.0: styles[idx] = 'color: #faca2b; font-weight: bold;'
                         else: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
                     elif col_name == 'Cotización Actual':
                         if "COMPRA" in est: styles[idx] = 'color: #21c354; font-weight: bold;'
@@ -426,7 +432,6 @@ if st.button("🚀 Escanear Watchlist", use_container_width=True):
             styled_df = df_res.style.apply(color_row, axis=1)
             st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
             
-            # Exportar manteniendo el Ticker en la primera columna
             df_export = df_res[columnas_visibles]
             csv = df_export.to_csv(index=True, sep=';', decimal=',').encode('utf-8')
             st.download_button(
