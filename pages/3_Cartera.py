@@ -81,10 +81,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# ENTRADA DE DATOS (100% PRIVADA)
+# ENTRADA DE DATOS (100% PRIVADA Y EN MEMORIA)
 # ==========================================
-st.title("💼 Panel de Rendimiento y Retorno Total DGI")
-st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. No se guarda ningún dato en disco ni en GitHub.*")
+st.title("💼 Panel de Rendimiento y Análisis DGI")
+st.markdown("> *Privacidad garantizada: Procesamiento 100% en memoria temporal de sesión. No se guarda ningún dato en servidor ni en GitHub.*")
 
 col_c1, col_c2 = st.columns(2)
 with col_c1:
@@ -106,12 +106,12 @@ if metodo_carga == "📂 Subir Archivo":
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 else:
-    st.info("Pega tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio (admite comas europeas y tabuladores de Excel).")
+    st.info("Pega directamente tu historial. Encabezados: Fecha, Ticker, Operacion, Acciones, Precio (admite comas europeas y tabuladores de Excel).")
     texto_csv = st.text_area(
         "Pega aquí tus transacciones:",
         value="",
         height=140,
-        placeholder="Fecha,Ticker,Operacion,Acciones,Precio"
+        placeholder="Fecha,Ticker,Operacion,Acciones,Precio\n01/01/2024,TICKER,Compra,10,25.50"
     )
     if texto_csv and texto_csv.strip():
         try:
@@ -178,8 +178,9 @@ if df_ops is not None and not df_ops.empty:
                     dict_historicos = {}
                     dict_dividendos = {}
                     dict_forward_div = {}
+                    dict_dgr5 = {}
 
-                    with st.spinner("Descargando precios de mercado, dividendos e historial FX..."):
+                    with st.spinner("Descargando fundamentales, dividendos y tipos de cambio..."):
                         for t in tickers_global:
                             try:
                                 tk = yf.Ticker(t)
@@ -214,6 +215,18 @@ if df_ops is not None and not df_ops.empty:
                                     if es_uk and f_div > 0:
                                         f_div = f_div / 100.0
                                     dict_forward_div[t] = f_div
+
+                                    # Estimación de crecimiento DGR a 5 años
+                                    div_hist_full = tk.dividends
+                                    if not div_hist_full.empty and len(div_hist_full) >= 8:
+                                        divs_anuales = div_hist_full.groupby(div_hist_full.index.year).sum()
+                                        if len(divs_anuales) >= 6 and divs_anuales.iloc[-6] > 0:
+                                            dgr = ((divs_anuales.iloc[-1] / divs_anuales.iloc[-6]) ** (1/5) - 1) * 100
+                                            dict_dgr5[t] = max(0.0, min(dgr, 15.0))
+                                        else:
+                                            dict_dgr5[t] = 5.0
+                                    else:
+                                        dict_dgr5[t] = 5.0
                             except Exception:
                                 pass
 
@@ -253,7 +266,6 @@ if df_ops is not None and not df_ops.empty:
                         daily_value = (daily_shares * datos_historicos[tickers_unicos]).sum(axis=1)
                         daily_shares_shifted = daily_shares.shift(1).fillna(0)
                         
-                        # Dividendos Brutos y Netos diarios
                         daily_gross_divs = (daily_shares_shifted * datos_dividendos[tickers_unicos]).sum(axis=1)
                         daily_net_divs = daily_gross_divs * net_factor
                         accumulated_divs_net = daily_net_divs.cumsum()
@@ -296,7 +308,7 @@ if df_ops is not None and not df_ops.empty:
                             global_mercado_eur = 0.0
                             global_divs_gross_eur = 0.0
                             global_divs_net_eur = 0.0
-                            total_div_anual_eur = 0.0
+                            total_forward_div_bruto_eur = 0.0
 
                             for t, acc in posiciones_activas.items():
                                 try: curr = yf.Ticker(t).info.get('currency', 'USD')
@@ -343,12 +355,14 @@ if df_ops is not None and not df_ops.empty:
                                 sym_divisa = "€" if curr == "EUR" else ("£" if curr in ["GBP", "GBp"] else "$")
 
                                 div_anual_unitario = dict_forward_div.get(t, 0.0)
+                                forward_div_anual_pos_bruto = (acc * div_anual_unitario) / fx_hoy
+                                forward_div_anual_pos_neto = forward_div_anual_pos_bruto * net_factor
+                                total_forward_div_bruto_eur += forward_div_anual_pos_bruto
+
                                 yoc_bruto = (div_anual_unitario / p_medio * 100) if p_medio > 0 else 0.0
                                 yoc_neto = yoc_bruto * net_factor
                                 yield_act_bruto = (div_anual_unitario / p_actual * 100) if p_actual > 0 else 0.0
                                 yield_act_neto = yield_act_bruto * net_factor
-
-                                total_div_anual_eur += (acc * div_anual_unitario) / fx_hoy
 
                                 resultados_tabla.append({
                                     "Ticker": t,
@@ -368,10 +382,12 @@ if df_ops is not None and not df_ops.empty:
                                     "Total Neto EUR": ret_neto_eur,
                                     "Rent Tot Bruto Pct": rent_tot_bruto_pct,
                                     "Rent Tot Neto Pct": rent_tot_neto_pct,
+                                    "Renta Anual Proyectada Neto": forward_div_anual_pos_neto,
                                     "YoC Bruto": yoc_bruto,
                                     "YoC Neto": yoc_neto,
                                     "Yield Act Bruto": yield_act_bruto,
-                                    "Yield Act Neto": yield_act_neto
+                                    "Yield Act Neto": yield_act_neto,
+                                    "DGR5": dict_dgr5.get(t, 5.0)
                                 })
 
                             plusvalia_global_eur = global_mercado_eur - global_inversion_eur
@@ -384,13 +400,21 @@ if df_ops is not None and not df_ops.empty:
                             pct_ret_bruto_global = (ret_tot_global_bruto_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0.0
                             pct_ret_neto_global = (ret_tot_global_neto_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0.0
 
-                            yoc_global_bruto = (total_div_anual_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0.0
+                            total_forward_div_neto_eur = total_forward_div_bruto_eur * net_factor
+                            sueldo_pasivo_mes_neto = total_forward_div_neto_eur / 12.0
+
+                            yoc_global_bruto = (total_forward_div_bruto_eur / global_inversion_eur * 100) if global_inversion_eur > 0 else 0.0
                             yoc_global_neto = yoc_global_bruto * net_factor
-                            yield_global_bruto = (total_div_anual_eur / global_mercado_eur * 100) if global_mercado_eur > 0 else 0.0
+                            yield_global_bruto = (total_forward_div_bruto_eur / global_mercado_eur * 100) if global_mercado_eur > 0 else 0.0
                             yield_global_neto = yield_global_bruto * net_factor
 
+                            # Asignar Pesos de Capital vs Pesos de Dividendo
+                            for r in resultados_tabla:
+                                r['Peso Capital Pct'] = (r['Valor EUR'] / global_mercado_eur * 100) if global_mercado_eur > 0 else 0.0
+                                r['Peso Renta Pct'] = (r['Renta Anual Proyectada Neto'] / total_forward_div_neto_eur * 100) if total_forward_div_neto_eur > 0 else 0.0
+
                             # ==========================================
-                            # 1. TARJETAS KPIS CON BRUTO Y NETO
+                            # 1. TARJETAS KPIS ESTRATÉGICAS DGI
                             # ==========================================
                             st.markdown(f"#### 🌐 Resumen de Rendimiento ({año_filtro})")
                             
@@ -399,7 +423,7 @@ if df_ops is not None and not df_ops.empty:
                             with k1:
                                 st.markdown(f"""
                                 <div class="metric-box">
-                                    <div class="metric-title">💰 Inversión vs Mercado</div>
+                                    <div class="metric-title">💰 Valor Cartera vs Coste</div>
                                     <div class="metric-val" style="color: #00d4ff;">{fmt_es(global_mercado_eur, 2, sufijo=" €")}</div>
                                     <div class="metric-sub" style="color: #aaa;">Coste: {fmt_es(global_inversion_eur, 2, sufijo=" €")}</div>
                                 </div>
@@ -428,7 +452,7 @@ if df_ops is not None and not df_ops.empty:
                                 col_tot = "#21c354" if ret_tot_global_neto_eur >= 0 else "#ff4b4b"
                                 st.markdown(f"""
                                 <div class="metric-box" style="border-color: rgba(33, 195, 84, 0.35); background: rgba(33, 195, 84, 0.05);">
-                                    <div class="metric-title" style="color: #21c354;">🚀 Retorno Total (Ganancia)</div>
+                                    <div class="metric-title" style="color: #21c354;">🚀 Retorno Total Real</div>
                                     <div class="metric-val" style="color: {col_tot};">{fmt_es(ret_tot_global_neto_eur, 2, signo=True, sufijo=" €")} <span style="font-size: 0.85rem;">Neto</span></div>
                                     <div class="metric-sub" style="color: {col_tot};"><b>{fmt_es(pct_ret_neto_global, 2, signo=True, sufijo="%")}</b> | Bruto: {fmt_es(pct_ret_bruto_global, 2, signo=True, sufijo="%")}</div>
                                 </div>
@@ -437,39 +461,39 @@ if df_ops is not None and not df_ops.empty:
                             with k5:
                                 st.markdown(f"""
                                 <div class="metric-box">
-                                    <div class="metric-title">⏳ Yields (YoC vs Mercado)</div>
-                                    <div class="metric-val" style="color: #faca2b;">{fmt_es(yoc_global_neto, 2, sufijo="%")} <span style="font-size: 0.85rem; color: #aaa;">YoC Neto</span></div>
-                                    <div class="metric-sub" style="color: #aaa;">YoC Bruto: <b>{fmt_es(yoc_global_bruto, 2, sufijo="%")}</b> | Yield Mkt: <b>{fmt_es(yield_global_neto, 2, sufijo="%")}</b></div>
+                                    <div class="metric-title">⏳ Renta Futura Proyectada</div>
+                                    <div class="metric-val" style="color: #faca2b;">{fmt_es(total_forward_div_neto_eur, 2, sufijo=" €/año")}</div>
+                                    <div class="metric-sub" style="color: #21c354;"><b>~{fmt_es(sueldo_pasivo_mes_neto, 2, sufijo=" €/mes limpios")}</b> | YoC: {fmt_es(yoc_global_neto, 2, sufijo="%")}</div>
                                 </div>
                                 """, unsafe_allow_html=True)
 
                             # ==========================================
-                            # 2. GRÁFICO REEMPLAZADO: COMPOSICIÓN DEL RETORNO TOTAL
+                            # 2. HERRAMIENTAS GRÁFICAS DE ESTRATEGIA DGI
                             # ==========================================
                             st.divider()
-                            col_g_ret1, col_g_ret2 = st.columns([1.6, 1.4])
+                            col_g1, col_g2 = st.columns(2)
                             
-                            df_ret_chart = pd.DataFrame(resultados_tabla).sort_values(by="Total Neto EUR", ascending=True)
+                            df_analytics = pd.DataFrame(resultados_tabla).sort_values(by="Total Neto EUR", ascending=True)
 
-                            with col_g_ret1:
-                                st.markdown("#### 🎯 Composición del Retorno Total por Empresa (€)")
+                            with col_g1:
+                                st.markdown("#### 🎯 Retorno Total: Plusvalía vs Dividendos (€)")
                                 fig_comp_eur = go.Figure()
                                 fig_comp_eur.add_trace(go.Bar(
-                                    y=df_ret_chart['Ticker'],
-                                    x=df_ret_chart['Plusvalia EUR'],
+                                    y=df_analytics['Ticker'],
+                                    x=df_analytics['Plusvalia EUR'],
                                     name='Plusvalía Latente (€)',
                                     orientation='h',
-                                    marker_color=['#21c354' if x >= 0 else '#ff4b4b' for x in df_ret_chart['Plusvalia EUR']],
-                                    text=[fmt_es(x, 0, signo=True, sufijo=" €") for x in df_ret_chart['Plusvalia EUR']],
+                                    marker_color=['#21c354' if x >= 0 else '#ff4b4b' for x in df_analytics['Plusvalia EUR']],
+                                    text=[fmt_es(x, 0, signo=True, sufijo=" €") for x in df_analytics['Plusvalia EUR']],
                                     textposition='auto'
                                 ))
                                 fig_comp_eur.add_trace(go.Bar(
-                                    y=df_ret_chart['Ticker'],
-                                    x=df_ret_chart['Divs Net EUR'],
+                                    y=df_analytics['Ticker'],
+                                    x=df_analytics['Divs Net EUR'],
                                     name='Dividendos Cobrados Netos (€)',
                                     orientation='h',
                                     marker_color='#00d4ff',
-                                    text=[fmt_es(x, 0, sufijo=" €") for x in df_ret_chart['Divs Net EUR']],
+                                    text=[fmt_es(x, 0, sufijo=" €") for x in df_analytics['Divs Net EUR']],
                                     textposition='auto'
                                 ))
                                 fig_comp_eur.update_layout(
@@ -480,40 +504,90 @@ if df_ops is not None and not df_ops.empty:
                                     paper_bgcolor='rgba(0,0,0,0)',
                                     plot_bgcolor='rgba(0,0,0,0)',
                                     legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
-                                    xaxis=dict(title="Ganancia Acumulada (€)")
+                                    xaxis=dict(title="Beneficio Total (€)")
                                 )
                                 st.plotly_chart(fig_comp_eur, use_container_width=True)
 
-                            with col_g_ret2:
-                                st.markdown("#### 🚀 Rentabilidad Total sobre Coste (%)")
-                                fig_ret_pct = go.Figure()
-                                fig_ret_pct.add_trace(go.Bar(
-                                    x=df_ret_chart['Ticker'],
-                                    y=df_ret_chart['Rent Tot Bruto Pct'],
-                                    name='Retorno Total Bruto (%)',
-                                    marker_color='#faca2b',
-                                    text=[fmt_es(x, 1, signo=True, sufijo="%") for x in df_ret_chart['Rent Tot Bruto Pct']],
+                            with col_g2:
+                                st.markdown("#### 🛡️ Radar de Concentración: Capital vs Flujo de Renta (%)")
+                                fig_conc = go.Figure()
+                                fig_conc.add_trace(go.Bar(
+                                    x=df_analytics['Ticker'],
+                                    y=df_analytics['Peso Capital Pct'],
+                                    name='% de tu Patrimonio (Capital)',
+                                    marker_color='#9c27b0',
+                                    text=[fmt_es(x, 1, sufijo="%") for x in df_analytics['Peso Capital Pct']],
                                     textposition='auto'
                                 ))
-                                fig_ret_pct.add_trace(go.Bar(
-                                    x=df_ret_chart['Ticker'],
-                                    y=df_ret_chart['Rent Tot Neto Pct'],
-                                    name='Retorno Total Neto (%)',
-                                    marker_color='#21c354',
-                                    text=[fmt_es(x, 1, signo=True, sufijo="%") for x in df_ret_chart['Rent Tot Neto Pct']],
+                                fig_conc.add_trace(go.Bar(
+                                    x=df_analytics['Ticker'],
+                                    y=df_analytics['Peso Renta Pct'],
+                                    name='% de tu Renta Total (Dividendos)',
+                                    marker_color='#00d4ff',
+                                    text=[fmt_es(x, 1, sufijo="%") for x in df_analytics['Peso Renta Pct']],
                                     textposition='auto'
                                 ))
-                                fig_ret_pct.update_layout(
+                                fig_conc.update_layout(
                                     barmode='group',
                                     template='plotly_dark',
                                     height=340,
-                                    margin=dict(l=0, r=0, t=10, b=10),
+                                    margin=dict(l=0, r=10, t=10, b=10),
                                     paper_bgcolor='rgba(0,0,0,0)',
                                     plot_bgcolor='rgba(0,0,0,0)',
                                     legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
-                                    yaxis=dict(title="Rentabilidad sobre Coste (%)")
+                                    yaxis=dict(title="Porcentaje (%)")
                                 )
-                                st.plotly_chart(fig_ret_pct, use_container_width=True)
+                                st.plotly_chart(fig_conc, use_container_width=True)
+
+                            # Proyección Compuesta Bola de Nieve a 10 Años
+                            st.divider()
+                            st.markdown("#### 🔮 Proyección a 10 Años: Efecto Bola de Nieve (Sin Aportar Más Capital)")
+                            dgr_medio_cartera = float(np.average(
+                                [r['DGR5'] for r in resultados_tabla],
+                                weights=[r['Renta Anual Proyectada Neto'] for r in resultados_tabla]
+                            )) if total_forward_div_neto_eur > 0 else 6.0
+
+                            años_futuros = list(range(1, 11))
+                            año_base = datetime.now().year
+                            labels_futuros = [str(año_base + y) for y in años_futuros]
+
+                            renta_proy_conservadora = [total_forward_div_neto_eur * ((1 + 0.04) ** y) for y in años_futuros]
+                            renta_proy_cartera = [total_forward_div_neto_eur * ((1 + (dgr_medio_cartera/100)) ** y) for y in años_futuros]
+                            renta_proy_fuerte = [total_forward_div_neto_eur * ((1 + 0.09) ** y) for y in años_futuros]
+
+                            fig_snow = go.Figure()
+                            fig_snow.add_trace(go.Bar(
+                                x=labels_futuros,
+                                y=renta_proy_cartera,
+                                name=f'Ritmo de tu Cartera (DGR: {dgr_medio_cartera:.1f}%)',
+                                marker_color='#21c354',
+                                text=[fmt_es(val, 0, sufijo=" €") for val in renta_proy_cartera],
+                                textposition='auto'
+                            ))
+                            fig_snow.add_trace(go.Scatter(
+                                x=labels_futuros,
+                                y=renta_proy_conservadora,
+                                mode='lines+markers',
+                                name='Escenario Conservador (+4%)',
+                                line=dict(color='#ff9800', width=2, dash='dot')
+                            ))
+                            fig_snow.add_trace(go.Scatter(
+                                x=labels_futuros,
+                                y=renta_proy_fuerte,
+                                mode='lines+markers',
+                                name='Escenario Alto (+9%)',
+                                line=dict(color='#00d4ff', width=2, dash='dash')
+                            ))
+                            fig_snow.update_layout(
+                                template='plotly_dark',
+                                height=350,
+                                margin=dict(l=0, r=0, t=10, b=10),
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+                                yaxis=dict(title="Renta Pasiva Neta / Año (€)")
+                            )
+                            st.plotly_chart(fig_snow, use_container_width=True)
 
                             # ==========================================
                             # 3. EVOLUCIÓN PATRIMONIAL ADAPTADA A LA AÑADA
@@ -560,7 +634,7 @@ if df_ops is not None and not df_ops.empty:
                             # 4. TABLA DETALLADA DE POSICIONES
                             # ==========================================
                             st.divider()
-                            st.markdown("#### 📋 Desglose Detallado de Posiciones (Bruto y Neto)")
+                            st.markdown("#### 📋 Desglose Detallado de Posiciones")
                             
                             df_pos_sorted = pd.DataFrame(resultados_tabla).sort_values(by="Total Neto EUR", ascending=False)
 
@@ -576,16 +650,13 @@ if df_ops is not None and not df_ops.empty:
                                     "Valor (€)": fmt_es(r['Valor EUR'], 2, sufijo=" €"),
                                     "Plusvalía (€)": fmt_es(r['Plusvalia EUR'], 2, signo=True, sufijo=" €"),
                                     "Plusvalía (%)": fmt_es(r['Rent Plusvalia Pct'], 2, signo=True, sufijo="%"),
-                                    "Divs Brutos (€)": fmt_es(r['Divs Gross EUR'], 2, sufijo=" €"),
-                                    "Divs Netos (€)": fmt_es(r['Divs Net EUR'], 2, sufijo=" €"),
-                                    "Ret. Total Bruto (€)": fmt_es(r['Total Bruto EUR'], 2, signo=True, sufijo=" €"),
+                                    "Divs Cobrados (€)": fmt_es(r['Divs Net EUR'], 2, sufijo=" €"),
                                     "Ret. Total Neto (€)": fmt_es(r['Total Neto EUR'], 2, signo=True, sufijo=" €"),
-                                    "Ret. Bruto (%)": fmt_es(r['Rent Tot Bruto Pct'], 2, signo=True, sufijo="%"),
-                                    "Ret. Neto (%)": fmt_es(r['Rent Tot Neto Pct'], 2, signo=True, sufijo="%"),
-                                    "YoC Bruto": fmt_es(r['YoC Bruto'], 2, sufijo="%"),
-                                    "YoC Neto": fmt_es(r['YoC Neto'], 2, sufijo="%"),
-                                    "Yield Act. Bruto": fmt_es(r['Yield Act Bruto'], 2, sufijo="%"),
-                                    "Yield Act. Neto": fmt_es(r['Yield Act Neto'], 2, sufijo="%")
+                                    "Ret. Total Neto (%)": fmt_es(r['Rent Tot Neto Pct'], 2, signo=True, sufijo="%"),
+                                    "YoC Neto (%)": fmt_es(r['YoC Neto'], 2, sufijo="%"),
+                                    "Yield Act. Neto (%)": fmt_es(r['Yield Act Neto'], 2, sufijo="%"),
+                                    "Peso Cap. (%)": fmt_es(r['Peso Capital Pct'], 1, sufijo="%"),
+                                    "Peso Renta (%)": fmt_es(r['Peso Renta Pct'], 1, sufijo="%")
                                 })
 
                             df_disp = pd.DataFrame(rows_display)
@@ -598,7 +669,7 @@ if df_ops is not None and not df_ops.empty:
                                 return ''
 
                             styler = df_disp.style
-                            cols_target = ['Plusvalía (€)', 'Plusvalía (%)', 'Ret. Total Bruto (€)', 'Ret. Total Neto (€)', 'Ret. Bruto (%)', 'Ret. Neto (%)']
+                            cols_target = ['Plusvalía (€)', 'Plusvalía (%)', 'Ret. Total Neto (€)', 'Ret. Total Neto (%)']
                             if hasattr(styler, 'map'):
                                 styler = styler.map(estilo_positivo_negativo, subset=cols_target)
                             else:
@@ -718,5 +789,20 @@ if df_ops is not None and not df_ops.empty:
                                 fig_y.add_trace(go.Scatter(x=tot_pat_y.index, y=tot_pat_y.values, mode='lines', line=dict(color='#e040fb', width=2.5), name='Patrimonio Total'))
                                 fig_y.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=380, hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5))
                                 st.plotly_chart(fig_y, use_container_width=True)
+
+                                st.markdown(f"#### 📊 Cobros Mensuales en {año_radio}")
+                                df_d_y = pd.DataFrame({'Fecha': dd_y.index, 'Dividendo': dd_y.values})
+                                df_d_y = df_d_y[df_d_y['Dividendo'] > 0]
+                                if not df_d_y.empty:
+                                    df_d_y['Mes'] = df_d_y['Fecha'].dt.month
+                                    agrup_m = df_d_y.groupby('Mes')['Dividendo'].sum()
+                                    y_vals = [agrup_m.get(m, 0.0) for m in range(1, 13)]
+                                    text_vals = [fmt_es(v, 2, sufijo=" €") if v > 0 else "" for v in y_vals]
+
+                                    fig_d = go.Figure(go.Bar(x=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'], y=y_vals, marker_color='#00d4ff', text=text_vals, textposition='auto'))
+                                    fig_d.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=0), height=300, yaxis_title="Dividendos Netos (€)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                                    st.plotly_chart(fig_d, use_container_width=True)
+                                else:
+                                    st.info(f"No se cobraron dividendos en {año_radio}.")
     except Exception as e:
         st.error(f"No se pudo procesar la cartera. Detalle: {e}")
