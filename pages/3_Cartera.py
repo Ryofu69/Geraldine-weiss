@@ -219,7 +219,10 @@ if df_ops is not None and not df_ops.empty:
                                     else:
                                         divs_reales = tk.dividends
                                         if not divs_reales.empty:
-                                            divs_reales.index = divs_reales.index.tz_localize(None).normalize()
+                                            try:
+                                                divs_reales.index = divs_reales.index.tz_localize(None).normalize()
+                                            except Exception:
+                                                pass
                                             divs_reales = divs_reales[~divs_reales.index.duplicated(keep='last')]
                                             divs_finales = divs_reales[divs_reales.index >= min_date_global]
                                         else:
@@ -241,9 +244,21 @@ if df_ops is not None and not df_ops.empty:
                                         f_div = f_div / 100.0
                                     dict_forward_div[t] = f_div
 
+                                    # ============================================================
+                                    # CÁLCULO DGR PURO Y MESES DE PAGO (SIN CONFLICTO DE TIMEZONE)
+                                    # ============================================================
                                     div_hist_full = tk.dividends
                                     if not div_hist_full.empty:
-                                        div_recientes = div_hist_full[div_hist_full.index >= (pd.Timestamp.now() - pd.DateOffset(years=2))]
+                                        try:
+                                            div_hist_full.index = div_hist_full.index.tz_localize(None).normalize()
+                                        except Exception:
+                                            pass
+                                        div_hist_full = div_hist_full[~div_hist_full.index.duplicated(keep='last')]
+
+                                    # Detección de meses de pago
+                                    if not div_hist_full.empty:
+                                        cutoff_date = pd.Timestamp.now().normalize() - pd.DateOffset(years=2)
+                                        div_recientes = div_hist_full[div_hist_full.index >= cutoff_date]
                                         if div_recientes.empty:
                                             div_recientes = div_hist_full.tail(4)
                                         meses_detectados = sorted(div_recientes.index.month.unique().tolist())
@@ -251,6 +266,7 @@ if df_ops is not None and not df_ops.empty:
                                     else:
                                         dict_meses_pago[t] = [1, 7]
 
+                                    # Cálculo de DGR (mínimo 5A y 12A)
                                     dgr_calc = 0.0
                                     if not div_hist_full.empty and len(div_hist_full) >= 2:
                                         divs_anuales = div_hist_full.groupby(div_hist_full.index.year).sum()
@@ -1048,7 +1064,7 @@ if df_ops is not None and not df_ops.empty:
 
                                 base_pct = val_ini + aportaciones if (val_ini + aportaciones) > 0 else 1.0
                                 
-                                # CÁLCULO SOLICITADO: TOTAL CIERRE = PRECIO FINAL MERCADO + DIVIDENDOS NETOS
+                                # TOTAL CIERRE: VALOR MERCADO FINAL + DIVIDENDOS NETOS COBRADOS
                                 total_cierre_anual = val_fin + div_tot
 
                                 # ==========================================
