@@ -153,7 +153,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
                         shares_yearly = sy
                         acc_ini = shares_yearly.iloc[-(años_analisis + 1)] if len(shares_yearly) >= (años_analisis + 1) else shares_yearly.iloc[0]
                         acc_fin = shares_yearly.iloc[-1]
-                        if acc_ini > 0 and (acc_fin / acc_ini) > 0.10:
+                        if acc_ini > 0 and (acc_fin / acc_ini) > 0.10: 
                             variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
             except Exception: pass
 
@@ -272,8 +272,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
         sym_m = "€" if currency == "EUR" else ("£" if currency in ["GBP", "GBp"] else "$")
 
         return {
-            "Estado": estado,
             "Ticker": ticker_symbol.strip().upper(),
+            "Estado": estado,
             "Calidad": f"{score_calidad:.1f}/10",
             "Valoración": f"{score_val:.1f}/10",
             "Chowder": f"{chowder_number:.1f} (Obj: {chowder_target:.0f})" if chowder_number != -999.0 else "N/D",
@@ -319,7 +319,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct):
 # ==========================================
 st.title("📡 Radar Watchlist DGI — Geraldine Weiss Moderno")
 st.markdown("La tabla prioriza oportunidades ordenando primero las empresas con mayor descuento respecto a su **Suelo Fundamental**.")
-st.markdown("> *Puntuaciones: **Calidad (0-10)** evalúa la solvencia por caja, resiliencia y retribución. **Valoración (0-10)** mide el margen de seguridad vía Canal Weiss, múltiplos P/FCF y Chowder. P/B queda como dato informativo secundario.*")
+st.markdown("> *Nota: La columna **Ticker** permanece fija a la izquierda al desplazarte en la pantalla para poder seguir las métricas sin perder de vista la empresa.*")
 
 tickers_masivos = st.text_area("Lista de Tickers (separados por comas):", "MKC, VIS.MC, MCD, GIS, WKL.AS, PEP, JNJ, HD")
 
@@ -345,6 +345,9 @@ if st.button("🚀 Escanear Watchlist", use_container_width=True):
         
         if resultados:
             df_res = pd.DataFrame(resultados).sort_values(by="_Dist_Suelo")
+            
+            # Fijar el Ticker como índice para bloquearlo en la vista móvil
+            df_res = df_res.set_index("Ticker")
             
             def color_row(row):
                 styles = [''] * len(row)
@@ -423,8 +426,9 @@ if st.button("🚀 Escanear Watchlist", use_container_width=True):
             styled_df = df_res.style.apply(color_row, axis=1)
             st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True)
             
+            # Exportar manteniendo el Ticker en la primera columna
             df_export = df_res[columnas_visibles]
-            csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
+            csv = df_export.to_csv(index=True, sep=';', decimal=',').encode('utf-8')
             st.download_button(
                 label="💾 Descargar CSV para Google Sheets",
                 data=csv,
