@@ -21,7 +21,6 @@ def limpiar_numero_europeo(val):
     if pd.isna(val) or val is None:
         return 0.0
     val_str = str(val).strip().replace('€', '').replace('$', '').replace('£', '').replace(' ', '')
-    # Si contiene punto de miles y coma decimal (ej: 1.250,50)
     if '.' in val_str and ',' in val_str:
         val_str = val_str.replace('.', '').replace(',', '.')
     elif ',' in val_str:
@@ -33,15 +32,18 @@ def limpiar_numero_europeo(val):
 
 def procesar_texto_o_archivo(contenido):
     try:
+        if not contenido or not str(contenido).strip():
+            return None, None
+
         if isinstance(contenido, str):
             stream = io.StringIO(contenido.strip())
         else:
             stream = io.BytesIO(contenido.read())
 
-        # Lee detectando automáticamente comas, puntos y comas o tabuladores de Excel
         df_raw = pd.read_csv(stream, sep=None, engine='python', dtype=str)
-        
-        # Mapeo flexible de columnas para evitar fallos de mayúsculas/acentos
+        if df_raw.empty:
+            return None, None
+
         column_map = {}
         for col in df_raw.columns:
             c_norm = col.strip().lower()
@@ -61,28 +63,30 @@ def procesar_texto_o_archivo(contenido):
         df['Ticker'] = df['Ticker'].astype(str).str.strip().str.upper()
         df['Operacion'] = df['Operacion'].astype(str).str.strip().str.capitalize()
         
-        # Conversión a números limpios
         df['Acciones'] = df['Acciones'].apply(limpiar_numero_europeo)
         df['Precio'] = df['Precio'].apply(limpiar_numero_europeo)
         df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
         
-        df = df.dropna(subset=['Fecha'])
+        df = df.dropna(subset=['Fecha', 'Ticker'])
         df = df[df['Acciones'] > 0]
         return df, None
     except Exception as e:
         return None, f"Error al procesar el formato: {e}"
 
 # ==========================================
-# GESTIÓN PERSISTENTE DE CARTERA
+# GESTIÓN PERSISTENTE DE CARTERA (PLANTILLA NEUTRA)
 # ==========================================
 def cargar_cartera_persistente():
     if os.path.exists(ARCHIVO_CARTERA):
         try:
             with open(ARCHIVO_CARTERA, "r", encoding="utf-8") as f:
-                return f.read().strip()
+                contenido = f.read().strip()
+                if contenido:
+                    return contenido
         except Exception:
             pass
-    return "Fecha,Ticker,Operacion,Acciones,Precio\n29/03/2016,REP.MC,Compra,764,13.0704\n11/04/2025,REP.MC,Compra,87,9.58"
+    # Plantilla vacía sin ninguna posición real
+    return "Fecha,Ticker,Operacion,Acciones,Precio\n"
 
 def guardar_cartera_persistente(texto):
     try:
@@ -114,7 +118,6 @@ def obtener_tasas_fx():
 # ==========================================
 st.title("💼 Control y Rendimiento de Cartera DGI")
 
-# Inyección CSS
 st.markdown("""
 <style>
 .card-dgi {
@@ -130,17 +133,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-with st.expander("📁 Importación y Persistencia de Operaciones (`cartera.csv`)", expanded=False):
+with st.expander("📁 Importación y Gestión de Operaciones", expanded=True):
     modo_carga = st.radio("Método de entrada:", ["📝 Pegar / Editar Texto", "📂 Subir Archivo CSV o Excel"], horizontal=True)
     contenido_texto = cargar_cartera_persistente()
     
     if modo_carga == "📝 Pegar / Editar Texto":
-        raw_input = st.text_area("Pega tus filas con comas, puntos o tabuladores de Excel:", value=contenido_texto, height=140)
+        raw_input = st.text_area("Pega tus operaciones con comas, puntos o tabuladores:", value=contenido_texto, height=140)
         col_g1, _ = st.columns([1, 4])
         with col_g1:
-            if st.button("💾 Guardar Cartera en Servidor"):
+            if st.button("💾 Guardar Localmente"):
                 if guardar_cartera_persistente(raw_input):
-                    st.success("Cartera guardada correctamente en `cartera.csv`.")
+                    st.success("Guardado localmente.")
                 else:
                     st.error("Error al guardar.")
         df_operaciones, err = procesar_texto_o_archivo(raw_input)
@@ -154,7 +157,7 @@ with st.expander("📁 Importación y Persistencia de Operaciones (`cartera.csv`
                     df_raw.to_csv(csv_buf, index=False)
                     df_operaciones, err = procesar_texto_o_archivo(csv_buf.getvalue())
                 except Exception as e:
-                    df_operaciones, err = None, f"Error al leer Excel: {e}. Guarda como CSV si persiste."
+                    df_operaciones, err = None, f"Error al leer Excel: {e}."
             else:
                 df_operaciones, err = procesar_texto_o_archivo(uploaded_file)
         else:
@@ -165,11 +168,12 @@ net_mult = 1.0 - (retencion_pct / 100.0)
 
 if err:
     st.error(f"⚠️ {err}")
-elif df_operaciones is not None and not df_operaciones.empty:
+elif df_operaciones is None or df_operaciones.empty:
+    st.info("ℹ️ No hay operaciones registradas aún. Pega tus transacciones o sube un archivo para visualizar la cartera.")
+else:
     with st.spinner("Conectando con mercados y analizando flujo de dividendos..."):
         tasas_fx = obtener_tasas_fx()
         
-        # 1. Consolidación de compras y ventas
         tickers_unicos = df_operaciones['Ticker'].unique()
         cartera_consolidada = []
         
@@ -201,7 +205,6 @@ elif df_operaciones is not None and not df_operaciones.empty:
         df_pos = pd.DataFrame(cartera_consolidada)
 
         if not df_pos.empty:
-            # 2. Descarga de fundamentales en vivo
             datos_mercado = []
             for t in df_pos['Ticker']:
                 try:
@@ -218,7 +221,6 @@ elif df_operaciones is not None and not df_operaciones.empty:
                         if not divs.empty:
                             div_rate_orig = divs.tail(4).sum() if len(divs) >= 4 else divs.iloc[-1] * 4
 
-                    payout_fcf = info.get('payoutRatio', 0.0) * 100.0
                     datos_mercado.append({
                         'Ticker': t,
                         'Moneda': curr,
@@ -234,7 +236,6 @@ elif df_operaciones is not None and not df_operaciones.empty:
             df_mkt = pd.DataFrame(datos_mercado)
             df_final = pd.merge(df_pos, df_mkt, on='Ticker')
 
-            # Conversión a Euros
             def fx(moneda): return tasas_fx.get(moneda, 1.0)
             
             df_final['FX_Rate'] = df_final['Moneda'].apply(fx)
@@ -245,17 +246,14 @@ elif df_operaciones is not None and not df_operaciones.empty:
             df_final['Plusvalia_EUR'] = df_final['Valor_Actual_EUR'] - df_final['Coste_EUR']
             df_final['Plusvalia_Pct'] = np.where(df_final['Coste_EUR'] > 0, (df_final['Plusvalia_EUR'] / df_final['Coste_EUR']) * 100.0, 0.0)
 
-            # Renta y Yields DGI
             df_final['Div_Anual_EUR'] = df_final['Div_Anual_Orig'] * df_final['FX_Rate']
             df_final['Renta_Bruta_Anual_EUR'] = df_final['Acciones'] * df_final['Div_Anual_EUR']
             df_final['Renta_Neta_Anual_EUR'] = df_final['Renta_Bruta_Anual_EUR'] * net_mult
             
-            # YoC (Yield on Cost) vs Yield Actual
             df_final['YoC_Bruto'] = np.where(df_final['PMC_EUR'] > 0, (df_final['Div_Anual_EUR'] / df_final['PMC_EUR']) * 100.0, 0.0)
             df_final['YoC_Neto'] = df_final['YoC_Bruto'] * net_mult
             df_final['Yield_Actual_Bruto'] = np.where(df_final['Precio_EUR'] > 0, (df_final['Div_Anual_EUR'] / df_final['Precio_EUR']) * 100.0, 0.0)
 
-            # Pesos de Cartera
             total_valor_cartera = df_final['Valor_Actual_EUR'].sum()
             total_coste_cartera = df_final['Coste_EUR'].sum()
             total_renta_neta_anual = df_final['Renta_Neta_Anual_EUR'].sum()
@@ -268,9 +266,6 @@ elif df_operaciones is not None and not df_operaciones.empty:
             plusvalia_global_eur = total_valor_cartera - total_coste_cartera
             plusvalia_global_pct = (plusvalia_global_eur / total_coste_cartera * 100.0) if total_coste_cartera > 0 else 0.0
 
-            # ==========================================
-            # PANEL DE CONTROL EJECUTIVO (KPIs)
-            # ==========================================
             st.divider()
             col_k1, col_k2, col_k3, col_k4 = st.columns(4)
             
@@ -315,24 +310,18 @@ elif df_operaciones is not None and not df_operaciones.empty:
                 </div>
                 """, unsafe_allow_html=True)
 
-            # ==========================================
-            # SEMÁFORO DE CONCENTRACIÓN Y RIESGO DGI
-            # ==========================================
             max_pos_cap = df_final.loc[df_final['Peso_Capital_Pct'].idxmax()]
             max_pos_div = df_final.loc[df_final['Peso_Renta_Pct'].idxmax()]
             
             avisos_riesgo = []
             if max_pos_cap['Peso_Capital_Pct'] > 5.0:
-                avisos_riesgo.append(f"**{max_pos_cap['Ticker']}** supera el límite prudencial de diversificación con un **{max_pos_cap['Peso_Capital_Pct']:.1f}% del capital**.")
+                avisos_riesgo.append(f"**{max_pos_cap['Ticker']}** supera el límite prudencial con un **{max_pos_cap['Peso_Capital_Pct']:.1f}% del capital**.")
             if max_pos_div['Peso_Renta_Pct'] > 10.0:
-                avisos_riesgo.append(f"Alta dependencia de cobro: **{max_pos_div['Ticker']}** genera el **{max_pos_div['Peso_Renta_Pct']:.1f}% de tus dividendos netos totales**.")
+                avisos_riesgo.append(f"Alta dependencia: **{max_pos_div['Ticker']}** genera el **{max_pos_div['Peso_Renta_Pct']:.1f}% de tus dividendos netos**.")
 
             if avisos_riesgo:
                 st.warning("⚠️ **Control de Concentración DGI:** " + " | ".join(avisos_riesgo))
 
-            # ==========================================
-            # GRÁFICOS: DIVERSIFICACIÓN Y YIELD ON COST
-            # ==========================================
             st.divider()
             col_g1, col_g2 = st.columns(2)
             
@@ -350,7 +339,6 @@ elif df_operaciones is not None and not df_operaciones.empty:
                     showlegend=False
                 )
                 st.plotly_chart(fig_don, use_container_width=True)
-                st.markdown("<p style='font-size:0.8rem; color:#aaa;'>Muestra la proporción de qué empresas pagan tu flujo de caja real anual.</p>", unsafe_allow_html=True)
 
             with col_g2:
                 st.markdown("#### 🚀 Yield on Cost (YoC) vs Yield Actual")
@@ -369,11 +357,7 @@ elif df_operaciones is not None and not df_operaciones.empty:
                     legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
                 )
                 st.plotly_chart(fig_bar, use_container_width=True)
-                st.markdown("<p style='font-size:0.8rem; color:#aaa;'>La barra amarilla por encima de la azul indica que el dividendo ha crecido respecto al precio pagado.</p>", unsafe_allow_html=True)
 
-            # ==========================================
-            # TABLA DETALLADA DE POSICIONES
-            # ==========================================
             st.divider()
             st.subheader("📋 Desglose Individual de Posiciones")
 
@@ -401,7 +385,6 @@ elif df_operaciones is not None and not df_operaciones.empty:
                             styles[idx] = 'color: #ff4b4b; font-weight: bold;'
                 return styles
 
-            # Formateo de visualización
             df_display = df_tabla.copy()
             df_display['Acciones'] = df_display['Acciones'].apply(lambda x: f"{x:,.2f}".rstrip('0').rstrip('.'))
             df_display['PMC_EUR'] = df_display['PMC_EUR'].apply(lambda x: f"{x:.2f} €")
@@ -421,7 +404,6 @@ elif df_operaciones is not None and not df_operaciones.empty:
                 use_container_width=True
             )
 
-            # Botón de Descarga
             csv_export = df_tabla.to_csv(index=False, sep=';', decimal=',').encode('utf-8')
             st.download_button(
                 label="💾 Descargar Resumen de Cartera en CSV",
