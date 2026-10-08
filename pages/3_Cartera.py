@@ -134,7 +134,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-with st.expander("📁 Importación y Gestión de Operaciones", expanded=True):
+with st.expander("📁 Importación y Gestión de Operaciones", expanded=False):
     modo_carga = st.radio("Método de entrada:", ["📝 Pegar / Editar Texto", "📂 Subir Archivo CSV o Excel"], horizontal=True)
     contenido_texto = cargar_cartera_persistente()
     
@@ -188,7 +188,7 @@ else:
     with col_f2:
         empresa_filtro = st.selectbox("🏢 Selecciona Empresa a Inspeccionar:", ["Todas las Empresas"] + tickers_todos, index=0)
 
-    # Filtrar operaciones
+    # Filtrar operaciones según selección
     df_filtradas = df_operaciones.copy()
     if año_filtro != "Todo el Historial":
         df_filtradas = df_filtradas[df_filtradas['Año'] == int(año_filtro)]
@@ -196,7 +196,7 @@ else:
         df_filtradas = df_filtradas[df_filtradas['Ticker'] == empresa_filtro]
 
     if df_filtradas.empty:
-        st.warning(f"No se encontraron operaciones activas para el filtro seleccionado ({año_filtro} | {empresa_filtro}).")
+        st.warning(f"No se encontraron operaciones para el filtro seleccionado ({año_filtro} | {empresa_filtro}).")
     else:
         with st.spinner("Descargando precios actuales y dividendos..."):
             tasas_fx = obtener_tasas_fx()
@@ -276,9 +276,11 @@ else:
                 df_final['Renta_Bruta_Anual_EUR'] = df_final['Acciones'] * df_final['Div_Anual_EUR']
                 df_final['Renta_Neta_Anual_EUR'] = df_final['Renta_Bruta_Anual_EUR'] * net_mult
                 
+                # Rendimientos Brutos y Netos
                 df_final['YoC_Bruto'] = np.where(df_final['PMC_EUR'] > 0, (df_final['Div_Anual_EUR'] / df_final['PMC_EUR']) * 100.0, 0.0)
                 df_final['YoC_Neto'] = df_final['YoC_Bruto'] * net_mult
                 df_final['Yield_Actual_Bruto'] = np.where(df_final['Precio_EUR'] > 0, (df_final['Div_Anual_EUR'] / df_final['Precio_EUR']) * 100.0, 0.0)
+                df_final['Yield_Actual_Neto'] = df_final['Yield_Actual_Bruto'] * net_mult
 
                 total_valor = df_final['Valor_Actual_EUR'].sum()
                 total_coste = df_final['Coste_EUR'].sum()
@@ -288,25 +290,29 @@ else:
                 df_final['Peso_Capital_Pct'] = (df_final['Valor_Actual_EUR'] / total_valor) * 100.0 if total_valor > 0 else 0.0
                 df_final['Peso_Renta_Pct'] = (df_final['Renta_Neta_Anual_EUR'] / total_renta_neta) * 100.0 if total_renta_neta > 0 else 0.0
 
+                yoc_medio_bruto = (total_renta_bruta / total_coste * 100.0) if total_coste > 0 else 0.0
                 yoc_medio_neto = (total_renta_neta / total_coste * 100.0) if total_coste > 0 else 0.0
+                yield_act_medio_bruto = (total_renta_bruta / total_valor * 100.0) if total_valor > 0 else 0.0
+                yield_act_medio_neto = (total_renta_neta / total_valor * 100.0) if total_valor > 0 else 0.0
+
                 plusvalia_eur = total_valor - total_coste
                 plusvalia_pct = (plusvalia_eur / total_coste * 100.0) if total_coste > 0 else 0.0
 
                 # ==========================================
                 # KPIS DINÁMICOS
                 # ==========================================
-                subtitulo = f"Resultados para: **{año_filtro}**" if año_filtro != "Todo el Historial" else "Resultados de **Todo el Historial**"
+                subtitulo = f"Resultados para Añada: **{año_filtro}**" if año_filtro != "Todo el Historial" else "Resultados de **Todo el Historial**"
                 if empresa_filtro != "Todas las Empresas":
                     subtitulo += f" | Empresa: **{empresa_filtro}**"
                 st.caption(subtitulo)
 
-                col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+                col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5)
                 with col_k1:
                     st.markdown(f"""
                     <div class="card-dgi">
-                        <span style="color: #aaa; font-size: 0.85rem;">💰 Valor Actual Seleccionado</span>
-                        <div style="font-size: 1.8rem; font-weight: bold; color: #00d4ff;">{total_valor:,.2f} €</div>
-                        <span style="font-size: 0.85rem; color: #888;">Coste invertido: {total_coste:,.2f} €</span>
+                        <span style="color: #aaa; font-size: 0.85rem;">💰 Valor Seleccionado</span>
+                        <div style="font-size: 1.6rem; font-weight: bold; color: #00d4ff;">{total_valor:,.2f} €</div>
+                        <span style="font-size: 0.8rem; color: #888;">Coste: {total_coste:,.2f} €</span>
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -318,8 +324,8 @@ else:
                             <span style="color: #aaa; font-size: 0.85rem;">📈 Plusvalía</span>
                             <span class="{b_color_pl}">{plusvalia_pct:+.2f}%</span>
                         </div>
-                        <div style="font-size: 1.8rem; font-weight: bold;">{plusvalia_eur:+,.2f} €</div>
-                        <span style="font-size: 0.85rem; color: #888;">Retorno por revalorización</span>
+                        <div style="font-size: 1.6rem; font-weight: bold;">{plusvalia_eur:+,.2f} €</div>
+                        <span style="font-size: 0.8rem; color: #888;">Revalorización neta</span>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -327,87 +333,211 @@ else:
                     renta_mes = total_renta_neta / 12.0
                     st.markdown(f"""
                     <div class="card-dgi">
-                        <span style="color: #aaa; font-size: 0.85rem;">💵 Renta Pasiva Neta / Año</span>
-                        <div style="font-size: 1.8rem; font-weight: bold; color: #21c354;">{total_renta_neta:,.2f} €</div>
-                        <span class="badge-verde" style="font-size: 0.8rem;">~{renta_mes:,.2f} € / mes</span>
+                        <span style="color: #aaa; font-size: 0.85rem;">💵 Renta Anual</span>
+                        <div style="font-size: 1.6rem; font-weight: bold; color: #21c354;">{total_renta_neta:,.2f} € <span style="font-size:0.8rem; color:#aaa;">Netos</span></div>
+                        <span style="font-size: 0.8rem; color: #888;">Bruto: {total_renta_bruta:,.2f} € (~{renta_mes:,.2f}€/m)</span>
                     </div>
                     """, unsafe_allow_html=True)
 
                 with col_k4:
                     st.markdown(f"""
                     <div class="card-dgi">
-                        <span style="color: #aaa; font-size: 0.85rem;">⏳ Yield on Cost (YoC) Neto</span>
-                        <div style="font-size: 1.8rem; font-weight: bold; color: #faca2b;">{yoc_medio_neto:.2f}%</div>
-                        <span style="font-size: 0.85rem; color: #888;">Yield s/ Coste Bruto: {(total_renta_bruta/total_coste)*100:.2f}%</span>
+                        <span style="color: #aaa; font-size: 0.85rem;">⏳ Yield on Cost (YoC)</span>
+                        <div style="font-size: 1.6rem; font-weight: bold; color: #faca2b;">{yoc_medio_neto:.2f}% <span style="font-size:0.8rem; color:#aaa;">Neto</span></div>
+                        <span style="font-size: 0.8rem; color: #888;">YoC Bruto: <b>{yoc_medio_bruto:.2f}%</b></span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                with col_k5:
+                    st.markdown(f"""
+                    <div class="card-dgi">
+                        <span style="color: #aaa; font-size: 0.85rem;">📊 Yield Mercado Hoy</span>
+                        <div style="font-size: 1.6rem; font-weight: bold; color: #00d4ff;">{yield_act_medio_neto:.2f}% <span style="font-size:0.8rem; color:#aaa;">Neto</span></div>
+                        <span style="font-size: 0.8rem; color: #888;">Yield Bruto: <b>{yield_act_medio_bruto:.2f}%</b></span>
                     </div>
                     """, unsafe_allow_html=True)
 
                 # ==========================================
-                # ANÁLISIS DE AÑADAS (GRÁFICO HISTÓRICO)
+                # SECCIÓN 1: GRÁFICOS CUANDO SE ELIGE UN AÑO
                 # ==========================================
-                if año_filtro == "Todo el Historial" and empresa_filtro == "Todas las Empresas" and len(años_disponibles) > 1:
+                if año_filtro != "Todo el Historial":
                     st.divider()
-                    st.subheader("📆 Rendimiento y Yield on Cost por Año de Compra (Añadas)")
-                    
-                    añadas_data = []
-                    for a in sorted(años_disponibles):
-                        df_a = df_operaciones[df_operaciones['Año'] == a]
-                        c_añada = 0.0
-                        v_añada = 0.0
-                        r_neta_añada = 0.0
-                        
-                        for t in df_a['Ticker'].unique():
-                            sub = df_a[df_a['Ticker'] == t]
-                            acc_a = sub[sub['Operacion'].str.lower() == 'compra']['Acciones'].sum() - sub[sub['Operacion'].str.lower() == 'venta']['Acciones'].sum()
-                            if acc_a > 0:
-                                row_match = df_final[df_final['Ticker'] == t]
-                                if not row_match.empty:
-                                    pmc_e = row_match['PMC_EUR'].iloc[0]
-                                    pr_e = row_match['Precio_EUR'].iloc[0]
-                                    div_e = row_match['Div_Anual_EUR'].iloc[0]
-                                    
-                                    c_añada += acc_a * pmc_e
-                                    v_añada += acc_a * pr_e
-                                    r_neta_añada += acc_a * div_e * net_mult
-                        
-                        if c_añada > 0:
-                            yoc_añada = (r_neta_añada / c_añada) * 100.0
-                            plusv_añada = ((v_añada - c_añada) / c_añada) * 100.0
-                            añadas_data.append({
-                                'Año': str(a),
-                                'Invertido_EUR': c_añada,
-                                'Valor_Hoy_EUR': v_añada,
-                                'YoC_Neto': yoc_añada,
-                                'Plusvalia_Pct': plusv_añada
-                            })
+                    st.subheader(f"📊 Análisis Gráfico de la Añada {año_filtro}")
+                    col_a1, col_a2 = st.columns(2)
 
-                    if añadas_data:
-                        df_añadas = pd.DataFrame(añadas_data)
-                        fig_añadas = go.Figure()
-                        fig_añadas.add_trace(go.Bar(
-                            x=df_añadas['Año'], y=df_añadas['Invertido_EUR'],
-                            name='Coste Invertido (€)', marker_color='#9c27b0'
+                    with col_a1:
+                        st.markdown(f"#### 💰 Coste Invertido vs. Valor Actual Hoy ({año_filtro})")
+                        fig_cap = go.Figure()
+                        fig_cap.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['Coste_EUR'],
+                            name=f'Invertido en {año_filtro} (€)', marker_color='#9c27b0'
                         ))
-                        fig_añadas.add_trace(go.Bar(
-                            x=df_añadas['Año'], y=df_añadas['Valor_Hoy_EUR'],
-                            name='Valor Actual (€)', marker_color='#00d4ff'
+                        fig_cap.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['Valor_Actual_EUR'],
+                            name='Valor Actual Hoy (€)', marker_color='#00d4ff'
                         ))
-                        fig_añadas.add_trace(go.Scatter(
-                            x=df_añadas['Año'], y=df_añadas['YoC_Neto'],
-                            name='YoC Neto Actual (%)', mode='lines+markers+text',
-                            text=[f"{v:.1f}%" for v in df_añadas['YoC_Neto']],
-                            textposition="top center", line=dict(color='#faca2b', width=3),
-                            yaxis='y2'
-                        ))
-                        fig_añadas.update_layout(
+                        fig_cap.update_layout(
                             template='plotly_dark', barmode='group', height=360,
                             margin=dict(l=0, r=0, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                            yaxis=dict(title="Euros (€)"),
-                            yaxis2=dict(title="YoC Neto (%)", overlaying='y', side='right', showgrid=False),
                             legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
                         )
-                        st.plotly_chart(fig_añadas, use_container_width=True)
-                        st.markdown("<p style='font-size:0.8rem; color:#aaa;'>La línea amarilla demuestra el efecto del interés compuesto: las compras de años más antiguos van elevando su Yield on Cost conforme los dividendos crecen año tras año.</p>", unsafe_allow_html=True)
+                        st.plotly_chart(fig_cap, use_container_width=True)
+
+                    with col_a2:
+                        st.markdown("#### 🚀 Rendimientos DGI: YoC vs. Yield Actual (Bruto y Neto)")
+                        fig_y = go.Figure()
+                        fig_y.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['YoC_Bruto'],
+                            name='YoC Bruto', marker_color='#faca2b'
+                        ))
+                        fig_y.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['YoC_Neto'],
+                            name='YoC Neto', marker_color='#ff9800'
+                        ))
+                        fig_y.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['Yield_Actual_Bruto'],
+                            name='Yield Act. Bruto', marker_color='#00d4ff'
+                        ))
+                        fig_y.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['Yield_Actual_Neto'],
+                            name='Yield Act. Neto', marker_color='#0088cc'
+                        ))
+                        fig_y.update_layout(
+                            template='plotly_dark', barmode='group', height=360,
+                            margin=dict(l=0, r=0, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                            yaxis=dict(title="Rendimiento (%)"),
+                            legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="center", x=0.5)
+                        )
+                        st.plotly_chart(fig_y, use_container_width=True)
+
+                # ==========================================
+                # SECCIÓN 2: GRÁFICOS CUANDO SE VE TODO EL HISTORIAL
+                # ==========================================
+                elif año_filtro == "Todo el Historial" and empresa_filtro == "Todas las Empresas":
+                    if len(años_disponibles) > 1:
+                        st.divider()
+                        st.subheader("📆 Rendimiento y Yield on Cost por Año de Compra (Añadas)")
+                        
+                        añadas_data = []
+                        for a in sorted(años_disponibles):
+                            df_a = df_operaciones[df_operaciones['Año'] == a]
+                            c_añada = 0.0
+                            v_añada = 0.0
+                            r_neta_añada = 0.0
+                            r_bruta_añada = 0.0
+                            
+                            for t in df_a['Ticker'].unique():
+                                sub = df_a[df_a['Ticker'] == t]
+                                acc_a = sub[sub['Operacion'].str.lower() == 'compra']['Acciones'].sum() - sub[sub['Operacion'].str.lower() == 'venta']['Acciones'].sum()
+                                if acc_a > 0:
+                                    row_match = df_final[df_final['Ticker'] == t]
+                                    fx_t = row_match['FX_Rate'].iloc[0] if not row_match.empty else 1.0
+                                    
+                                    coste_pos = 0.0
+                                    for _, r_op in sub.iterrows():
+                                        if r_op['Operacion'].lower() == 'compra':
+                                            coste_pos += r_op['Acciones'] * r_op['Precio'] * fx_t
+                                            
+                                    if not row_match.empty:
+                                        pr_e = row_match['Precio_EUR'].iloc[0]
+                                        div_e = row_match['Div_Anual_EUR'].iloc[0]
+                                        
+                                        val_pos = acc_a * pr_e
+                                        r_b_pos = acc_a * div_e
+                                        r_n_pos = r_b_pos * net_mult
+                                        
+                                        c_añada += coste_pos
+                                        v_añada += val_pos
+                                        r_bruta_añada += r_b_pos
+                                        r_neta_añada += r_n_pos
+                            
+                            if c_añada > 0:
+                                yoc_b_añada = (r_bruta_añada / c_añada) * 100.0
+                                yoc_n_añada = (r_neta_añada / c_añada) * 100.0
+                                plusv_añada = ((v_añada - c_añada) / c_añada) * 100.0
+                                añadas_data.append({
+                                    'Año': str(a),
+                                    'Invertido_EUR': c_añada,
+                                    'Valor_Hoy_EUR': v_añada,
+                                    'YoC_Bruto': yoc_b_añada,
+                                    'YoC_Neto': yoc_n_añada,
+                                    'Plusvalia_Pct': plusv_añada
+                                })
+
+                        if añadas_data:
+                            df_añadas = pd.DataFrame(añadas_data)
+                            fig_añadas = go.Figure()
+                            fig_añadas.add_trace(go.Bar(
+                                x=df_añadas['Año'], y=df_añadas['Invertido_EUR'],
+                                name='Coste Invertido (€)', marker_color='#9c27b0'
+                            ))
+                            fig_añadas.add_trace(go.Bar(
+                                x=df_añadas['Año'], y=df_añadas['Valor_Hoy_EUR'],
+                                name='Valor Actual (€)', marker_color='#00d4ff'
+                            ))
+                            fig_añadas.add_trace(go.Scatter(
+                                x=df_añadas['Año'], y=df_añadas['YoC_Bruto'],
+                                name='YoC Bruto (%)', mode='lines+markers',
+                                line=dict(color='#faca2b', width=3),
+                                yaxis='y2'
+                            ))
+                            fig_añadas.add_trace(go.Scatter(
+                                x=df_añadas['Año'], y=df_añadas['YoC_Neto'],
+                                name='YoC Neto (%)', mode='lines+markers+text',
+                                text=[f"{v:.1f}%" for v in df_añadas['YoC_Neto']],
+                                textposition="top center", line=dict(color='#ff9800', width=3, dash='dot'),
+                                yaxis='y2'
+                            ))
+                            fig_añadas.update_layout(
+                                template='plotly_dark', barmode='group', height=360,
+                                margin=dict(l=0, r=0, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                                yaxis=dict(title="Euros (€)"),
+                                yaxis2=dict(title="YoC (%)", overlaying='y', side='right', showgrid=False),
+                                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
+                            )
+                            st.plotly_chart(fig_añadas, use_container_width=True)
+
+                    st.divider()
+                    col_g1, col_g2 = st.columns(2)
+                    with col_g1:
+                        st.markdown("#### 🍩 Distribución de Renta Neta por Empresa")
+                        fig_don = go.Figure()
+                        fig_don.add_trace(go.Pie(
+                            labels=df_final['Ticker'], values=df_final['Renta_Neta_Anual_EUR'],
+                            hole=0.55, textinfo='label+percent'
+                        ))
+                        fig_don.update_layout(
+                            template='plotly_dark', margin=dict(l=0, r=0, t=10, b=10), height=340,
+                            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False
+                        )
+                        st.plotly_chart(fig_don, use_container_width=True)
+
+                    with col_g2:
+                        st.markdown("#### 🚀 YoC vs. Yield Actual (Bruto y Neto) Global")
+                        fig_y_all = go.Figure()
+                        fig_y_all.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['YoC_Bruto'],
+                            name='YoC Bruto', marker_color='#faca2b'
+                        ))
+                        fig_y_all.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['YoC_Neto'],
+                            name='YoC Neto', marker_color='#ff9800'
+                        ))
+                        fig_y_all.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['Yield_Actual_Bruto'],
+                            name='Yield Act. Bruto', marker_color='#00d4ff'
+                        ))
+                        fig_y_all.add_trace(go.Bar(
+                            x=df_final['Ticker'], y=df_final['Yield_Actual_Neto'],
+                            name='Yield Act. Neto', marker_color='#0088cc'
+                        ))
+                        fig_y_all.update_layout(
+                            template='plotly_dark', barmode='group', height=340,
+                            margin=dict(l=0, r=0, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                            yaxis=dict(title="Rendimiento (%)"),
+                            legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="center", x=0.5)
+                        )
+                        st.plotly_chart(fig_y_all, use_container_width=True)
 
                 # ==========================================
                 # HISTORIAL DE OPERACIONES FILTRADAS
@@ -420,15 +550,17 @@ else:
                     st.dataframe(df_ops_vista, use_container_width=True)
 
                 # ==========================================
-                # TABLA DE POSICIONES ACTIVAS
+                # TABLA DETALLADA DE POSICIONES
                 # ==========================================
                 st.divider()
-                st.subheader("📋 Desglose de Posiciones de la Selección")
+                st.subheader("📋 Desglose Detallado de Posiciones")
 
                 df_tabla = df_final[[
                     'Ticker', 'Nombre', 'Acciones', 'PMC_EUR', 'Precio_EUR',
                     'Coste_EUR', 'Valor_Actual_EUR', 'Plusvalia_Pct',
-                    'Renta_Neta_Anual_EUR', 'YoC_Neto', 'Yield_Actual_Bruto',
+                    'Renta_Bruta_Anual_EUR', 'Renta_Neta_Anual_EUR',
+                    'YoC_Bruto', 'YoC_Neto',
+                    'Yield_Actual_Bruto', 'Yield_Actual_Neto',
                     'Peso_Capital_Pct', 'Peso_Renta_Pct'
                 ]].copy()
 
@@ -441,9 +573,12 @@ else:
                 df_display['Coste_EUR'] = df_display['Coste_EUR'].apply(lambda x: f"{x:,.2f} €")
                 df_display['Valor_Actual_EUR'] = df_display['Valor_Actual_EUR'].apply(lambda x: f"{x:,.2f} €")
                 df_display['Plusvalia_Pct'] = df_display['Plusvalia_Pct'].apply(lambda x: f"{x:+.2f}%")
+                df_display['Renta_Bruta_Anual_EUR'] = df_display['Renta_Bruta_Anual_EUR'].apply(lambda x: f"{x:,.2f} €")
                 df_display['Renta_Neta_Anual_EUR'] = df_display['Renta_Neta_Anual_EUR'].apply(lambda x: f"{x:,.2f} €")
+                df_display['YoC_Bruto'] = df_display['YoC_Bruto'].apply(lambda x: f"{x:.2f}%")
                 df_display['YoC_Neto'] = df_display['YoC_Neto'].apply(lambda x: f"{x:.2f}%")
                 df_display['Yield_Actual_Bruto'] = df_display['Yield_Actual_Bruto'].apply(lambda x: f"{x:.2f}%")
+                df_display['Yield_Actual_Neto'] = df_display['Yield_Actual_Neto'].apply(lambda x: f"{x:.2f}%")
                 df_display['Peso_Capital_Pct'] = df_display['Peso_Capital_Pct'].apply(lambda x: f"{x:.1f}%")
                 df_display['Peso_Renta_Pct'] = df_display['Peso_Renta_Pct'].apply(lambda x: f"{x:.1f}%")
 
