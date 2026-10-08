@@ -10,7 +10,7 @@ from plotly.subplots import make_subplots
 # Ignorar advertencias menores
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="Analizar Empresa - Weiss", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Analizar Empresa - Weiss DGI", page_icon="🔍", layout="wide")
 
 # Diccionario de respaldo
 TRADUCCION = {
@@ -47,14 +47,15 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     es_tecnologica = 'technology' in sector_en.lower() or 'software' in industry_en.lower()
     es_financiera = 'financial' in sector_en.lower() or 'bank' in industry_en.lower()
     es_industrial = 'industrial' in sector_en.lower() or 'basic materials' in sector_en.lower()
+    es_defensivo = 'consumer defensive' in sector_en.lower() or 'healthcare' in sector_en.lower()
     
     es_telecom = 'communication' in sector_en.lower() or 'telecom' in industry_en.lower()
     es_utility_pura = 'utility' in sector_en.lower() or 'utilities' in sector_en.lower()
 
-    payout_limite_bpa = 80.0 if es_regulada_o_reit else 50.0
-    payout_limite_fcf = 85.0 if es_regulada_o_reit else 60.0
-    payout_amarillo_bpa = 85.0 if es_regulada_o_reit else 60.0
-    payout_amarillo_fcf = 90.0 if es_regulada_o_reit else 70.0
+    payout_limite_bpa = 80.0 if es_regulada_o_reit else 60.0
+    payout_amarillo_bpa = 85.0 if es_regulada_o_reit else 75.0
+    payout_limite_fcf = 85.0 if es_regulada_o_reit else 75.0
+    payout_amarillo_fcf = 92.0 if es_regulada_o_reit else 85.0
 
     currency = info.get('currency', 'USD')
     divisor_uk = 1.0 
@@ -127,10 +128,18 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     bpa_forward = get_safe('forwardEps')
     per_forward = get_safe('forwardPE')
     price_to_book = get_safe('priceToBook', -1)
-    total_debt = get_safe('totalDebt', 0)
-    ebitda = get_safe('ebitda', 0)
+    total_debt = get_safe('totalDebt', 0.0)
+    total_cash = get_safe('totalCash', 0.0)
+    ebitda = get_safe('ebitda', 0.0)
     respaldo_institucional = get_safe('heldPercentInstitutions') * 100
     payout_forward = (forward_dividend / bpa_forward) * 100 if bpa_forward > 0 else -1
+
+    # Deuda Neta / EBITDA Operativa
+    deuda_neta = max(0.0, total_debt - total_cash)
+    if ebitda > 0:
+        deuda_ebitda = deuda_neta / ebitda
+    else:
+        deuda_ebitda = 999.0 if total_debt > 0 else 0.0
 
     años_crecimiento_bpa = 0
     total_años_bpa_datos = 0
@@ -151,10 +160,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     try:
         inc_stmt = ticker.income_stmt
         if not inc_stmt.empty:
-            if 'Diluted EPS' in inc_stmt.index: eps_data = inc_stmt.loc['Diluted EPS'].dropna()
-            elif 'Basic EPS' in inc_stmt.index: eps_data = inc_stmt.loc['Basic EPS'].dropna()
-            else: eps_data = []
-
+            eps_data = inc_stmt.loc['Diluted EPS'].dropna() if 'Diluted EPS' in inc_stmt.index else inc_stmt.loc['Basic EPS'].dropna()
             if len(eps_data) >= 4:
                 eps_actual = eps_data.iloc[0] 
                 eps_pasado = eps_data.iloc[3] 
@@ -266,37 +272,60 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     txt_extra_justo = f"Ancla ({años_analisis}A)"
     txt_extra_sobre = f"Techo: +{pct_sobre_vs_media:.1f}% vs Media"
 
-    # --- CÁLCULO DEL SCORE WEISS (CON RESCATE DEUDA / EBITDA) ---
-    score = 0.0
-    cond_fcf = payout_fcf != -1 and payout_fcf <= payout_amarillo_fcf
-    cond_pfcf = p_fcf != -1 and 0 < p_fcf <= 20
+    # ==========================================
+    # CÁLCULO DUAL DGI MODERNO (CALIDAD Y VALORACIÓN)
+    # ==========================================
     
-    if deuda_equity > 0:
-        cond_deuda = deuda_equity <= 50.0
-    else:
-        cond_deuda = (total_debt / ebitda <= 3.5) if ebitda > 0 else False
+    # 1. SCORE DE CALIDAD DGI (0 a 10 Pts)
+    score_calidad = 0.0
 
-    cond_historial = años_pagando >= 25 and racha_sin_recortes >= 12
-    cond_aumentos = incrementos_dividendo >= min(5, años_analisis)
-    cond_acciones = variacion_acciones is not None and variacion_acciones < 0
-    cond_yield = yield_actual >= yield_medio
-    cond_bpa = 0 < payout_ratio <= payout_amarillo_bpa
-    cond_per = 0 < per <= 20
-    ratio_bpa_val = (años_crecimiento_bpa / total_años_bpa_datos) if total_años_bpa_datos > 0 else 0
-    cond_consistencia = total_años_bpa_datos > 0 and ratio_bpa_val >= 0.65
+    lim_deuda_optima = 4.0 if (es_regulada_o_reit or es_defensivo or es_telecom) else 3.0
+    lim_deuda_aceptable = 5.0 if (es_regulada_o_reit or es_defensivo or es_telecom) else 4.0
+    if deuda_ebitda <= lim_deuda_optima: pts_deuda = 2.5
+    elif deuda_ebitda <= lim_deuda_aceptable: pts_deuda = 1.5
+    else: pts_deuda = 0.0
+    score_calidad += pts_deuda
 
-    if cond_fcf: score += 1.5
-    if cond_pfcf: score += 1.5
-    if cond_deuda: score += 1.5
-    if cond_historial: score += 1.5
-    if cond_aumentos: score += 1.0
-    if cond_acciones: score += 1.0
-    if cond_yield: score += 0.5
-    if cond_bpa: score += 0.5
-    if cond_per: score += 0.5
-    if cond_consistencia: score += 0.5
+    if 0 <= payout_fcf <= payout_limite_fcf: pts_fcf = 2.5
+    elif payout_fcf <= payout_amarillo_fcf: pts_fcf = 1.25
+    else: pts_fcf = 0.0
+    score_calidad += pts_fcf
 
-    # --- CÁLCULO DE LA REGLA DE CHOWDER Y PRECIO OBJETIVO CHOWDER ---
+    if (años_pagando >= 20 and racha_sin_recortes >= 10) or racha_sin_recortes >= 15: pts_hist = 2.0
+    elif (años_pagando >= 10 and racha_sin_recortes >= 8) or racha_sin_recortes >= 10: pts_hist = 1.25
+    elif racha_sin_recortes >= 5: pts_hist = 0.75
+    else: pts_hist = 0.0
+    score_calidad += pts_hist
+
+    if dgr_5y is not None and dgr_5y >= 5.0: pts_dgr = 1.5
+    elif dgr_5y is not None and dgr_5y >= 2.5: pts_dgr = 0.75
+    else: pts_dgr = 0.0
+    score_calidad += pts_dgr
+
+    cond_recompras = variacion_acciones is not None and variacion_acciones < -0.5
+    cond_bpa_pos = crecimiento_bpa_3y is not None and crecimiento_bpa_3y > 0
+    pts_cap = 1.5 if (cond_recompras or cond_bpa_pos) else 0.0
+    score_calidad += pts_cap
+
+    # 2. SCORE DE VALORACIÓN DGI (0 a 10 Pts)
+    score_val = 0.0
+
+    if yield_actual >= yield_infravalorado: pts_yield = 4.0
+    elif yield_actual >= yield_medio: pts_yield = 2.5
+    else: pts_yield = 0.0
+    score_val += pts_yield
+
+    if 0 < p_fcf <= 20.0: pts_pfcf = 2.5
+    elif 0 < p_fcf <= 25.0: pts_pfcf = 1.25
+    else: pts_pfcf = 0.0
+    score_val += pts_pfcf
+
+    if 0 < per <= 20.0: pts_per = 2.0
+    elif 0 < per <= 25.0: pts_per = 1.0
+    else: pts_per = 0.0
+    score_val += pts_per
+
+    # Regla de Chowder
     if (es_utility_pura or es_telecom) and yield_actual > 4.0:
         chowder_target = 8.0
     elif yield_actual >= 3.0:
@@ -312,9 +341,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         yield_req_chowder = chowder_target - dgr_5y
         if yield_req_chowder > 0:
             precio_obj_chowder = (forward_dividend / yield_req_chowder) * 100
+        pts_chowder = 1.5 if chowder_pass else 0.0
     else:
         chowder_number = None
         chowder_pass = False
+        pts_chowder = 0.0
+    score_val += pts_chowder
 
     # ==========================================
     # INTERFAZ VISUAL STREAMLIT
@@ -373,9 +405,24 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
     with col4: metric_color("Franja Sobrevalorada", f"{precio_venta / divisor_uk:.2f}{sym}", f"Yield {yield_sobrevalorado:.2f}% ({yield_sobrevalorado * net_mult:.2f}% neto)", txt_extra_sobre, "#ff4b4b") 
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if score >= 8.0: st.success(f"🏆 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Sobresaliente. Fuerte generación de caja y altísima seguridad.")
-    elif score >= 5.0: st.warning(f"⚖️ **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Empresa Aceptable. Tiene solidez pero presenta debilidades en su flujo de efectivo o valoración.")
-    else: st.error(f"🚨 **BLUE CHIP SCORE WEISS: {score:.1f}/10** — Calidad Insuficiente. No supera los filtros de caja real y seguridad.")
+    
+    # --- LOS 2 RÁNKINGS DGI INDEPENDIENTES (CALIDAD + VALORACIÓN) ---
+    col_sc1, col_sc2 = st.columns(2)
+    with col_sc1:
+        if score_calidad >= 8.0: 
+            st.success(f"🛡️ **CALIDAD DGI: {score_calidad:.1f}/10** — Negocio Sobresaliente. Fuerte generación de caja, balance solvente y resiliencia.")
+        elif score_calidad >= 6.0: 
+            st.warning(f"⚖️ **CALIDAD DGI: {score_calidad:.1f}/10** — Negocio Aceptable. Solidez con algún reto operativo o ciclo de inversión intensivo.")
+        else: 
+            st.error(f"🚨 **CALIDAD DGI: {score_calidad:.1f}/10** — Calidad Insuficiente. Riesgo en cobertura de dividendo por caja o endeudamiento.")
+
+    with col_sc2:
+        if score_val >= 7.0: 
+            st.success(f"🏷️ **VALORACIÓN DGI: {score_val:.1f}/10** — Oportunidad Clara. Cotiza en zona de ganga histórica por canal de Yield y múltiplos.")
+        elif score_val >= 4.0: 
+            st.warning(f"🏷️ **VALORACIÓN DGI: {score_val:.1f}/10** — Valoración Justa. Cotiza cerca de su media histórica o múltiplos intermedios.")
+        else: 
+            st.error(f"🏷️ **VALORACIÓN DGI: {score_val:.1f}/10** — Sobrevalorada o Exigente. Poco o nulo margen de seguridad fundamental.")
 
     if chowder_number is not None:
         if chowder_pass:
@@ -607,7 +654,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### ⚖️ Valoración Contable y Solvencia Real")
-    cv1, cv2, cv3 = st.columns(3)
+    cv1, cv2, cv3, cv4 = st.columns(4)
     
     if price_to_book > 0:
         if es_financiera or es_industrial: pb_optimo, pb_max = 1.5, 2.5; txt_opt = "Óptimo < 1.5x (Fin/Ind)"
@@ -621,13 +668,22 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
         fcf_color = "normal" if fcf_yield > yield_actual else "inverse"
         cv2.metric("FCF Yield (Rentabilidad de Caja)", f"{fcf_yield:.2f}%", f"Óptimo > {yield_actual:.2f}% (Div. Bruto)", delta_color=fcf_color)
     else: cv2.metric("FCF Yield (Rentabilidad de Caja)", "N/D")
+
+    # Métrica DGI Moderna: Deuda Neta / EBITDA
+    if deuda_ebitda < 900:
+        if deuda_ebitda <= lim_deuda_optima: d_eb_est, d_eb_col = f"Óptimo ≤ {lim_deuda_optima:.1f}x", "normal"
+        elif deuda_ebitda <= lim_deuda_aceptable: d_eb_est, d_eb_col = f"Aceptable ≤ {lim_deuda_aceptable:.1f}x", "off"
+        else: d_eb_est, d_eb_col = f"Peligro > {lim_deuda_aceptable:.1f}x", "inverse"
+        cv3.metric("Deuda Neta / EBITDA", f"{deuda_ebitda:.2f}x", delta=d_eb_est, delta_color=d_eb_col)
+    else:
+        cv3.metric("Deuda Neta / EBITDA", "N/D" if total_debt == 0 else "EBITDA ≤ 0")
         
     if deuda_fcf > 0:
         if deuda_fcf < 3: d_estado, d_color = "Óptimo < 3.0 Años", "normal"
         elif deuda_fcf < 5: d_estado, d_color = "Aceptable < 5.0 Años", "off"
         else: d_estado, d_color = "Peligro > 5.0 Años", "inverse"
-        cv3.metric("Deuda Total / FCF", f"{deuda_fcf:.2f} Años", delta=d_estado, delta_color=d_color)
-    else: cv3.metric("Deuda Total / FCF", "N/D" if total_debt == 0 else "FCF Negativo")
+        cv4.metric("Deuda Total / FCF", f"{deuda_fcf:.2f} Años", delta=d_estado, delta_color=d_color)
+    else: cv4.metric("Deuda Total / FCF", "N/D" if total_debt == 0 else "FCF Negativo")
 
     if variacion_acciones is not None and variacion_acciones < -1.0:
         if price_to_book > 5.0 or deuda_fcf > 4.0:
@@ -703,103 +759,122 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
             st.plotly_chart(fig_divs, use_container_width=True)
 
     st.divider()
-    st.subheader(f"📋 Decálogo de Calidad del Blue Chip ({años_analisis} Años)")
+    st.subheader(f"📋 Decálogo Detallado DGI — Geraldine Weiss Moderno ({años_analisis} Años)")
     
-    t_fcf = "[🎯 +1.5 / 1.5 pts]" if cond_fcf else "[❌ 0.0 / 1.5 pts]"
-    t_pfcf = "[🎯 +1.5 / 1.5 pts]" if cond_pfcf else "[❌ 0.0 / 1.5 pts]"
-    t_deuda = "[🎯 +1.5 / 1.5 pts]" if cond_deuda else "[❌ 0.0 / 1.5 pts]"
-    t_hist = "[🎯 +1.5 / 1.5 pts]" if cond_historial else "[❌ 0.0 / 1.5 pts]"
-    t_aum = "[🎯 +1.0 / 1.0 pts]" if cond_aumentos else "[❌ 0.0 / 1.0 pts]"
-    t_acc = "[🎯 +1.0 / 1.0 pts]" if cond_acciones else "[❌ 0.0 / 1.0 pts]"
-    t_yield = "[🎯 +0.5 / 0.5 pts]" if cond_yield else "[❌ 0.0 / 0.5 pts]"
-    t_bpa = "[🎯 +0.5 / 0.5 pts]" if cond_bpa else "[❌ 0.0 / 0.5 pts]"
-    t_per_t = "[🎯 +0.5 / 0.5 pts]" if cond_per else "[❌ 0.0 / 0.5 pts]"
-    t_cons = "[🎯 +0.5 / 0.5 pts]" if cond_consistencia else "[❌ 0.0 / 0.5 pts]"
-    t_info = "[ℹ️ Info]"
+    # Etiquetas informativas con asignación de puntos
+    t_yield = f"[🏷️ Val: +{pts_yield:.1f} / 4.0 pts]"
+    t_pfcf = f"[🏷️ Val: +{pts_pfcf:.2f} / 2.5 pts]"
+    t_per_t = f"[🏷️ Val: +{pts_per:.1f} / 2.0 pts]"
+    t_chowder_t = f"[🏷️ Val: +{pts_chowder:.1f} / 1.5 pts]"
+    
+    t_fcf = f"[🛡️ Cal: +{pts_fcf:.2f} / 2.5 pts]"
+    t_deuda = f"[🛡️ Cal: +{pts_deuda:.1f} / 2.5 pts]"
+    t_hist = f"[🛡️ Cal: +{pts_hist:.2f} / 2.0 pts]"
+    t_dgr_t = f"[🛡️ Cal: +{pts_dgr:.2f} / 1.5 pts]"
+    t_cap_t = f"[🛡️ Cal: +{pts_cap:.1f} / 1.5 pts]"
+    t_info = "[ℹ️ Dato Adicional]"
 
-    st.markdown("#### 💰 1. Valoración y Rentabilidad")
-    if yield_actual >= yield_infravalorado: st.success(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Excelente, supera el {yield_infravalorado:.2f}%)")
-    elif yield_actual >= yield_medio: st.warning(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Aceptable, superior a media de {yield_medio:.2f}%)")
-    else: st.error(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Pobre, inferior a media de {yield_medio:.2f}%)")
-
-    if 0 < per <= 20: st.success(f"{t_per_t} PER (Beneficio Contable): {per:.2f} (Valoración atractiva)")
-    else: st.error(f"{t_per_t} PER (Beneficio Contable): {per:.2f} (Múltiplo caro)")
+    st.markdown("#### 🏷️ 1. Múltiplos y Oportunidad de Entrada (Score Valoración: 10 Pts)")
+    if yield_actual >= yield_infravalorado: 
+        st.success(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (En Suelo Histórico de Compra, supera el {yield_infravalorado:.2f}%)")
+    elif yield_actual >= yield_medio: 
+        st.warning(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Aceptable: por encima de la media histórica de {yield_medio:.2f}%)")
+    else: 
+        st.error(f"{t_yield} Rentabilidad Bruta: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% Neto) | (Pobre: por debajo de su media histórica de {yield_medio:.2f}%)")
 
     if p_fcf != -1:
-        if 0 < p_fcf <= 20: st.success(f"{t_pfcf} P/FCF (Efectivo Real): {p_fcf:.2f} (Barato. FCF Yield: {fcf_yield:.2f}%)")
-        else: st.error(f"{t_pfcf} P/FCF (Efectivo Real): {p_fcf:.2f} (Caro. FCF Yield: {fcf_yield:.2f}%)")
-    else: st.error(f"{t_pfcf} P/FCF (Efectivo Real): NEGATIVO")
+        if 0 < p_fcf <= 20.0: st.success(f"{t_pfcf} P/FCF (Múltiplo Flujo de Caja): {p_fcf:.2f}x (Muy atractivo ≤ 20x. FCF Yield: {fcf_yield:.2f}%)")
+        elif 0 < p_fcf <= 25.0: st.warning(f"{t_pfcf} P/FCF (Múltiplo Flujo de Caja): {p_fcf:.2f}x (Moderado ≤ 25x. FCF Yield: {fcf_yield:.2f}%)")
+        else: st.error(f"{t_pfcf} P/FCF (Múltiplo Flujo de Caja): {p_fcf:.2f}x (Múltiplo exigente > 25x. FCF Yield: {fcf_yield:.2f}%)")
+    else: st.error(f"{t_pfcf} P/FCF: NEGATIVO (La empresa no genera flujo de caja libre)")
+
+    if 0 < per <= 20.0: st.success(f"{t_per_t} PER (Beneficio Contable): {per:.2f}x (Valoración razonable ≤ 20x)")
+    elif 0 < per <= 25.0: st.warning(f"{t_per_t} PER (Beneficio Contable): {per:.2f}x (Múltiplo justo ≤ 25x)")
+    else: st.error(f"{t_per_t} PER (Beneficio Contable): {per:.2f}x (Múltiplo exigente > 25x)")
+
+    if chowder_number is not None and chowder_pass:
+        st.success(f"{t_chowder_t} Regla de Chowder: {chowder_number:.1f} (Aprobada ≥ {chowder_target:.0f}. Retorno total compuesto atractivo)")
+    elif chowder_number is not None:
+        st.error(f"{t_chowder_t} Regla de Chowder: {chowder_number:.1f} (Suspensa < {chowder_target:.0f}. Retorno combinado insuficiente)")
+    else:
+        st.info(f"{t_chowder_t} Regla de Chowder: N/D")
 
     if price_to_book > 0:
-        if es_financiera or es_industrial: l_verde, l_amarillo = 1.5, 2.5; ctx = "Sector Fin/Ind (Exige P/B estricto)"
-        elif es_tecnologica: l_verde, l_amarillo = 5.0, 10.0; ctx = "Sector Tech/Software (P/B alto por intangibles)"
-        else: l_verde, l_amarillo = 2.5, 5.0; ctx = "Sector General"
-        if price_to_book <= l_verde: st.success(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Atractivo)")
-        elif price_to_book <= l_amarillo: st.warning(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Exigente, pero en el límite)")
-        else: st.error(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x | {ctx} (Sobrevaloración contable extrema o recompras masivas)")
+        if es_financiera or es_industrial: l_verde, l_amarillo = 1.5, 2.5; ctx = "Financiero/Industrial"
+        elif es_tecnologica: l_verde, l_amarillo = 5.0, 10.0; ctx = "Tecnología/Software"
+        else: l_verde, l_amarillo = 2.5, 5.0; ctx = "General"
+        if price_to_book <= l_verde: st.success(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x ({ctx}: Atractivo)")
+        elif price_to_book <= l_amarillo: st.warning(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x ({ctx}: En rango)")
+        else: st.info(f"{t_info} Precio/Libros (P/B): {price_to_book:.2f}x ({ctx}: Elevado por intangibles o recompras)")
 
-    st.markdown("#### 🛡️ 2. Seguridad del Dividendo (Cobertura)")
-    if 0 < payout_ratio <= payout_limite_bpa: st.success(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Seguro para su sector, exige < {payout_limite_bpa:.0f}%)")
-    elif payout_limite_bpa < payout_ratio <= payout_amarillo_bpa: st.warning(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Atención: Excede el límite óptimo de {payout_limite_bpa:.0f}%, pero se mantiene cubierto bajo el {payout_amarillo_bpa:.0f}%)")
-    else: st.error(f"{t_bpa} Payout (BPA Histórico): {payout_ratio:.2f}% (Elevado y peligroso: supera el límite sectorial de {payout_amarillo_bpa:.0f}%)")
+    st.markdown("#### 🛡️ 2. Seguridad del Dividendo en Efectivo (Score Calidad)")
+    if payout_fcf != -1:
+        if 0 <= payout_fcf <= payout_limite_fcf: 
+            st.success(f"{t_fcf} Payout sobre FCF (Efectivo Real): {payout_fcf:.2f}% (Excelente: la caja cubre con holgura el dividendo ≤ {payout_limite_fcf:.0f}%)")
+        elif payout_fcf <= payout_amarillo_fcf: 
+            st.warning(f"{t_fcf} Payout sobre FCF (Efectivo Real): {payout_fcf:.2f}% (Aceptable: consume parte del colchón de caja ≤ {payout_amarillo_fcf:.0f}%)")
+        else: 
+            st.error(f"{t_fcf} Payout sobre FCF (Efectivo Real): {payout_fcf:.2f}% (Precaución: el dividendo presiona el flujo libre > {payout_amarillo_fcf:.0f}%)")
+    else: 
+        st.error(f"{t_fcf} Payout sobre FCF: NEGATIVO (La empresa está quemando caja)")
+
+    if 0 < payout_ratio <= payout_limite_bpa: 
+        st.success(f"{t_info} Payout contable (BPA): {payout_ratio:.2f}% (Sano para su sector, referencia < {payout_limite_bpa:.0f}%)")
+    elif payout_limite_bpa < payout_ratio <= payout_amarillo_bpa: 
+        st.warning(f"{t_info} Payout contable (BPA): {payout_ratio:.2f}% (En el límite sectorial de {payout_amarillo_bpa:.0f}%)")
+    else: 
+        st.info(f"{t_info} Payout contable (BPA): {payout_ratio:.2f}% (Elevado contablemente)")
     
     if payout_forward != -1:
-        if payout_forward < (payout_ratio - 1): tendencia_fw = "mejorará"
-        elif payout_forward > (payout_ratio + 1): tendencia_fw = "empeorará"
-        else: tendencia_fw = "se mantendrá estable"
-        if 0 < payout_forward <= payout_limite_bpa: st.success(f"{t_info} Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Sano: la cobertura {tendencia_fw})")
-        elif payout_limite_bpa < payout_forward <= payout_amarillo_bpa: st.warning(f"{t_info} Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Justo: la cobertura {tendencia_fw})")
-        else: st.error(f"{t_info} Forward Payout (Proyección Año Próximo): {payout_forward:.2f}% (Peligro: la cobertura {tendencia_fw})")
-    else: st.error(f"{t_info} Forward Payout: No disponible por BPA futuro negativo")
+        tendencia_fw = "mejorará" if payout_forward < payout_ratio else "empeorará"
+        st.info(f"{t_info} Forward Payout BPA (Estimado): {payout_forward:.2f}% (La cobertura contable prevista {tendencia_fw})")
 
-    if payout_fcf != -1:
-        if payout_fcf <= payout_limite_fcf: st.success(f"{t_fcf} Payout (FCF / Caja Real): {payout_fcf:.2f}% (Caja fuerte para su sector, exige < {payout_limite_fcf:.0f}%)")
-        elif payout_limite_fcf < payout_fcf <= payout_amarillo_fcf: st.warning(f"{t_fcf} Payout (FCF / Caja Real): {payout_fcf:.2f}% (Precaución: El dividendo consume más caja de lo ideal, rozando el límite sectorial de {payout_amarillo_fcf:.0f}%)")
-        else: st.error(f"{t_fcf} Payout (FCF / Caja Real): {payout_fcf:.2f}% (Peligro crítico: la empresa destina demasiada caja al dividendo, supera el {payout_amarillo_fcf:.0f}%)")
-    else: st.error(f"{t_fcf} Payout (FCF): NEGATIVO (La empresa está quemando caja real)")
+    st.markdown("#### 🏗️ 3. Solvencia Operativa y Asignación de Capital (Score Calidad)")
+    if deuda_ebitda < 900:
+        if deuda_ebitda <= lim_deuda_optima: 
+            st.success(f"{t_deuda} Solvencia Operativa (Deuda Neta / EBITDA): {deuda_ebitda:.2f}x (Óptimo ≤ {lim_deuda_optima:.1f}x. Capacidad de pago excelente)")
+        elif deuda_ebitda <= lim_deuda_aceptable: 
+            st.warning(f"{t_deuda} Solvencia Operativa (Deuda Neta / EBITDA): {deuda_ebitda:.2f}x (Aceptable ≤ {lim_deuda_aceptable:.1f}x. Apalancamiento controlado)")
+        else: 
+            st.error(f"{t_deuda} Solvencia Operativa (Deuda Neta / EBITDA): {deuda_ebitda:.2f}x (Peligro: deuda operativa elevada > {lim_deuda_aceptable:.1f}x)")
+    else: 
+        st.error(f"{t_deuda} Solvencia Operativa: N/D o EBITDA negativo")
 
-    st.markdown("#### 🏗️ 3. Solvencia y Gestión del Capital")
+    if cond_recompras or cond_bpa_pos:
+        txt_motivo = f"Recompras netas ({variacion_acciones:+.2f}%)" if cond_recompras else f"Crecimiento BPA 3Y ({crecimiento_bpa_3y:+.2f}%)"
+        st.success(f"{t_cap_t} Asignación de Capital: Cumplido vía {txt_motivo}")
+    else:
+        st.error(f"{t_cap_t} Asignación de Capital: Sin recompras netas y con BPA estancado a 3 años")
+
     if deuda_fcf != -1:
-        if deuda_fcf <= 3.0: st.success(f"{t_deuda} Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Excelente: Puede liquidar su deuda con la caja íntegra de {deuda_fcf:.1f} años)")
-        elif deuda_fcf <= 5.0: st.warning(f"{t_deuda} Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Aceptable: Nivel de apalancamiento controlable)")
-        else: st.error(f"{t_deuda} Solvencia (Deuda/FCF): {deuda_fcf:.2f} años (Peligro: Alta carga de deuda respecto a su capacidad de generar caja)")
-    elif total_debt > 0 and fcf <= 0: st.error(f"{t_deuda} Solvencia (Deuda/FCF): PELIGRO (Tiene deuda estructural y quema caja libre)")
-
-    if deuda_equity == 0.0: st.warning(f"{t_info} Deuda/Capital: 0.00% (Posible Patrimonio Negativo por recompras masivas)")
-    elif 0 < deuda_equity <= 50: st.success(f"{t_info} Deuda/Capital: {deuda_equity:.2f}% (Balance sano)")
-    else: st.error(f"{t_info} Deuda/Capital: {deuda_equity:.2f}% (Apalancamiento elevado)")
-
+        st.info(f"{t_info} Deuda Total / FCF: {deuda_fcf:.2f} años de flujo libre para extinguir la deuda íntegra")
     if current_ratio > 0:
-        if current_ratio >= 1.5: st.success(f"{t_info} Liquidez (Current Ratio): {current_ratio:.2f} (Caja solvente)")
-        elif current_ratio >= 1.0: st.warning(f"{t_info} Liquidez (Current Ratio): {current_ratio:.2f} (Justa)")
-        else: st.error(f"{t_info} Liquidez (Current Ratio): {current_ratio:.2f} (Falta de liquidez a corto plazo)")
+        st.info(f"{t_info} Liquidez Inmediata (Current Ratio): {current_ratio:.2f}")
 
-    if variacion_acciones is not None:
-        if variacion_acciones < 0: st.success(f"{t_acc} Acciones en circulación: {variacion_acciones:.2f}% en {años_analisis} años (Excelente, la empresa destruye acciones)")
-        elif variacion_acciones <= 5: st.warning(f"{t_acc} Acciones en circulación: +{variacion_acciones:.2f}% en {años_analisis} años (Estable / Ligera dilución)")
-        else: st.error(f"{t_acc} Acciones en circulación: +{variacion_acciones:.2f}% en {años_analisis} años (Peligro, la empresa diluye al accionista)")
+    st.markdown("#### 🛡️ 4. Resiliencia, Historial y Crecimiento (Score Calidad)")
+    if (años_pagando >= 20 and racha_sin_recortes >= 10) or racha_sin_recortes >= 15: 
+        st.success(f"{t_hist} Historial y Resiliencia: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata consagrada / Historial intachable)")
+    elif (años_pagando >= 10 and racha_sin_recortes >= 8) or racha_sin_recortes >= 10: 
+        st.warning(f"{t_hist} Historial y Resiliencia: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Solidez y trayectoria contrastada)")
+    elif racha_sin_recortes >= 5: 
+        st.warning(f"{t_hist} Historial y Resiliencia: {racha_sin_recortes} años consecutivos sin recortes (Historial reciente)")
+    else: 
+        st.error(f"{t_hist} Historial y Resiliencia: {años_pagando} años pagando | Racha sin recortes: {racha_sin_recortes} años (Insuficiente)")
 
-    st.markdown("#### 🛡️ 4. Historial y Crecimiento")
-    if años_pagando >= 25 and racha_sin_recortes >= 12: st.success(f"{t_hist} Historial: {años_pagando} años pagando | {racha_sin_recortes} años sin recortes (Aristócrata consagrada)")
-    else: st.warning(f"{t_hist} Historial: {años_pagando} años pagando | Racha sin recortes: {racha_sin_recortes} años")
+    if dgr_5y is not None and dgr_5y >= 5.0: 
+        st.success(f"{t_dgr_t} Crecimiento Real (DGR 5A): {dgr_5y:.2f}% (Bate la inflación histórica con holgura ≥ 5.0%)")
+    elif dgr_5y is not None and dgr_5y >= 2.5: 
+        st.warning(f"{t_dgr_t} Crecimiento Real (DGR 5A): {dgr_5y:.2f}% (Crecimiento moderado ≥ 2.5%)")
+    else: 
+        st.error(f"{t_dgr_t} Crecimiento Real (DGR 5A): {dgr_5y if dgr_5y is not None else 'N/D'}% (Estancado o inferior a 2.5%)")
 
-    if incrementos_dividendo >= min(5, años_analisis): st.success(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): El dividendo ha subido {incrementos_dividendo} veces en los últimos {años_analisis} años (Cumple exigencia de crecimiento)")
-    else: st.error(f"{t_aum} Frecuencia de Aumentos (Filtro Weiss): Solo {incrementos_dividendo} aumentos detectados en {años_analisis} años (Falta de crecimiento activo)")
-
-    if total_años_bpa_datos > 0:
-        ratio_bpa = años_crecimiento_bpa / total_años_bpa_datos
-        if ratio_bpa >= 0.65: st.success(f"{t_cons} Consistencia BPA (Proxy Yahoo): Crecimiento neto positivo en {años_crecimiento_bpa} de {total_años_bpa_datos} años analizados (Consistente a corto plazo)")
-        else: st.error(f"{t_cons} Consistencia BPA (Proxy Yahoo): Solo {años_crecimiento_bpa} años de crecimiento de {total_años_bpa_datos} evaluados (Excesiva ciclicidad reciente)")
-
-    if dgr_5y is not None:
-        if dgr_5y >= 10: st.success(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Excelente)")
-        elif dgr_5y > 0: st.warning(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Positivo)")
-        else: st.error(f"{t_info} Crecimiento DGR 5A (Medio Plazo): {dgr_5y:.2f}% (Estancado / Recortes)")
+    if incrementos_dividendo >= min(5, años_analisis): 
+        st.info(f"{t_info} Frecuencia de Subidas: El dividendo ha aumentado {incrementos_dividendo} veces en {años_analisis} años")
+    else: 
+        st.info(f"{t_info} Frecuencia de Subidas: {incrementos_dividendo} aumentos en {años_analisis} años")
 
     if dgr_periodo is not None:
-        if dgr_periodo >= 10: st.success(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Excelente ritmo continuo)")
-        elif dgr_periodo > 0: st.warning(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Sostenido)")
-        else: st.error(f"{t_info} Crecimiento DGR {años_analisis}A (Periodo): {dgr_periodo:.2f}% (Estancado / Recortes)")
+        st.info(f"{t_info} Crecimiento DGR {años_analisis}A (Largo Plazo): {dgr_periodo:.2f}% anual compuesto")
 
     st.markdown("#### 🏢 5. Fortaleza Institucional")
     if market_cap > 10_000_000_000: st.success(f"{t_info} Tamaño: {market_cap / 1e9:.2f} mil millones de {sym} (Gran capitalización institucional)")
@@ -1245,7 +1320,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct):
 # ==========================================
 # INTERFAZ DIRECTA DE LA PÁGINA
 # ==========================================
-st.title("🔍 Análisis Individual — Geraldine Weiss")
+st.title("🔍 Análisis Individual — Geraldine Weiss DGI")
 
 col_input1, col_input2, col_input3 = st.columns(3)
 with col_input1: 
