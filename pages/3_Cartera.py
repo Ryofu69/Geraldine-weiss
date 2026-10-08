@@ -69,7 +69,8 @@ def procesar_texto_o_archivo(contenido):
         
         df = df.dropna(subset=['Fecha', 'Ticker'])
         df = df[df['Acciones'] > 0]
-        df['Año'] = df['Fecha'].dt.year.astype(int)
+        if not df.empty:
+            df['Año'] = df['Fecha'].dt.year.astype(int)
         return df, None
     except Exception as e:
         return None, f"Error al procesar el formato: {e}"
@@ -133,7 +134,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-with st.expander("📁 Importación y Gestión de Operaciones", expanded=False):
+with st.expander("📁 Importación y Gestión de Operaciones", expanded=True):
     modo_carga = st.radio("Método de entrada:", ["📝 Pegar / Editar Texto", "📂 Subir Archivo CSV o Excel"], horizontal=True)
     contenido_texto = cargar_cartera_persistente()
     
@@ -169,25 +170,25 @@ net_mult = 1.0 - (retencion_pct / 100.0)
 if err:
     st.error(f"⚠️ {err}")
 elif df_operaciones is None or df_operaciones.empty:
-    st.info("ℹ️ No hay operaciones registradas aún. Pega tus transacciones o sube un archivo para visualizar la cartera.")
+    st.info("ℹ️ No hay operaciones registradas aún. Pega tus transacciones en el cuadro superior o sube un archivo para visualizar la cartera.")
 else:
     # ==========================================
     # FILTROS ANALÍTICOS (AÑADA Y EMPRESA)
     # ==========================================
-    st.markdown("### 🎯 Filtros Analíticos de Cartera")[span_3](start_span)[span_3](end_span)
-    col_f1, col_f2 = st.columns(2)[span_4](start_span)[span_4](end_span)
+    st.markdown("### 🎯 Filtros Analíticos de Cartera")
+    col_f1, col_f2 = st.columns(2)
     
     años_disponibles = sorted(df_operaciones['Año'].unique().tolist(), reverse=True)
-    opciones_años = ["Todo el Historial"] + [str(a) for a in años_disponibles][span_5](start_span)[span_5](end_span)
+    opciones_años = ["Todo el Historial"] + [str(a) for a in años_disponibles]
     
     with col_f1:
-        año_filtro = st.selectbox("📅 Selecciona Año de Compra (Modo Añada):", opciones_años, index=0)[span_6](start_span)[span_6](end_span)
+        año_filtro = st.selectbox("📅 Selecciona Año de Compra (Modo Añada):", opciones_años, index=0)
     
     tickers_todos = sorted(df_operaciones['Ticker'].unique().tolist())
     with col_f2:
-        empresa_filtro = st.selectbox("🏢 Selecciona Empresa a Inspeccionar:", ["Todas las Empresas"] + tickers_todos, index=0)[span_7](start_span)[span_7](end_span)
+        empresa_filtro = st.selectbox("🏢 Selecciona Empresa a Inspeccionar:", ["Todas las Empresas"] + tickers_todos, index=0)
 
-    # Aplicar filtros a las operaciones
+    # Filtrar operaciones
     df_filtradas = df_operaciones.copy()
     if año_filtro != "Todo el Historial":
         df_filtradas = df_filtradas[df_filtradas['Año'] == int(año_filtro)]
@@ -195,12 +196,12 @@ else:
         df_filtradas = df_filtradas[df_filtradas['Ticker'] == empresa_filtro]
 
     if df_filtradas.empty:
-        st.warning(f"No se encontraron operaciones para el filtro seleccionado (Año: {año_filtro}, Empresa: {empresa_filtro}).")
+        st.warning(f"No se encontraron operaciones activas para el filtro seleccionado ({año_filtro} | {empresa_filtro}).")
     else:
         with st.spinner("Descargando precios actuales y dividendos..."):
             tasas_fx = obtener_tasas_fx()
             
-            # Consolidar posiciones para las operaciones filtradas
+            # Consolidar compras y ventas de la selección
             posiciones = []
             for t in df_filtradas['Ticker'].unique():
                 df_t = df_filtradas[df_filtradas['Ticker'] == t].sort_values('Fecha')
@@ -292,12 +293,12 @@ else:
                 plusvalia_pct = (plusvalia_eur / total_coste * 100.0) if total_coste > 0 else 0.0
 
                 # ==========================================
-                # KPIS DINÁMICOS (SEGÚN FILTRO)
+                # KPIS DINÁMICOS
                 # ==========================================
-                subtitulo_filtro = f"Resultados para: **{año_filtro}**" if año_filtro != "Todo el Historial" else "Resultados de **Todo el Historial**"
+                subtitulo = f"Resultados para: **{año_filtro}**" if año_filtro != "Todo el Historial" else "Resultados de **Todo el Historial**"
                 if empresa_filtro != "Todas las Empresas":
-                    subtitulo_filtro += f" | Empresa: **{empresa_filtro}**"
-                st.caption(subtitulo_filtro)
+                    subtitulo += f" | Empresa: **{empresa_filtro}**"
+                st.caption(subtitulo)
 
                 col_k1, col_k2, col_k3, col_k4 = st.columns(4)
                 with col_k1:
@@ -342,7 +343,7 @@ else:
                     """, unsafe_allow_html=True)
 
                 # ==========================================
-                # ANÁLISIS DE AÑADAS (COMPARATIVA ENTRE AÑOS)
+                # ANÁLISIS DE AÑADAS (GRÁFICO HISTÓRICO)
                 # ==========================================
                 if año_filtro == "Todo el Historial" and empresa_filtro == "Todas las Empresas" and len(años_disponibles) > 1:
                     st.divider()
@@ -365,13 +366,9 @@ else:
                                     pr_e = row_match['Precio_EUR'].iloc[0]
                                     div_e = row_match['Div_Anual_EUR'].iloc[0]
                                     
-                                    coste_pos = acc_a * pmc_e
-                                    val_pos = acc_a * pr_e
-                                    renta_pos = acc_a * div_e * net_mult
-                                    
-                                    c_añada += coste_pos
-                                    v_añada += val_pos
-                                    r_neta_añada += renta_pos
+                                    c_añada += acc_a * pmc_e
+                                    v_añada += acc_a * pr_e
+                                    r_neta_añada += acc_a * div_e * net_mult
                         
                         if c_añada > 0:
                             yoc_añada = (r_neta_añada / c_añada) * 100.0
@@ -463,3 +460,5 @@ else:
                     mime="text/csv",
                     use_container_width=True
                 )
+            else:
+                st.info("No se han encontrado posiciones abiertas activas tras procesar las operaciones de esta selección.")
