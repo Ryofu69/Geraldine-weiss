@@ -26,7 +26,7 @@ def cargar_watchlist():
         except Exception:
             pass
     # Lista predeterminada si el archivo no existe aún
-    return "MKC, VIS.MC, MCD, GIS, WKL.AS, PEP, JNJ, HD"
+    return "REP.MC, KHC, ENG.MC, DGE.L, PFE, BATS.L, RKT.L, TGT, WPC, HRL, BMY, O, RED.MC, CMCSA, EBRO.MC, LOG.MC, VZ, ACN, WKL.AS, VOW3.DE, PEP, KO, VICI, IIPR, HSY, MDLZ, UPS, GOOGL, UNH, GIS, ADP, LOW, MCD, VIS.MC, MC.PA, NKE, MKC, JNJ, PG, CL, WMT, MDT, ABT, ABBV, BDX, EMR, GPC, SYY, APD, STAG, MRK, MO, ABF.L, PBR, OHI, CSCO, PM, CVX, XOM, TAP, IBE.MC, GAW.L, AD.AS, ITX.MC, ELE.MC, VID.MC, UNA.AS"
 
 def guardar_watchlist(texto):
     try:
