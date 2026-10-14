@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import warnings
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -135,7 +136,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
 
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
-    # Agrupar posibles dividendos registrados el mismo día
     dividendos = dividendos.groupby(dividendos.index).sum()
 
     # Si tenemos tick en vivo de mercado abierto, actualizamos la última vela
@@ -162,7 +162,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
         return
 
     precio_actual = float(historial_analisis['Close'].dropna().iloc[-1])
-    año_actual = datetime.now().year
+    año_actual = datetime.now(ZoneInfo("Europe/Madrid")).year
 
     # --- DETECCIÓN SECTORIAL AVANZADA (REITs, QUASI-REITs, FINANCIERAS) ---
     sector_en = info.get('sector', 'Desconocido')
@@ -184,7 +184,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
     net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
-    # --- DIVIDENDOS SIN PICOS ARTIFICIALES (POR CONTEO DE PAGOS) ---
+    # --- DIVIDENDOS ANUALES (1 ESCALÓN POR AÑO NATURAL, SIN MINI-ESCALONES TRIMESTRALES) ---
     años = dividendos.index.year
     conteo_por_año = años.value_counts()
     conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
@@ -199,7 +199,17 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     aviso_extraordinario = bool((dividendos.tail(pagos_por_año * 2) > umbral_extra.tail(pagos_por_año * 2)).any())
     dividendos_regulares = dividendos.where(dividendos <= umbral_extra, mediana_pagos)
 
-    divs_reg_por_año = dividendos_regulares.groupby(dividendos_regulares.index.year).sum()
+    # Agrupación anual (1 escalón por año, corrigiendo si un pago de finales de dic pasó a principios de ene)
+    suma_anual_reg = dividendos_regulares.groupby(dividendos_regulares.index.year).sum()
+    conteo_anual_reg = dividendos_regulares.groupby(dividendos_regulares.index.year).count()
+    divs_reg_por_año = suma_anual_reg.copy()
+
+    for y in divs_reg_por_año.index:
+        if y < año_actual and pagos_por_año in [2, 4, 12]:
+            c = conteo_anual_reg.loc[y]
+            # Si un año tuvo 3 o 5 pagos por desfase de fechas en enero/diciembre, anualizamos sus pagos reales
+            if c > 0 and c != pagos_por_año and abs(c - pagos_por_año) == 1:
+                divs_reg_por_año.loc[y] = (suma_anual_reg.loc[y] / c) * pagos_por_año
 
     forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
     if es_peniques_uk and forward_dividend > (precio_actual * 0.25):
@@ -209,21 +219,10 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
         ultimo_año_completo = divs_reg_por_año.iloc[-2] if len(divs_reg_por_año) > 1 else 0
         forward_dividend = max(dividendos_regulares.iloc[-1] * pagos_por_año, ultimo_año_completo)
 
-    # TTM por número exacto de eventos (evita solapamientos de 3 o 5 pagos por desfases de días en el calendario)
-    div_ttm_por_evento = dividendos_regulares.rolling(window=pagos_por_año, min_periods=1).mean() * pagos_por_año
-    
-    # Proyectar sobre el calendario diario sin dientes de sierra
-    idx_union = historial_completo.index.union(div_ttm_por_evento.index).sort_values()
-    div_ttm_diario = div_ttm_por_evento.reindex(idx_union).ffill().bfill().reindex(historial_analisis.index)
-
+    # Mapeo clásico de 1 escalón anual (igual al método original de Weiss)
     historial_analisis['Year'] = historial_analisis.index.year
-    historial_analisis['Div_Anual'] = div_ttm_diario
-
-    # Anclar desde el último pago registrado al forward_dividend actual
-    fecha_ult_div = dividendos.index[-1]
-    historial_analisis.loc[historial_analisis.index >= fecha_ult_div, 'Div_Anual'] = max(
-        forward_dividend, float(div_ttm_por_evento.iloc[-1])
-    )
+    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_reg_por_año)
+    historial_analisis.loc[historial_analisis['Year'] == año_actual, 'Div_Anual'] = forward_dividend
     historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
 
     historial_analisis['Yield_Diario'] = (historial_analisis['Div_Anual'] / historial_analisis['Close']) * 100
@@ -580,7 +579,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     else:
         tipo_empresa_txt = "🏭 Sector Industrial / General (Filtros Estrictos)"
 
-    hora_actual_str = datetime.now().strftime("%H:%M:%S")
+    # Hora exacta de España (Europe/Madrid)
+    hora_actual_str = datetime.now(ZoneInfo("Europe/Madrid")).strftime("%H:%M:%S")
     st.header(f"Análisis de {ticker_symbol} ({currency}) — {tipo_empresa_txt}")
     
     aviso_fx = f"&nbsp;&nbsp;|&nbsp;&nbsp; 💱 <strong>Contabilidad convertida:</strong> {curr_fin} ➔ {currency} (FX: {fx_rate:.4f})" if fx_rate != 1.0 else ""
@@ -1326,7 +1326,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
 
     st.markdown("#### 🛡️ 4. Resiliencia, Historial y Foso Económico")
     if cond_roic and cond_rev:
-        st.success(f"{t_foso_t} Foso Económico: Rentabilidad s/ Capital y Ventas 3A ({revenue_cagr_3y:+.1f}%) positivas y robustas")
+        st.success(f"{t_foso_t} Foso Económico: Rentabilidad s/ Capital y Ventas 3A ({revenue_cagr_3y:+.1f}%) positivas y robustos")
     elif cond_roic or cond_rev:
         st.warning(f"{t_foso_t} Foso Económico Parcial: Uno de los dos filtros (ROIC/ROE o Ventas) requiere seguimiento")
     else:
@@ -1555,7 +1555,7 @@ with col_input2:
 with col_input3: 
     impuesto = st.number_input("Retención IRPF (%)", value=19.0, step=1.0, key="imp_ind")
 with col_input4:
-    capital_simulado = st.number_input("Capital Simulado Orden:", value=2000.0, step=250.0)
+    capital_simulado = st.number_input("Capital Simulado Orden:", value=500.0, step=50.0, key="cap_sim_500")
 
 aplicar_merma = st.checkbox("Aplicar merma fiscal en origen no recuperable (>15% en Suiza, Alemania, Francia, Dinamarca, Irlanda)", value=True)
 
