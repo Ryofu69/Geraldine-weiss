@@ -514,7 +514,7 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     score_total_20 = round(score_calidad + score_val, 1)
 
     # ==========================================
-    # SECCIÓN 1: HUELLA PENTAGONAL FIJA (SIN ROTACIÓN ACCIDENTAL EN MÓVIL)
+    # SECCIÓN 1: HUELLA PENTAGONAL ESTÁTICA EN MÓVIL (SIN GIROS NI ERRORES)
     # ==========================================
     st.header(f"📋 Auditoría y Decálogo DGI (20 Puntos) — {nombre_empresa} ({ticker_symbol})")
     st.caption(f"Nota Global Combinada: {f_num(score_total_20, 1)} / 20,0 pts  |  Calidad: {f_num(score_calidad, 1)}/10  |  Valoración: {f_num(score_val, 1)}/10")
@@ -526,20 +526,16 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     pilar_foso_pct = ((pts_hist + pts_foso + pts_dgr) / 4.5) * 100
 
     categorias_radar = [
-        "1. Yield Weiss (4p)",
-        "2. Múltiplos y Chowder (6p)",
-        "3. Seguridad Caja (2p)",
-        "4. Solvencia y Capital (3,5p)",
-        "5. Foso e Historial (4,5p)"
+        f"1. Yield Weiss ({f_num(pilar_yield_pct, 0)}%)",
+        f"2. Múltiplos ({f_num(pilar_mult_pct, 0)}%)",
+        f"3. Caja FCF ({f_num(pilar_caja_pct, 0)}%)",
+        f"4. Solvencia ({f_num(pilar_solv_pct, 0)}%)",
+        f"5. Foso e Hist. ({f_num(pilar_foso_pct, 0)}%)"
     ]
     valores_radar = [pilar_yield_pct, pilar_mult_pct, pilar_caja_pct, pilar_solv_pct, pilar_foso_pct]
 
-    # Configuración para evitar que al hacer scroll en el móvil se deforme o gire el gráfico
-    config_fijo_movil = {
-        'displayModeBar': True,
-        'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d'],
-        'scrollZoom': False
-    }
+    # staticPlot=True bloquea giros y zooms táctiles accidentales al hacer scroll en el móvil
+    config_estatico = {'staticPlot': True, 'displayModeBar': False}
 
     col_rad1, col_rad2 = st.columns(2)
     with col_rad1:
@@ -551,22 +547,22 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             fill='toself',
             fillcolor='rgba(0, 212, 255, 0.22)',
             line=dict(color='#00d4ff', width=2.5),
+            marker=dict(size=7, color='#00d4ff'),
             name=ticker_symbol
         ))
         fig_radar.update_layout(
             template='plotly_dark',
-            dragmode=False,
             polar=dict(
-                radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%", fixedrange=True, gridcolor="rgba(255,255,255,0.1)"),
-                angularaxis=dict(fixedrange=True, rotation=90, direction="clockwise"),
+                radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%", gridcolor="rgba(255,255,255,0.12)"),
+                angularaxis=dict(rotation=90, direction="clockwise", tickfont=dict(size=11, color="#ddd")),
                 bgcolor='rgba(0,0,0,0)'
             ),
-            margin=dict(l=40, r=40, t=25, b=25),
+            margin=dict(l=45, r=45, t=25, b=25),
             height=330,
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False
         )
-        st.plotly_chart(fig_radar, use_container_width=True, config=config_fijo_movil)
+        st.plotly_chart(fig_radar, use_container_width=True, config=config_estatico)
 
     with col_rad2:
         st.markdown("#### 📊 Puntos Obtenidos vs. Máximo Posible por Bloque")
@@ -591,22 +587,22 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             marker_color='rgba(255, 255, 255, 0.12)', text=[f"Máx: {f_num(m, 1)}" for m in pts_max_b], textposition='inside'
         ))
         fig_bar_pts.update_layout(
-            barmode='stack', template='plotly_dark', dragmode=False,
+            barmode='stack', template='plotly_dark',
             margin=dict(l=0, r=10, t=20, b=20), height=330,
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),
-            xaxis=dict(title="Puntos", fixedrange=True),
-            yaxis=dict(fixedrange=True)
+            xaxis=dict(title="Puntos")
         )
-        st.plotly_chart(fig_bar_pts, use_container_width=True, config=config_fijo_movil)
+        st.plotly_chart(fig_bar_pts, use_container_width=True, config=config_estatico)
 
+    nombres_limpios = ["1. Yield Weiss", "2. Múltiplos y Chowder", "3. Seguridad de Caja", "4. Solvencia y Capital", "5. Foso e Historial"]
     idx_mejor = int(np.argmax(valores_radar))
     idx_peor = int(np.argmin(valores_radar))
     st.markdown(
         f'<div class="explicacion-graf">'
         f'💡 <strong>Diagnóstico Global en {ticker_symbol}:</strong> Suma <strong>{f_num(score_total_20, 1)} de 20 puntos posibles</strong>. '
-        f'Su mayor fortaleza actual es <strong>{categorias_radar[idx_mejor]}</strong> (al <strong>{f_num(valores_radar[idx_mejor], 0, "%")}</strong> de su capacidad máxima), '
-        f'mientras que su punto más exigente hoy es <strong>{categorias_radar[idx_peor]}</strong> (al <strong>{f_num(valores_radar[idx_peor], 0, "%")}</strong>).'
+        f'Su mayor fortaleza actual es <strong>{nombres_limpios[idx_mejor]}</strong> (al <strong>{f_num(valores_radar[idx_mejor], 0, "%")}</strong> de su capacidad máxima), '
+        f'mientras que su punto más exigente hoy es <strong>{nombres_limpios[idx_peor]}</strong> (al <strong>{f_num(valores_radar[idx_peor], 0, "%")}</strong>).'
         f'</div>',
         unsafe_allow_html=True
     )
