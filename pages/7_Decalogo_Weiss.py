@@ -139,34 +139,34 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
         except (ValueError, TypeError): return default
 
     st.markdown("""
-    <style>
-    .card-audit {
-        background: rgba(255, 255, 255, 0.035);
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        border-radius: 10px;
-        padding: 12px 15px;
-        margin-bottom: 11px;
-    }
-    .explicacion-graf {
-        background: rgba(0, 212, 255, 0.05);
-        border-left: 3px solid #00d4ff;
-        padding: 10px 14px;
-        border-radius: 0 8px 8px 0;
-        font-size: 0.88rem;
-        color: #d0d0d8;
-        margin-top: -8px;
-        margin-bottom: 18px;
-        line-height: 1.45;
-    }
-    .badge-pts-verde { background: rgba(33, 195, 84, 0.22); color: #21c354; padding: 3px 9px; border-radius: 5px; font-weight: 700; font-size: 0.82rem; }
-    .badge-pts-ambar { background: rgba(250, 202, 43, 0.22); color: #faca2b; padding: 3px 9px; border-radius: 5px; font-weight: 700; font-size: 0.82rem; }
-    .badge-pts-rojo { background: rgba(255, 75, 75, 0.22); color: #ff4b4b; padding: 3px 9px; border-radius: 5px; font-weight: 700; font-size: 0.82rem; }
-    .badge-pts-info { background: rgba(0, 212, 255, 0.18); color: #00d4ff; padding: 3px 9px; border-radius: 5px; font-weight: 700; font-size: 0.82rem; }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+.card-audit {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 10px;
+    padding: 12px 15px;
+    margin-bottom: 11px;
+}
+.explicacion-graf {
+    background: rgba(0, 212, 255, 0.05);
+    border-left: 3px solid #00d4ff;
+    padding: 10px 14px;
+    border-radius: 0 8px 8px 0;
+    font-size: 0.88rem;
+    color: #d0d0d8;
+    margin-top: -8px;
+    margin-bottom: 18px;
+    line-height: 1.45;
+}
+.badge-pts-verde { background: rgba(33, 195, 84, 0.22); color: #21c354; padding: 3px 9px; border-radius: 5px; font-weight: 700; font-size: 0.82rem; white-space: nowrap; }
+.badge-pts-ambar { background: rgba(250, 202, 43, 0.22); color: #faca2b; padding: 3px 9px; border-radius: 5px; font-weight: 700; font-size: 0.82rem; white-space: nowrap; }
+.badge-pts-rojo { background: rgba(255, 75, 75, 0.22); color: #ff4b4b; padding: 3px 9px; border-radius: 5px; font-weight: 700; font-size: 0.82rem; white-space: nowrap; }
+.badge-pts-info { background: rgba(0, 212, 255, 0.18); color: #00d4ff; padding: 3px 9px; border-radius: 5px; font-weight: 700; font-size: 0.82rem; white-space: nowrap; }
+</style>
+""", unsafe_allow_html=True)
 
     def render_item_auditoria(titulo, valor_txt, pts_ganados, pts_max, diagnostico_txt, meta_txt):
-        """Dibuja una tarjeta de auditoría con barra de progreso individual."""
+        """Dibuja una tarjeta de auditoría sin sangrías HTML para evitar bloques de código en Markdown."""
         if pts_max > 0:
             pct = min(100.0, max(0.0, (pts_ganados / pts_max) * 100))
             if pct >= 75:
@@ -179,26 +179,23 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
                 color = "#ff4b4b"
                 cls_b = "badge-pts-rojo"
             badge_html = f'<span class="{cls_b}">+{f_num(pts_ganados, 2)} / {f_num(pts_max, 1)} pts</span>'
-            barra_html = f"""
-            <div style="background: rgba(255,255,255,0.08); border-radius: 4px; height: 6px; width: 100%; overflow: hidden; margin: 7px 0;">
-                <div style="background: {color}; width: {pct:.1f}%; height: 100%;"></div>
-            </div>
-            """
+            barra_html = f'<div style="background: rgba(255,255,255,0.08); border-radius: 4px; height: 6px; width: 100%; overflow: hidden; margin: 8px 0;"><div style="background: {color}; width: {pct:.1f}%; height: 100%;"></div></div>'
         else:
-            badge_html = '<span class="badge-pts-info">ℹ️ Métrica Auxiliar</span>'
-            barra_html = '<div style="height: 4px;"></div>'
+            badge_html = '<span class="badge-pts-info">ℹ️ Auxiliar</span>'
+            barra_html = '<div style="height: 6px;"></div>'
 
-        st.markdown(f"""
-        <div class="card-audit">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 0.92rem; font-weight: 600; color: #eee;">{titulo}: <strong style="color:#00d4ff;">{valor_txt}</strong></span>
-                {badge_html}
-            </div>
-            {barra_html}
-            <div style="font-size: 0.83rem; color: #ccc; margin-bottom: 3px;">{diagnostico_txt}</div>
-            <div style="font-size: 0.77rem; color: #888;">🎯 <em>{meta_txt}</em></div>
-        </div>
-        """, unsafe_allow_html=True)
+        html_card = (
+            f'<div class="card-audit">'
+            f'<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">'
+            f'<span style="font-size: 0.92rem; font-weight: 600; color: #eee;">{titulo}: <strong style="color:#00d4ff;">{valor_txt}</strong></span>'
+            f'{badge_html}'
+            f'</div>'
+            f'{barra_html}'
+            f'<div style="font-size: 0.83rem; color: #ccc; margin-bottom: 4px;">{diagnostico_txt}</div>'
+            f'<div style="font-size: 0.77rem; color: #999;">🎯 <em>{meta_txt}</em></div>'
+            f'</div>'
+        )
+        st.markdown(html_card, unsafe_allow_html=True)
 
     # --- DIVISAS Y NORMALIZACIÓN ---
     currency_raw = info.get('currency', 'USD')
@@ -329,7 +326,6 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     es_quasi_reit_o_recompras = (not es_reit_puro) and (not es_financiera) and (operating_margins >= 22.0) and (total_equity_raw <= 0 or price_to_book < 0 or deuda_equity == 0.0)
     es_regulada_o_reit = es_reit_puro or es_utility_pura or es_quasi_reit_o_recompras
 
-    payout_limite_bpa = 85.0 if es_regulada_o_reit else 60.0
     payout_limite_fcf = 75.0 if es_regulada_o_reit else 65.0
     payout_amarillo_fcf = 90.0 if es_regulada_o_reit else 85.0
     payout_forward = (forward_dividend / bpa_forward) * 100 if bpa_forward > 0 else -1
@@ -460,7 +456,7 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
         except Exception: pass
 
     # ==========================================
-    # CÁLCULO RIGUROSO DE PUNTOS (SINCRONIZADO CON PESTAÑA 1)
+    # CÁLCULO RIGUROSO DE PUNTOS
     # ==========================================
     lim_deuda_optima = 3.5 if (es_regulada_o_reit or es_defensivo or es_telecom) else 2.5
     lim_deuda_aceptable = 5.0 if (es_regulada_o_reit or es_defensivo or es_telecom) else 4.0
@@ -494,7 +490,6 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
 
     score_calidad = min(10.0, round(pts_deuda + pts_cob + pts_fcf + pts_hist + pts_foso + pts_dgr + pts_cap, 1))
 
-    # Puntos Valoración
     if yield_actual >= yield_infravalorado: pts_yield = 4.0
     elif yield_actual >= yield_medio: pts_yield = interpolar_puntos(yield_actual, yield_infravalorado, yield_medio, 4.0, 2.0, inverso=False)
     elif yield_actual >= yield_sobrevalorado: pts_yield = interpolar_puntos(yield_actual, yield_medio, yield_sobrevalorado, 2.0, 0.0, inverso=False)
@@ -519,12 +514,11 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     score_total_20 = round(score_calidad + score_val, 1)
 
     # ==========================================
-    # SECCIÓN 1: HUELLA PENTAGONAL DGI (RADAR) Y BARRAS DE PILARES
+    # SECCIÓN 1: HUELLA PENTAGONAL FIJA (SIN ROTACIÓN ACCIDENTAL EN MÓVIL)
     # ==========================================
     st.header(f"📋 Auditoría y Decálogo DGI (20 Puntos) — {nombre_empresa} ({ticker_symbol})")
     st.caption(f"Nota Global Combinada: {f_num(score_total_20, 1)} / 20,0 pts  |  Calidad: {f_num(score_calidad, 1)}/10  |  Valoración: {f_num(score_val, 1)}/10")
 
-    # 5 Pilares Normalizados de 0 a 100%
     pilar_yield_pct = (pts_yield / 4.0) * 100
     pilar_mult_pct = ((pts_pfcf + pts_per + pts_chowder) / 6.0) * 100
     pilar_caja_pct = (pts_fcf / 2.0) * 100
@@ -540,6 +534,13 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     ]
     valores_radar = [pilar_yield_pct, pilar_mult_pct, pilar_caja_pct, pilar_solv_pct, pilar_foso_pct]
 
+    # Configuración para evitar que al hacer scroll en el móvil se deforme o gire el gráfico
+    config_fijo_movil = {
+        'displayModeBar': True,
+        'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d'],
+        'scrollZoom': False
+    }
+
     col_rad1, col_rad2 = st.columns(2)
     with col_rad1:
         st.markdown("#### 🕸️ Huella Pentagonal DGI (% de Perfección por Pilar)")
@@ -554,16 +555,18 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
         ))
         fig_radar.update_layout(
             template='plotly_dark',
+            dragmode=False,
             polar=dict(
-                radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%", gridcolor="rgba(255,255,255,0.1)"),
+                radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%", fixedrange=True, gridcolor="rgba(255,255,255,0.1)"),
+                angularaxis=dict(fixedrange=True, rotation=90, direction="clockwise"),
                 bgcolor='rgba(0,0,0,0)'
             ),
-            margin=dict(l=35, r=35, t=20, b=20),
+            margin=dict(l=40, r=40, t=25, b=25),
             height=330,
             paper_bgcolor='rgba(0,0,0,0)',
             showlegend=False
         )
-        st.plotly_chart(fig_radar, use_container_width=True)
+        st.plotly_chart(fig_radar, use_container_width=True, config=config_fijo_movil)
 
     with col_rad2:
         st.markdown("#### 📊 Puntos Obtenidos vs. Máximo Posible por Bloque")
@@ -588,21 +591,25 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             marker_color='rgba(255, 255, 255, 0.12)', text=[f"Máx: {f_num(m, 1)}" for m in pts_max_b], textposition='inside'
         ))
         fig_bar_pts.update_layout(
-            barmode='stack', template='plotly_dark', margin=dict(l=0, r=10, t=20, b=20), height=330,
+            barmode='stack', template='plotly_dark', dragmode=False,
+            margin=dict(l=0, r=10, t=20, b=20), height=330,
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),
-            xaxis=dict(title="Puntos")
+            xaxis=dict(title="Puntos", fixedrange=True),
+            yaxis=dict(fixedrange=True)
         )
-        st.plotly_chart(fig_bar_pts, use_container_width=True)
+        st.plotly_chart(fig_bar_pts, use_container_width=True, config=config_fijo_movil)
 
-    # Diagnóstico dinámico de la Huella Pentagonal
     idx_mejor = int(np.argmax(valores_radar))
     idx_peor = int(np.argmin(valores_radar))
-    st.markdown(f"""
-    <div class="explicacion-graf">
-        💡 <strong>Diagnóstico Global en {ticker_symbol}:</strong> Suma <strong>{f_num(score_total_20, 1)} de 20 puntos posibles</strong>. Su mayor fortaleza actual es <strong>{categorias_radar[idx_mejor]}</strong> (al <strong>{f_num(valores_radar[idx_mejor], 0, '%')}</strong> de su capacidad máxima), mientras que su punto más exigente o eslabón débil hoy es <strong>{categorias_radar[idx_peor]}</strong> (al <strong>{f_num(valores_radar[idx_peor], 0, '%')}</strong>).
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="explicacion-graf">'
+        f'💡 <strong>Diagnóstico Global en {ticker_symbol}:</strong> Suma <strong>{f_num(score_total_20, 1)} de 20 puntos posibles</strong>. '
+        f'Su mayor fortaleza actual es <strong>{categorias_radar[idx_mejor]}</strong> (al <strong>{f_num(valores_radar[idx_mejor], 0, "%")}</strong> de su capacidad máxima), '
+        f'mientras que su punto más exigente hoy es <strong>{categorias_radar[idx_peor]}</strong> (al <strong>{f_num(valores_radar[idx_peor], 0, "%")}</strong>).'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
     # ==========================================
     # SECCIÓN 2: AUDITORÍA PUNTO POR PUNTO (2 COLUMNAS)
@@ -610,11 +617,9 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     st.divider()
     col_aud_val, col_aud_cal = st.columns(2)
 
-    # --- COLUMNA IZQUIERDA: SCORE DE VALORACIÓN (10 PTS) ---
     with col_aud_val:
         st.subheader(f"🏷️ 1. Auditoría de Valoración ({f_num(score_val, 1)} / 10,0 Pts)")
 
-        # 1.1 Yield Weiss (4.0 pts)
         diag_y = f"Percentil {f_num(percentil_yield_actual, 1)}% de los últimos {años_analisis} años (Media: {f_num(yield_medio, 2, '%')} | Suelo P95: {f_num(yield_infravalorado, 2, '%')})."
         meta_y = f"Logra los 4,0 pts si el precio baja a ≤ {f_num(precio_compra_weiss, 2, sym)} (Yield ≥ {f_num(yield_infravalorado, 2, '%')})." if pts_yield < 4.0 else "¡Máxima puntuación conseguida! Cotiza en suelo histórico de compra."
         render_item_auditoria(
@@ -623,7 +628,6 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             pts_yield, 4.0, diag_y, meta_y
         )
 
-        # 1.2 P/FCF o P/FFO (2.5 pts)
         if es_financiera and p_fcf <= 0:
             diag_pf = f"Entidad financiera evaluada mediante Precio / Valor Contable ({f_num(price_to_book, 2, 'x')})."
             meta_pf = "Logra los 2,5 pts con un P/B ≤ 1,10x."
@@ -639,13 +643,12 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             val_pf_txt = "Negativo / N/D"
         render_item_auditoria(f"Múltiplo de Caja (Precio / {etiqueta_fcf})", val_pf_txt, pts_pfcf, 2.5, diag_pf, meta_pf)
 
-        # 1.3 PER o P/FFO REIT (2.0 pts)
         if es_reit_puro and p_fcf > 0:
             diag_per = f"En REITs se evalúa P/FFO ({f_num(p_fcf, 1, 'x')}) en lugar del PER contable ({f_num(per, 1, 'x')}) distorsionado por amortizaciones."
             meta_per = "Logra los 2,0 pts con P/FFO ≤ 16,0x."
             val_per_txt = f"{f_num(p_fcf, 1, 'x')} P/FFO"
         elif multiplo_per_eval > 0:
-            diag_per = f"Múltiplo sobre beneficio contable. Óptimo ≤ 16,0x, aceptable ≤ 24,0x."
+            diag_per = "Múltiplo sobre beneficio contable. Óptimo ≤ 16,0x, aceptable ≤ 24,0x."
             meta_per = "Logra los 2,0 pts cuando el PER baja a ≤ 16,0x." if pts_per < 2.0 else "¡Máxima puntuación conseguida! PER ≤ 16,0x."
             val_per_txt = f"{f_num(per, 1, 'x')}"
         else:
@@ -654,7 +657,6 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             val_per_txt = "N/D"
         render_item_auditoria("Múltiplo Beneficio (PER)", val_per_txt, pts_per, 2.0, diag_per, meta_per)
 
-        # 1.4 Regla de Chowder (1.5 pts)
         if chowder_number is not None:
             diag_ch = f"Suma de Yield ({f_num(yield_actual, 2, '%')}) + DGR 5A ({f_num(dgr_5y, 2, '%')}). Meta exigida para su perfil: ≥ {f_num(chowder_target, 0)} pts."
             meta_ch = f"Logra los 1,5 pts alcanzando un número Chowder ≥ {f_num(chowder_target, 0)}." if pts_chowder < 1.5 else "¡Máxima puntuación conseguida! Supera el umbral exigido de Chowder."
@@ -665,7 +667,6 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             val_ch_txt = "N/D"
         render_item_auditoria("Regla de Chowder (Retorno Compuesto)", val_ch_txt, pts_chowder, 1.5, diag_ch, meta_ch)
 
-        # 1.5 Métrica Auxiliar: Precio / Valor en Libros (P/B)
         if price_to_book > 0:
             ctx_pb = "Financiero/Industrial" if (es_financiera or es_industrial) else ("Tecnología" if es_tecnologica else "General")
             render_item_auditoria(
@@ -676,11 +677,9 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
                 "En empresas con fuertes recompras (MCD, HD, SBUX) el P/B se dispara sin implicar riesgo."
             )
 
-    # --- COLUMNA DERECHA: SCORE DE CALIDAD DGI (10 PTS) ---
     with col_aud_cal:
         st.subheader(f"🛡️ 2. Auditoría de Calidad del Negocio ({f_num(score_calidad, 1)} / 10,0 Pts)")
 
-        # 2.1 Payout sobre Caja Libre (2.0 pts)
         if payout_fcf > 0:
             diag_pfcf = f"Porcentaje del {etiqueta_fcf} real consumido por el dividendo. Límite sano: ≤ {f_num(payout_limite_fcf, 0, '%')}, alerta: > {f_num(payout_amarillo_fcf, 0, '%')}."
             meta_pfcf = f"Logra los 2,0 pts manteniendo el Payout {etiqueta_fcf} ≤ {f_num(payout_limite_fcf, 0, '%')}." if pts_fcf < 2.0 else f"¡Máxima puntuación! El dividendo está holgadamente cubierto por el {etiqueta_fcf}."
@@ -691,7 +690,6 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             val_pay_txt = f"{f_num(payout_ratio, 1, '%')} (BPA)"
         render_item_auditoria(f"Seguridad del Dividendo (Payout {etiqueta_fcf})", val_pay_txt, pts_fcf, 2.0, diag_pfcf, meta_pfcf)
 
-        # 2.2 Solvencia Operativa: Deuda Neta / EBITDA (2.0 pts)
         if es_financiera:
             diag_deb = f"En banca y seguros se evalúa mediante la rentabilidad sobre recursos propios (ROE: {f_num(roe, 1, '%')})."
             meta_deb = "Logra los 2,0 pts con un ROE ≥ 14,0%."
@@ -702,32 +700,27 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             val_deb_txt = f"{f_num(deuda_ebitda, 2, 'x')}" if deuda_ebitda < 900 else "Elevada"
         render_item_auditoria("Solvencia Operativa (Deuda Neta / EBITDA)", val_deb_txt, pts_deuda, 2.0, diag_deb, meta_deb)
 
-        # 2.3 Cobertura de Intereses (0.5 pts)
         val_cob_txt = f"{f_num(cobertura_intereses, 1, 'x')}" if cobertura_intereses is not None else ("Sin Deuda Neta" if deuda_neta == 0 else "N/D")
         diag_cob = "Veces que el beneficio operativo (EBIT) cubre la factura anual de intereses bancarios."
         meta_cob = "Logra los 0,5 pts con un ratio EBIT / Intereses ≥ 5,0x (o deuda neta cero)."
         render_item_auditoria("Cobertura de Intereses (EBIT / Intereses)", val_cob_txt, pts_cob, 0.5, diag_cob, meta_cob)
 
-        # 2.4 Historial y Racha sin Recortes (2.0 pts)
         aviso_fat = " ⚠️ Penalizado en -0,6 pts por fatiga en la última subida anual." if fatiga_dividendo else ""
         diag_hist = f"Lleva {años_pagando} años repartiendo dividendos y encadena {racha_sin_recortes} años sin recortes.{aviso_fat}"
         meta_hist = "Logra los 2,0 pts con ≥ 20 años sin recortes (o 25 años pagando y 12 sin recortes) sin fatiga reciente."
         render_item_auditoria("Resiliencia e Historial de Pagos", f"{años_pagando}A pagando | {racha_sin_recortes}A sin recorte", pts_hist, 2.0, diag_hist, meta_hist)
 
-        # 2.5 Foso Económico: ROIC/ROE + Crecimiento Ventas 3A (1.5 pts)
         lbl_foso_m = "ROE" if es_financiera else "ROIC"
         val_foso_txt = f"{lbl_foso_m}: {f_num(metrica_rentabilidad, 1, '%')} | Ventas 3A: {f_num(revenue_cagr_3y, 1, '%', signo_pos=True)}"
         diag_foso = "Combina la rentabilidad sobre el capital invertido con la expansión real de facturación a 3 años."
         meta_foso = f"Logra los 1,5 pts con {lbl_foso_m} ≥ 12,0% y crecimiento de ventas > +1,0% anual."
         render_item_auditoria("Foso Económico (Rentabilidad + Ventas)", val_foso_txt, pts_foso, 1.5, diag_foso, meta_foso)
 
-        # 2.6 Ritmo de Subida del Dividendo DGR 5A (1.0 pt)
         val_dgr_txt = f_num(dgr_5y, 2, '%') if dgr_5y is not None else "N/D"
         diag_dgr = "Crecimiento anual compuesto del dividendo en los últimos 5 años frente a la inflación."
         meta_dgr = "Logra 1,0 pt completo con DGR 5A ≥ 6,0% anual (0,5 pts si está entre 3,0% y 6,0%)."
         render_item_auditoria("Crecimiento Real del Dividendo (DGR 5A)", val_dgr_txt, pts_dgr, 1.0, diag_dgr, meta_dgr)
 
-        # 2.7 Asignación de Capital: Recompras y Crecimiento BPA (1.0 pt)
         val_cap_txt = f"Acciones: {f_num(variacion_acciones, 1, '%', signo_pos=True)} | BPA 3A: {f_num(crecimiento_bpa_3y, 1, '%', signo_pos=True)}"
         diag_cap = "Evalúa si la directiva crea valor recomprando acciones netas o expandiendo el beneficio por acción."
         meta_cap = "Logra 1,0 pt reduciendo acciones en circulación (> 1%) o 0,5 pts con BPA 3A creciendo > 2%/año."
