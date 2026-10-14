@@ -135,6 +135,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
 
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
+    # Agrupar posibles dividendos registrados el mismo día
+    dividendos = dividendos.groupby(dividendos.index).sum()
 
     # Si tenemos tick en vivo de mercado abierto, actualizamos la última vela
     if precio_vivo is not None and precio_vivo > 0 and not historial_completo.empty:
@@ -149,7 +151,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
         for col in ['Open', 'High', 'Low', 'Close']:
             if col in historial_completo.columns:
                 historial_completo[col] = historial_completo[col] / 100.0
-        # Si los dividendos históricos venían en peniques, pasarlos a Libras
         if dividendos.median() > (historial_completo['Close'].median() * 0.25):
             dividendos = dividendos / 100.0
 
@@ -163,7 +164,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     precio_actual = float(historial_analisis['Close'].dropna().iloc[-1])
     año_actual = datetime.now().year
 
-    # --- DETECCIÓN SECTORIAL AVanzada (REITs, QUASI-REITs, FINANCIERAS) ---
+    # --- DETECCIÓN SECTORIAL AVANZADA (REITs, QUASI-REITs, FINANCIERAS) ---
     sector_en = info.get('sector', 'Desconocido')
     industry_en = info.get('industry', 'Desconocido')
     pais = info.get('country', 'Desconocido')
@@ -183,7 +184,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
     net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
-    # --- DIVIDENDOS Y FILTRO DE EXTRAORDINARIOS ANTES DE BANDAS DE WEISS ---
+    # --- DIVIDENDOS SIN PICOS ARTIFICIALES (POR CONTEO DE PAGOS) ---
     años = dividendos.index.year
     conteo_por_año = años.value_counts()
     conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
@@ -191,14 +192,13 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     if pagos_por_año not in [1, 2, 4, 12]:
         pagos_por_año = 4 if pagos_por_año == 3 else (12 if pagos_por_año > 10 else 4)
 
-    # Limpieza de pagos extraordinarios a nivel de pago individual para no deformar las bandas
+    # Limpieza de pagos extraordinarios a nivel de pago individual
     ventana_med = max(4, pagos_por_año * 2)
     mediana_pagos = dividendos.rolling(window=ventana_med, min_periods=1).median()
     umbral_extra = mediana_pagos * 1.75
     aviso_extraordinario = bool((dividendos.tail(pagos_por_año * 2) > umbral_extra.tail(pagos_por_año * 2)).any())
     dividendos_regulares = dividendos.where(dividendos <= umbral_extra, mediana_pagos)
 
-    divs_por_año = dividendos.groupby(dividendos.index.year).sum()
     divs_reg_por_año = dividendos_regulares.groupby(dividendos_regulares.index.year).sum()
 
     forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
@@ -209,26 +209,22 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
         ultimo_año_completo = divs_reg_por_año.iloc[-2] if len(divs_reg_por_año) > 1 else 0
         forward_dividend = max(dividendos_regulares.iloc[-1] * pagos_por_año, ultimo_año_completo)
 
-    # Serie continua TTM (Rolling 365D) para eliminar escalones artificiales de año natural
-    divs_diarios_reg = dividendos_regulares.groupby(dividendos_regulares.index).sum()
-    idx_completo = pd.date_range(start=historial_completo.index.min(), end=historial_completo.index.max(), freq='D')
-    divs_calendario = divs_diarios_reg.reindex(idx_completo, fill_value=0.0)
-    div_ttm_serie = divs_calendario.rolling('365D').sum()
+    # TTM por número exacto de eventos (evita solapamientos de 3 o 5 pagos por desfases de días en el calendario)
+    div_ttm_por_evento = dividendos_regulares.rolling(window=pagos_por_año, min_periods=1).mean() * pagos_por_año
+    
+    # Proyectar sobre el calendario diario sin dientes de sierra
+    idx_union = historial_completo.index.union(div_ttm_por_evento.index).sort_values()
+    div_ttm_diario = div_ttm_por_evento.reindex(idx_union).ffill().bfill().reindex(historial_analisis.index)
 
     historial_analisis['Year'] = historial_analisis.index.year
-    historial_analisis['Div_TTM'] = div_ttm_serie.reindex(historial_analisis.index).bfill().ffill()
-    
-    # Si al principio de la serie el TTM está incompleto, respaldar con el anual regular
-    div_anual_map = historial_analisis['Year'].map(divs_reg_por_año)
-    historial_analisis['Div_Anual'] = np.where(
-        historial_analisis['Div_TTM'] > (div_anual_map * 0.7),
-        historial_analisis['Div_TTM'],
-        div_anual_map
-    )
-    # Anclar los últimos meses al forward_dividend vigente
+    historial_analisis['Div_Anual'] = div_ttm_diario
+
+    # Anclar desde el último pago registrado al forward_dividend actual
     fecha_ult_div = dividendos.index[-1]
-    historial_analisis.loc[historial_analisis.index >= fecha_ult_div, 'Div_Anual'] = forward_dividend
-    historial_analisis['Div_Anual'] = pd.Series(historial_analisis['Div_Anual'], index=historial_analisis.index).bfill().ffill()
+    historial_analisis.loc[historial_analisis.index >= fecha_ult_div, 'Div_Anual'] = max(
+        forward_dividend, float(div_ttm_por_evento.iloc[-1])
+    )
+    historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
 
     historial_analisis['Yield_Diario'] = (historial_analisis['Div_Anual'] / historial_analisis['Close']) * 100
     historial_analisis.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -255,7 +251,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     roe = get_safe('returnOnEquity', 0.0) * 100
     operating_margins = get_safe('operatingMargins', 0.0) * 100
 
-    # Magnitudes absolutas convertidas si la empresa reporta en otra divisa (ej. NVO, SHEL.L, TSM)
     total_debt = get_safe('totalDebt', 0.0) * fx_rate
     total_cash = get_safe('totalCash', 0.0) * fx_rate
     ebitda = get_safe('ebitda', 0.0) * fx_rate
@@ -263,11 +258,9 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     ocf_raw = get_safe('operatingCashflow', 0.0) * fx_rate
     shares = get_safe('sharesOutstanding', 0.0)
 
-    # En REITs puros, el Operating Cash Flow (FFO proxy) es mucho más fiel que el FCF contable
     flujo_caja_referencia = ocf_raw if (es_reit_puro and ocf_raw > fcf_raw) else fcf_raw
     etiqueta_fcf = "FFO (Flujo Operativo)" if (es_reit_puro and ocf_raw > fcf_raw) else "FCF (Flujo Caja Libre)"
 
-    # Detección de Quasi-REITs / Franquicias con recompras intensivas y patrimonio contable negativo/bajo (ej. MCD, YUM, SBUX, HD)
     total_equity_raw = get_safe('totalStockholderEquity', 0.0) * fx_rate
     if total_equity_raw == 0 and not bs_stmt.empty:
         for eq_k in ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity']:
@@ -318,7 +311,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
                 if k in inc_stmt.index:
                     ebit_val = float(inc_stmt.loc[k].dropna().iloc[-1]) * fx_rate
                     break
-        # Si el patrimonio neto es negativo por recompras masivas (ej. MCD, SBUX), usamos max(0, equity)
         inv_cap = (total_debt + max(0.0, total_equity_raw)) - total_cash
         if inv_cap <= 0 and not bs_stmt.empty:
             for k_ass in ['Total Assets']:
@@ -414,7 +406,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
         if inercia_ratio < 0.5:
             fatiga_dividendo = True
 
-    # Racha sin recortes (sobre dividendos regulares para evitar falsos recortes tras dividendo especial)
     racha_sin_recortes = 0
     if len(dividendos_barras) > 1:
         for i in range(1, len(dividendos_barras)):
@@ -478,7 +469,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     # ==========================================
     score_calidad = 0.0
 
-    # 1. Solvencia adaptada a Sector (Industrial vs REIT/Quasi-REIT vs Financiero)
     lim_deuda_optima = 4.5 if (es_regulada_o_reit or es_defensivo or es_telecom) else 3.0
     lim_deuda_aceptable = 5.5 if (es_regulada_o_reit or es_defensivo or es_telecom) else 4.0
 
@@ -493,14 +483,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
             pts_cob = 0.5 if deuda_neta == 0 else 0.0
     score_calidad += (pts_deuda + pts_cob)
 
-    # 2. Seguridad del Payout (FCF/FFO o BPA en Financieras)
     if es_financiera and payout_fcf == -1:
         pts_fcf = interpolar_puntos(payout_ratio, 50.0, 75.0, 2.0, 0.8, inverso=True) if payout_ratio > 0 else 0.0
     else:
         pts_fcf = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf * 1.05, 2.0, 0.8, inverso=True) if payout_fcf > 0 else 0.0
     score_calidad += pts_fcf
 
-    # 3. Historial
     if (años_pagando >= 20 and racha_sin_recortes >= 10) or racha_sin_recortes >= 15: pts_hist = 2.0
     elif (años_pagando >= 10 and racha_sin_recortes >= 8) or racha_sin_recortes >= 10: pts_hist = 1.25
     elif racha_sin_recortes >= 5: pts_hist = 0.75
@@ -509,7 +497,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
         pts_hist -= 0.5
     score_calidad += pts_hist
 
-    # 4. Foso económico (ROIC o ROE en financieras/quasi-REITs)
     metrica_rentabilidad = roe if (es_financiera or (roic is None and roe > 0)) else roic
     cond_roic = (metrica_rentabilidad is not None and metrica_rentabilidad >= 10.0) or (es_reit_puro and operating_margins >= 25.0)
     cond_rev = (revenue_cagr_3y is not None and revenue_cagr_3y > 0)
@@ -518,13 +505,11 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     else: pts_foso = 0.0
     score_calidad += pts_foso
 
-    # 5. DGR 5A
     if dgr_5y is not None and dgr_5y >= 5.0: pts_dgr = 1.0
     elif dgr_5y is not None and dgr_5y >= 2.5: pts_dgr = 0.5
     else: pts_dgr = 0.0
     score_calidad += pts_dgr
 
-    # 6. Asignación de Capital
     cond_recompras = variacion_acciones is not None and variacion_acciones < -0.5
     cond_bpa_pos = crecimiento_bpa_3y is not None and crecimiento_bpa_3y > 0
     pts_cap = 1.5 if (cond_recompras or cond_bpa_pos) else 0.0
@@ -534,7 +519,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     # --- 2. SCORE DE VALORACIÓN DGI PROGRESIVO (10 Pts) ---
     score_val = 0.0
 
-    # Puntos por Yield interpolados sin salto brusco
     if yield_actual >= yield_infravalorado:
         pts_yield = 4.0
     elif yield_actual >= yield_medio:
@@ -545,14 +529,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
         pts_yield = 0.0
     score_val += pts_yield
 
-    # Puntos por P/FCF (o P/FFO en REITs, o P/B en Financieras)
     if es_financiera and p_fcf <= 0:
         pts_pfcf = interpolar_puntos(price_to_book, 1.3, 2.5, 2.5, 1.0, inverso=True) if price_to_book > 0 else 0.0
     else:
         pts_pfcf = interpolar_puntos(p_fcf, 18.0, 26.0, 2.5, 1.0, inverso=True) if p_fcf > 0 else 0.0
     score_val += pts_pfcf
 
-    # Puntos por PER (En REITs puros usamos P/FFO en lugar del PER contable distorsionado por amortizaciones)
     multiplo_per_eval = p_fcf if (es_reit_puro and p_fcf > 0) else per
     pts_per = interpolar_puntos(multiplo_per_eval, 18.0, 26.0, 2.0, 0.8, inverso=True) if multiplo_per_eval > 0 else 0.0
     score_val += pts_per
@@ -580,7 +562,6 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     score_val += pts_chowder
     score_val = min(10.0, round(score_val, 1))
 
-    # Detección de Trampa de Valor
     posible_trampa_valor = (precio_actual <= precio_compra) and (
         score_calidad < 5.5 or (payout_fcf > 95.0) or (dgr_1y is not None and dgr_1y < -1.0)
     )
@@ -634,7 +615,7 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
     if aviso_extraordinario:
         st.warning("⚠️ **Dividendo Extraordinario Filtrado:** Se ha detectado un pago atípico (>75% sobre la mediana). El algoritmo lo ha suavizado automáticamente para no distorsionar las Bandas de Weiss.")
 
-    st.subheader(f"🎯 Precios Objetivo y Valoración Actual (Basado en {años_analisis} Años - TTM Continuo)")
+    st.subheader(f"🎯 Precios Objetivo y Valoración Actual (Basado en {años_analisis} Años)")
     
     if precio_actual <= precio_compra: color_actual = "#21c354" 
     elif precio_actual >= precio_venta: color_actual = "#ff4b4b" 
@@ -762,8 +743,12 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
         st.markdown(html_stats, unsafe_allow_html=True)
 
     st.divider()
-    st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses + RSI + MACD)")
-    st.markdown("> **Uso en Mercado Abierto:** Busca picos de volumen rojo extremo (Capitulación), **RSI < 35 (Sobreventa)** y precio tocando la línea verde discontinua (Suelo Weiss). Dispara cuando el histograma MACD pierda inercia bajista o cruce al alza.")
+    st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses + SMA 200/1000 + RSI + MACD)")
+    st.markdown("> **Uso en Mercado Abierto:** Busca confluencia entre la **SMA 1000**, la línea verde discontinua (Suelo Weiss), **RSI < 35 (Sobreventa)** y picos de volumen rojo (Capitulación). Dispara cuando el histograma MACD pierda inercia bajista.")
+
+    # Medias móviles calculadas sobre el historial completo para tener siempre las 1.000 sesiones previas
+    sma_200_full = historial_completo['Close'].rolling(200).mean()
+    sma_1000_full = historial_completo['Close'].rolling(1000).mean()
 
     fecha_calculo_macd = pd.Timestamp.now().normalize() - pd.DateOffset(years=1)
     df_tech_full = historial_analisis[historial_analisis.index >= fecha_calculo_macd].copy()
@@ -772,7 +757,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
         df_tech_full['Precio_Compra'] = (df_tech_full['Div_Anual'] / yield_infravalorado) * 100
         df_tech_full['Precio_Justo'] = (df_tech_full['Div_Anual'] / yield_medio) * 100
         df_tech_full['Precio_Venta'] = (df_tech_full['Div_Anual'] / yield_sobrevalorado) * 100
-        df_tech_full['SMA_200'] = historial_completo['Close'].rolling(200).mean().reindex(df_tech_full.index)
+        df_tech_full['SMA_200'] = sma_200_full.reindex(df_tech_full.index)
+        df_tech_full['SMA_1000'] = sma_1000_full.reindex(df_tech_full.index)
 
         if yield_req_chowder is not None and yield_req_chowder > 0:
             df_tech_full['Precio_Chowder'] = (df_tech_full['Div_Anual'] / yield_req_chowder) * 100
@@ -806,23 +792,29 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
             ult_hist = df_tech['Histogram'].iloc[-1]
             penult_hist = df_tech['Histogram'].iloc[-2] if len(df_tech) > 1 else 0
             ult_rsi = df_tech['RSI'].iloc[-1] if pd.notna(df_tech['RSI'].iloc[-1]) else 50.0
+            ult_sma1000 = df_tech['SMA_1000'].iloc[-1] if pd.notna(df_tech['SMA_1000'].iloc[-1]) else None
 
             avg_vol = df_tech['Volume'].mean()
             vol_elevado = df_tech['Volume'].tail(5).max() > (avg_vol * 1.5)
 
-            txt_rsi = f"RSI en **{ult_rsi:.1f}** " + ("(Sobreventa extrema 🟢). " if ult_rsi <= 32 else ("(Sobrecompra 🔴). " if ult_rsi >= 70 else "(Zona neutral). "))
+            txt_rsi = f"RSI: **{ult_rsi:.1f}** " + ("(Sobreventa 🟢) | " if ult_rsi <= 32 else ("(Sobrecompra 🔴) | " if ult_rsi >= 70 else "| "))
+            if ult_sma1000 is not None and ult_sma1000 > 0:
+                dist_sma1000 = ((ult_close_val - ult_sma1000) / ult_sma1000) * 100
+                txt_sma1000 = f"SMA 1000: **{ult_sma1000:.2f}{sym}** ({dist_sma1000:+.1f}%) | "
+            else:
+                txt_sma1000 = ""
 
-            analisis_ia = f"🧠 **Lectura en Vivo ({precio_str}):** {txt_rsi}"
+            analisis_ia = f"🧠 **Lectura en Vivo ({precio_str}):** {txt_rsi}{txt_sma1000}"
             if dist_suelo <= 0:
                 descuento_extra = abs(dist_suelo)
-                if descuento_extra > 0.5: analisis_ia += f"🎯 **En Zona de Disparo.** El precio cotiza un **{descuento_extra:.1f}% por debajo** de tu Suelo Fundamental ({suelo_str}). "
-                else: analisis_ia += f"🎯 **En Zona de Disparo.** El precio está tocando el Suelo Fundamental ({suelo_str}). "
+                if descuento_extra > 0.5: analisis_ia += f"🎯 **En Zona de Disparo.** Cotiza un **{descuento_extra:.1f}% por debajo** de tu Suelo Fundamental ({suelo_str}). "
+                else: analisis_ia += f"🎯 **En Zona de Disparo.** Tocando el Suelo Fundamental ({suelo_str}). "
                 if vol_elevado: analisis_ia += "Se detecta pico de volumen reciente (posible capitulación). "
                 if ult_macd > ult_signal and ult_hist > 0: analisis_ia += "El MACD confirma giro alcista. **Escenario de COMPRA IDEAL.**"
                 elif ult_macd < ult_signal and ult_hist > penult_hist: analisis_ia += "El MACD sigue negativo pero el histograma ya remonta (frenada bajista). Excelente punto para acumular."
                 else: analisis_ia += "El MACD sigue cayendo. Puedes fraccionar la entrada si buscas precio o esperar giro de vela."
             elif 0 < dist_suelo <= 5.0:
-                analisis_ia += f"🟡 **Alerta Temprana / Rebote.** El precio está a solo un **{dist_suelo:.1f}%** de tu zona de compra ({suelo_str}). "
+                analisis_ia += f"🟡 **Alerta Temprana / Rebote.** A solo un **{dist_suelo:.1f}%** de tu zona de compra ({suelo_str}). "
                 if ult_macd > ult_signal: analisis_ia += "El MACD ya es alcista. Si acaba de rebotar cerca de la línea verde, es buena entrada."
                 else: analisis_ia += "El MACD es bajista; vigila si corrige ese pequeño tramo restante hasta tocar la línea verde."
             else:
@@ -849,7 +841,8 @@ def screener_weiss_definitivo(ticker_symbol, años_analisis, impuesto_pct, aplic
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Venta'], name='Techo (Sobrevalorada)', line=dict(color='#ff4b4b', width=1.5, dash='dash'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Justo'], name='Precio Justo', line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash='dot'), showlegend=True, visible='legendonly'), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Compra'], name='Suelo (Infravalorada)', line=dict(color='#21c354', width=1.5, dash='dash'), showlegend=True), row=1, col=1)
-            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['SMA_200'], name='SMA 200', line=dict(color='#faca2b', width=1.2, dash='dot'), showlegend=True), row=1, col=1)
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['SMA_200'], name='SMA 200', line=dict(color='#faca2b', width=1.4, dash='dot'), showlegend=True), row=1, col=1)
+            fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['SMA_1000'], name='SMA 1000', line=dict(color='#ff9100', width=2.0), showlegend=True), row=1, col=1)
 
             if 'Precio_Chowder' in df_tech.columns:
                 fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
