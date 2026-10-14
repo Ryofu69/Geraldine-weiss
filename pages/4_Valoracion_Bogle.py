@@ -23,6 +23,22 @@ MERMA_ORIGEN_PAIS = {
 }
 
 # ==========================================
+# FORMATEO A LA ESPAÑOLA (PUNTOS Y COMAS)
+# ==========================================
+def f_num(val, dec=2, sufijo=""):
+    """Formatea un número con puntos de miles y comas de decimales (estilo español)."""
+    if pd.isna(val) or val is None:
+        return "N/D"
+    try:
+        val_f = float(val)
+        # Formato base con punto para miles y coma para decimales
+        formatted = f"{val_f:,.{dec}f}"
+        formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"{formatted}{sufijo}"
+    except Exception:
+        return str(val)
+
+# ==========================================
 # CACHÉ DE DOBLE VELOCIDAD (MERCADO ABIERTO)
 # ==========================================
 @st.cache_data(ttl=900, show_spinner=False)
@@ -110,7 +126,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         try: return float(val)
         except (ValueError, TypeError): return default
 
-    # --- ESTILOS CSS (CUADRÍCULA 2x2 EN MÓVIL + TERMÓMETRO + EXPLICACIONES) ---
     st.markdown("""
     <style>
     .grid-precios-weiss {
@@ -156,7 +171,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     </style>
     """, unsafe_allow_html=True)
 
-    # --- DIVISAS Y NORMALIZACIÓN ---
     currency_raw = info.get('currency', 'USD')
     es_peniques_uk = (currency_raw == 'GBp')
     currency = 'GBP' if es_peniques_uk else currency_raw
@@ -196,12 +210,10 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
     precio_actual = float(historial_analisis['Close'].dropna().iloc[-1])
 
-    # --- DETECCIÓN SECTORIAL ---
     sector_en = info.get('sector', 'Desconocido')
     industry_en = info.get('industry', 'Desconocido')
     pais = info.get('country', 'Desconocido')
     nombre_empresa = info.get('shortName', ticker_symbol)
-    
     sector_final = TRADUCCION.get(sector_en, sector_en)
 
     es_reit_puro = 'reit' in industry_en.lower() or 'real estate' in sector_en.lower()
@@ -213,7 +225,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
     net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
-    # --- DIVIDENDOS ANUALES (1 ESCALÓN POR AÑO NATURAL) ---
     años = dividendos.index.year
     conteo_por_año = años.value_counts()
     conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
@@ -262,7 +273,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     yield_actual = (forward_dividend / precio_actual) * 100 if precio_actual > 0 else 0.0
     percentil_yield_actual = float((yields_validos < yield_actual).mean() * 100)
 
-    # --- FUNDAMENTALES CON CONVERSIÓN FX ---
     payout_ratio = get_safe('payoutRatio') * 100
     per_actual = get_safe('trailingPE')
     per_forward = get_safe('forwardPE')
@@ -419,7 +429,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
     shareholder_yield = yield_actual + recompras_anualizadas
 
-    # Canales de Precio Weiss
     precio_compra = (forward_dividend / yield_infravalorado) * 100 if yield_infravalorado > 0 else 0
     precio_justo = (forward_dividend / yield_medio) * 100 if yield_medio > 0 else 0
     precio_venta = (forward_dividend / yield_sobrevalorado) * 100 if yield_sobrevalorado > 0 else 0
@@ -430,78 +439,82 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     dist_suelo_pct = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 0
 
     # ==========================================
-    # SCORES DGI (CALIDAD Y VALORACIÓN)
+    # SISTEMA DE PUNTUACIONES MÁS ESTRICTO Y REALISTA
     # ==========================================
     score_calidad = 0.0
-    lim_deuda_optima = 4.5 if (es_regulada_o_reit or es_defensivo or es_telecom) else 3.0
-    lim_deuda_aceptable = 5.5 if (es_regulada_o_reit or es_defensivo or es_telecom) else 4.0
+    
+    # 1. Solvencia y Deuda más estricta (Máx 2.5 pts)
+    lim_deuda_optima = 3.5 if (es_regulada_o_reit or es_defensivo or es_telecom) else 2.5
+    lim_deuda_aceptable = 5.0 if (es_regulada_o_reit or es_defensivo or es_telecom) else 4.0
 
     if es_financiera:
-        pts_deuda = 2.0 if roe >= 12.0 else (1.0 if roe >= 8.0 else 0.0)
-        pts_cob = 0.5 if current_ratio >= 1.0 or roe >= 10.0 else 0.0
+        pts_deuda = 2.0 if roe >= 14.0 else (1.0 if roe >= 9.0 else 0.0)
+        pts_cob = 0.5 if current_ratio >= 1.1 else 0.0
     else:
-        pts_deuda = interpolar_puntos(deuda_ebitda, lim_deuda_optima, lim_deuda_aceptable * 1.15, 2.0, 0.75, inverso=True)
-        pts_cob = (0.5 if cobertura_intereses >= 4.0 else (0.25 if cobertura_intereses >= 2.5 else 0.0)) if cobertura_intereses is not None else (0.5 if deuda_neta == 0 else 0.0)
+        pts_deuda = interpolar_puntos(deuda_ebitda, lim_deuda_optima, lim_deuda_aceptable, 2.0, 0.5, inverso=True)
+        pts_cob = (0.5 if cobertura_intereses >= 5.0 else (0.25 if cobertura_intereses >= 3.0 else 0.0)) if cobertura_intereses is not None else (0.5 if deuda_neta == 0 else 0.0)
     score_calidad += (pts_deuda + pts_cob)
 
+    # 2. Seguridad del Payout FCF (Máx 2.0 pts)
     if es_financiera and payout_fcf == -1:
-        pts_fcf = interpolar_puntos(payout_ratio, 50.0, 75.0, 2.0, 0.8, inverso=True) if payout_ratio > 0 else 0.0
+        pts_fcf = interpolar_puntos(payout_ratio, 45.0, 70.0, 2.0, 0.5, inverso=True) if payout_ratio > 0 else 0.0
     else:
-        pts_fcf = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf * 1.05, 2.0, 0.8, inverso=True) if payout_fcf > 0 else 0.0
+        pts_fcf = interpolar_puntos(payout_fcf, 65.0, 85.0, 2.0, 0.5, inverso=True) if payout_fcf > 0 else 0.0
     score_calidad += pts_fcf
 
-    if (años_pagando >= 20 and racha_sin_recortes >= 10) or racha_sin_recortes >= 15: pts_hist = 2.0
-    elif (años_pagando >= 10 and racha_sin_recortes >= 8) or racha_sin_recortes >= 10: pts_hist = 1.25
-    elif racha_sin_recortes >= 5: pts_hist = 0.75
+    # 3. Historial de Recortes (Máx 2.0 pts)
+    if (años_pagando >= 25 and racha_sin_recortes >= 12) or racha_sin_recortes >= 20: pts_hist = 2.0
+    elif (años_pagando >= 12 and racha_sin_recortes >= 8) or racha_sin_recortes >= 10: pts_hist = 1.2
+    elif racha_sin_recortes >= 5: pts_hist = 0.6
     else: pts_hist = 0.0
-    if fatiga_dividendo and pts_hist > 0.5: pts_hist -= 0.5
-    score_calidad += pts_hist
+    if fatiga_dividendo and pts_hist > 0.5: pts_hist -= 0.6
+    score_calidad += max(0.0, pts_hist)
 
+    # 4. Foso Económico exigente (Máx 1.5 pts)
     metrica_rentabilidad = roe if (es_financiera or (roic is None and roe > 0)) else roic
-    cond_roic = (metrica_rentabilidad is not None and metrica_rentabilidad >= 10.0) or (es_reit_puro and operating_margins >= 25.0)
-    cond_rev = (revenue_cagr_3y is not None and revenue_cagr_3y > 0)
-    pts_foso = 1.0 if (cond_roic and cond_rev) else (0.5 if (cond_roic or cond_rev) else 0.0)
+    cond_roic = (metrica_rentabilidad is not None and metrica_rentabilidad >= 12.0) or (es_reit_puro and operating_margins >= 28.0)
+    cond_rev = (revenue_cagr_3y is not None and revenue_cagr_3y > 1.0)
+    pts_foso = 1.5 if (cond_roic and cond_rev) else (0.75 if (cond_roic or cond_rev) else 0.0)
     score_calidad += pts_foso
 
-    pts_dgr = 1.0 if (dgr_5y is not None and dgr_5y >= 5.0) else (0.5 if (dgr_5y is not None and dgr_5y >= 2.5) else 0.0)
-    score_calidad += pts_dgr
+    # 5. Crecimiento y Recompras (Máx 2.0 pts)
+    pts_dgr = 1.0 if (dgr_5y is not None and dgr_5y >= 6.0) else (0.5 if (dgr_5y is not None and dgr_5y >= 3.0) else 0.0)
+    pts_cap = 1.0 if (variacion_acciones is not None and variacion_acciones < -1.0) else (0.5 if (crecimiento_bpa_3y is not None and crecimiento_bpa_3y > 2.0) else 0.0)
+    score_calidad += (pts_dgr + pts_cap)
+    score_calidad = min(10.0, round(score_calidad, 1))
 
-    cond_recompras = variacion_acciones is not None and variacion_acciones < -0.5
-    cond_bpa_pos = crecimiento_bpa_3y is not None and crecimiento_bpa_3y > 0
-    pts_cap = 1.5 if (cond_recompras or cond_bpa_pos) else 0.0
-    score_calidad = min(10.0, round(score_calidad + pts_cap, 1))
-
+    # Score Valoración más estricto
     score_val = 0.0
     if yield_actual >= yield_infravalorado: pts_yield = 4.0
-    elif yield_actual >= yield_medio: pts_yield = interpolar_puntos(yield_actual, yield_infravalorado, yield_medio, 4.0, 2.2, inverso=False)
-    elif yield_actual >= yield_sobrevalorado: pts_yield = interpolar_puntos(yield_actual, yield_medio, yield_sobrevalorado, 2.2, 0.0, inverso=False)
+    elif yield_actual >= yield_medio: pts_yield = interpolar_puntos(yield_actual, yield_infravalorado, yield_medio, 4.0, 2.0, inverso=False)
+    elif yield_actual >= yield_sobrevalorado: pts_yield = interpolar_puntos(yield_actual, yield_medio, yield_sobrevalorado, 2.0, 0.0, inverso=False)
     else: pts_yield = 0.0
     score_val += pts_yield
 
     if es_financiera and p_fcf <= 0:
-        pts_pfcf = interpolar_puntos(price_to_book, 1.3, 2.5, 2.5, 1.0, inverso=True) if price_to_book > 0 else 0.0
+        pts_pfcf = interpolar_puntos(price_to_book, 1.1, 2.0, 2.5, 0.8, inverso=True) if price_to_book > 0 else 0.0
     else:
-        pts_pfcf = interpolar_puntos(p_fcf, 18.0, 26.0, 2.5, 1.0, inverso=True) if p_fcf > 0 else 0.0
+        pts_pfcf = interpolar_puntos(p_fcf, 15.0, 22.0, 2.5, 0.8, inverso=True) if p_fcf > 0 else 0.0
     score_val += pts_pfcf
 
     multiplo_per_eval = p_fcf if (es_reit_puro and p_fcf > 0) else per
-    pts_per = interpolar_puntos(multiplo_per_eval, 18.0, 26.0, 2.0, 0.8, inverso=True) if multiplo_per_eval > 0 else 0.0
+    pts_per = interpolar_puntos(multiplo_per_eval, 16.0, 24.0, 2.0, 0.6, inverso=True) if multiplo_per_eval > 0 else 0.0
     score_val += pts_per
 
-    chowder_target = 8.0 if ((es_utility_pura or es_telecom or es_reit_puro) and yield_actual > 4.0) else (12.0 if yield_actual >= 3.0 else 15.0)
+    chowder_target = 9.0 if ((es_utility_pura or es_telecom or es_reit_puro) and yield_actual > 4.0) else (13.0 if yield_actual >= 3.0 else 16.0)
     yield_req_chowder = None
     if dgr_5y is not None:
         chowder_number = yield_actual + dgr_5y
         yield_req_chowder = chowder_target - dgr_5y
-        pts_chowder = interpolar_puntos(chowder_number, chowder_target, chowder_target - 2.5, 1.5, 0.5, inverso=False)
+        pts_chowder = interpolar_puntos(chowder_number, chowder_target, chowder_target - 3.0, 1.5, 0.3, inverso=False)
     else:
         pts_chowder = 0.0
     score_val = min(10.0, round(score_val + pts_chowder, 1))
 
-    posible_trampa_valor = (precio_actual <= precio_compra) and (score_calidad < 5.5 or (payout_fcf > 95.0) or (dgr_1y is not None and dgr_1y < -1.0))
+    posible_trampa_valor = (precio_actual <= precio_compra) and (score_calidad < 6.0 or (payout_fcf > 90.0) or (dgr_1y is not None and dgr_1y < -2.0))
 
     # ==========================================
-    # MOTOR BOGLE + REVERSIÓN A LA MEDIA DE WEISS (5 AÑOS)
+    # MOTOR BOGLE + REVERSIÓN A LA MEDIA (5 AÑOS)
     # ==========================================
     horizonte_bogle = 5
     candidatos_crec = [x for x in [dgr_5y, dgr_periodo, crecimiento_bpa_3y] if x is not None]
@@ -522,7 +535,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     precio_estimado_5a = precio_justo * ((1 + (crec_bogle / 100.0)) ** horizonte_bogle)
 
     # ==========================================
-    # RENDERIZADO VISUAL DE LA PÁGINA 1
+    # RENDERIZADO VISUAL
     # ==========================================
     if es_reit_puro: tipo_empresa_txt = "🏢 REIT / Inmobiliario (FFO)"
     elif es_quasi_reit_o_recompras: tipo_empresa_txt = "🍔 Franquicia / Recompras"
@@ -544,111 +557,110 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
             else: txt_exdiv = f"Último Ex-Div: {ex_dt.strftime('%d/%m/%Y')} (hace {abs(dias_ex)}d)"
         except Exception: pass
 
-    aviso_fx = f" | 💱 <strong>FX:</strong> {curr_fin}➔{currency} ({fx_rate:.3f})" if fx_rate != 1.0 else ""
+    aviso_fx = f" | 💱 <strong>FX:</strong> {curr_fin}➔{currency} ({f_num(fx_rate, 3)})" if fx_rate != 1.0 else ""
     st.markdown(f"""
     <div style="background-color: rgba(255, 255, 255, 0.05); padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 0.9rem;">
         <strong>Sector:</strong> <span style="color: #00d4ff;">{sector_final}</span> &nbsp;|&nbsp; 
         <strong>Último tick:</strong> <span style="color: #faca2b;">{hora_actual_str}</span> &nbsp;|&nbsp; 
         <span style="color: #e040fb; font-weight:600;">{txt_exdiv}</span> &nbsp;|&nbsp;
-        <strong>Shareholder Yield:</strong> <span style="color: #21c354;">{shareholder_yield:.2f}%</span>{aviso_fx}
+        <strong>Shareholder Yield:</strong> <span style="color: #21c354;">{f_num(shareholder_yield, 2, '%')}</span>{aviso_fx}
     </div>
     """, unsafe_allow_html=True)
 
-    # Perfil Fiscal compacto
     if pais in ['United States', 'Netherlands', 'Canada']: 
         st.success(f"✅ **Fiscalidad ({pais})**: Retención en origen del 15% (100% recuperable en la Renta en España).")
     elif pais == 'United Kingdom': 
         st.success(f"✅ **Fiscalidad ({pais})**: Retención en origen del 0% (salvo PIDs en REITs).")
     elif pais == 'Spain': 
-        st.success(f"✅ **Fiscalidad ({pais})**: Mercado local. Retención directa del {impuesto_pct}%.")
+        st.success(f"✅ **Fiscalidad ({pais})**: Mercado local. Retención directa del {f_num(impuesto_pct, 1, '%')}.")
     elif pais in MERMA_ORIGEN_PAIS:
-        st.warning(f"⚠️ **Fiscalidad ({pais})**: Exceso de retención en origen del **{MERMA_ORIGEN_PAIS[pais]}%** sobre el 15% del convenio. {'(Ya descontado de tu Yield Neto)' if aplicar_merma_origen else '(No descontado)'}")
+        st.warning(f"⚠️ **Fiscalidad ({pais})**: Exceso de retención en origen del **{f_num(MERMA_ORIGEN_PAIS[pais], 2, '%')}** sobre el 15% del convenio.")
 
     if aviso_extraordinario:
-        st.warning("⚠️ **Dividendo Extraordinario Filtrado:** Pago atípico (>75% sobre la mediana) suavizado automáticamente para no deformar los canales.")
+        st.warning("⚠️ **Dividendo Extraordinario Filtrado:** Pago atípico (>75% sobre la mediana) suavizado automáticamente.")
 
-    # 1. PUNTUACIONES Y VEREDICTO EJECUTIVO
+    # 1. PUNTUACIONES Y VEREDICTO
     col_sc1, col_sc2 = st.columns(2)
     with col_sc1:
         if score_calidad >= 8.0: 
-            st.success(f"🛡️ **CALIDAD DGI: {score_calidad:.1f}/10** — Negocio Sobresaliente. Caja blindada y foso competitivo claro.")
+            st.success(f"🛡️ **CALIDAD DGI: {f_num(score_calidad, 1)}/10** — Negocio Sobresaliente y Balance Blindado.")
         elif score_calidad >= 6.0: 
-            st.warning(f"⚖️ **CALIDAD DGI: {score_calidad:.1f}/10** — Negocio Sólido. Apto para cartera vigilando deuda o ciclo.")
+            st.warning(f"⚖️ **CALIDAD DGI: {f_num(score_calidad, 1)}/10** — Negocio Sólido. Apto vigilando deuda.")
         else: 
-            st.error(f"🚨 **CALIDAD DGI: {score_calidad:.1f}/10** — Calidad Baja. Alerta en solvencia, payout o ventas.")
+            st.error(f"🚨 **CALIDAD DGI: {f_num(score_calidad, 1)}/10** — Calidad Insuficiente / Riesgo de Apalancamiento.")
 
     with col_sc2:
         if score_val >= 7.0: 
-            st.success(f"🏷️ **VALORACIÓN DGI: {score_val:.1f}/10** — Oportunidad Clara. Percentil {percentil_yield_actual:.0f}% de Yield histórico.")
+            st.success(f"🏷️ **VALORACIÓN DGI: {f_num(score_val, 1)}/10** — Oportunidad Clara (Percentil {f_num(percentil_yield_actual, 0)}% de Yield).")
         elif score_val >= 4.0: 
-            st.warning(f"🏷️ **VALORACIÓN DGI: {score_val:.1f}/10** — Valoración Neutral. Cotiza cerca de su media histórica.")
+            st.warning(f"🏷️ **VALORACIÓN DGI: {f_num(score_val, 1)}/10** — Neutral / Cerca de su media histórica.")
         else: 
-            st.error(f"🏷️ **VALORACIÓN DGI: {score_val:.1f}/10** — Exigente / Cara. Margen de seguridad reducido.")
+            st.error(f"🏷️ **VALORACIÓN DGI: {f_num(score_val, 1)}/10** — Cotización Cara o Exigente.")
 
     if posible_trampa_valor:
-        st.warning("🚨 **VEREDICTO: POSIBLE TRAMPA DE VALOR** — Cotiza en Suelo de Weiss, pero su Calidad DGI es baja (< 5.5) o el Payout FCF supera el 95%. Riesgo de recorte.")
+        st.warning("🚨 **VEREDICTO: POSIBLE TRAMPA DE VALOR** — Cotiza en Suelo de Weiss, pero su Calidad DGI es baja (< 6.0) o el Payout FCF supera el 90%.")
     elif precio_actual <= precio_compra and score_calidad >= 7.0:
-        st.success(f"💎 **VEREDICTO: COMPRA FUERTE DGI** — Empresa de alta calidad ({score_calidad:.1f}/10) cotizando por debajo de su Suelo de Weiss ({precio_compra:.2f}{sym}).")
+        st.success(f"💎 **VEREDICTO: COMPRA FUERTE DGI** — Alta calidad ({f_num(score_calidad, 1)}/10) por debajo del Suelo Weiss ({f_num(precio_compra, 2)}{sym}).")
     elif precio_actual <= precio_compra:
-        st.success(f"🟢 **VEREDICTO: EN ZONA DE COMPRA WEISS** — Cotiza un {abs(dist_suelo_pct):.1f}% por debajo de su Suelo de Compra ({precio_compra:.2f}{sym}).")
+        st.success(f"🟢 **VEREDICTO: EN ZONA DE COMPRA WEISS** — Cotiza un {f_num(abs(dist_suelo_pct), 1)}% por debajo de su Suelo ({f_num(precio_compra, 2)}{sym}).")
     elif precio_actual <= precio_justo and score_calidad >= 7.0:
-        st.info(f"🟢 **VEREDICTO: ACUMULAR / VIGILAR** — Gran negocio cotizando con un {abs(pct_actual_vs_media):.1f}% de descuento sobre su Precio Justo ({precio_justo:.2f}{sym}).")
+        st.info(f"🟢 **VEREDICTO: ACUMULAR / VIGILAR** — Gran negocio con un {f_num(abs(pct_actual_vs_media), 1)}% de descuento sobre su Precio Justo.")
     elif precio_actual >= precio_venta:
-        st.error(f"🔴 **VEREDICTO: ZONA DE SOBREVALORACIÓN (VENTA / NO COMPRAR)** — Supera el techo histórico de Weiss ({precio_venta:.2f}{sym}).")
+        st.error(f"🔴 **VEREDICTO: ZONA DE VENTA** — Supera el techo histórico de Weiss ({f_num(precio_venta, 2)}{sym}).")
     else:
-        st.info(f"⏳ **VEREDICTO: MANTENER / EN ESPERA** — Cotiza un +{pct_actual_vs_media:.1f}% sobre su Precio Justo. Espera corrección hacia {precio_compra:.2f}{sym}.")
+        st.info(f"⏳ **VEREDICTO: MANTENER / EN ESPERA** — Cotiza un +{f_num(pct_actual_vs_media, 1)}% sobre su Precio Justo.")
 
-    # 2. CUADRÍCULA 2x2 RESPONSIVA DE PRECIOS OBJETIVO WEISS
+    # 2. CUADRÍCULA 2x2 RESPONSIVA
     color_actual = "#21c354" if precio_actual <= precio_compra else ("#ff4b4b" if precio_actual >= precio_venta else "#faca2b")
-    txt_extra_actual = f"Descuento: {abs(pct_actual_vs_media):.1f}% vs Media" if pct_actual_vs_media <= 0 else f"Sobreprecio: +{pct_actual_vs_media:.1f}% vs Media"
+    txt_extra_actual = f"Descuento: {f_num(abs(pct_actual_vs_media), 1)}% vs Media" if pct_actual_vs_media <= 0 else f"Sobreprecio: +{f_num(pct_actual_vs_media, 1)}% vs Media"
 
     st.markdown(f"""
     <div class="grid-precios-weiss">
         <div class="card-precio" style="border-top: 3px solid {color_actual};">
             <span style="font-size: 0.85rem; color: #aaa;">Cotización en Vivo</span>
-            <span style="font-size: 1.75rem; font-weight: 800; color: {color_actual};">{precio_actual:.2f}{sym}</span>
-            <span style="font-size: 0.85rem; font-weight: 600; color: {color_actual};">Yield: {yield_actual:.2f}% ({yield_actual * net_mult:.2f}% neto)</span>
-            <span style="font-size: 0.78rem; color: #999; margin-top: 2px;">{txt_extra_actual} · Perc. {percentil_yield_actual:.0f}%</span>
+            <span style="font-size: 1.75rem; font-weight: 800; color: {color_actual};">{f_num(precio_actual, 2)}{sym}</span>
+            <span style="font-size: 0.85rem; font-weight: 600; color: {color_actual};">Yield: {f_num(yield_actual, 2, '%')} ({f_num(yield_actual * net_mult, 2, '%')} neto)</span>
+            <span style="font-size: 0.78rem; color: #999; margin-top: 2px;">{txt_extra_actual} · Perc. {f_num(percentil_yield_actual, 0)}%</span>
         </div>
         <div class="card-precio" style="border-top: 3px solid #21c354;">
             <span style="font-size: 0.85rem; color: #aaa;">Suelo Compra (Weiss)</span>
-            <span style="font-size: 1.75rem; font-weight: 800; color: #21c354;">{precio_compra:.2f}{sym}</span>
-            <span style="font-size: 0.85rem; font-weight: 600; color: #21c354;">Yield: {yield_infravalorado:.2f}% ({yield_infravalorado * net_mult:.2f}% neto)</span>
-            <span style="font-size: 0.78rem; color: #999; margin-top: 2px;">Suelo: {pct_infra_vs_media:.1f}% vs Media</span>
+            <span style="font-size: 1.75rem; font-weight: 800; color: #21c354;">{f_num(precio_compra, 2)}{sym}</span>
+            <span style="font-size: 0.85rem; font-weight: 600; color: #21c354;">Yield: {f_num(yield_infravalorado, 2, '%')} ({f_num(yield_infravalorado * net_mult, 2, '%')} neto)</span>
+            <span style="font-size: 0.78rem; color: #999; margin-top: 2px;">Suelo: {f_num(pct_infra_vs_media, 1)}% vs Media</span>
         </div>
         <div class="card-precio" style="border-top: 3px solid #faca2b;">
             <span style="font-size: 0.85rem; color: #aaa;">Precio Justo ({años_analisis}A)</span>
-            <span style="font-size: 1.75rem; font-weight: 800; color: #faca2b;">{precio_justo:.2f}{sym}</span>
-            <span style="font-size: 0.85rem; font-weight: 600; color: #faca2b;">Yield: {yield_medio:.2f}% ({yield_medio * net_mult:.2f}% neto)</span>
+            <span style="font-size: 1.75rem; font-weight: 800; color: #faca2b;">{f_num(precio_justo, 2)}{sym}</span>
+            <span style="font-size: 0.85rem; font-weight: 600; color: #faca2b;">Yield: {f_num(yield_medio, 2, '%')} ({f_num(yield_medio * net_mult, 2, '%')} neto)</span>
             <span style="font-size: 0.78rem; color: #999; margin-top: 2px;">Imán Reversión a la Media</span>
         </div>
         <div class="card-precio" style="border-top: 3px solid #ff4b4b;">
             <span style="font-size: 0.85rem; color: #aaa;">Techo Venta (Weiss)</span>
-            <span style="font-size: 1.75rem; font-weight: 800; color: #ff4b4b;">{precio_venta:.2f}{sym}</span>
-            <span style="font-size: 0.85rem; font-weight: 600; color: #ff4b4b;">Yield: {yield_sobrevalorado:.2f}% ({yield_sobrevalorado * net_mult:.2f}% neto)</span>
-            <span style="font-size: 0.78rem; color: #999; margin-top: 2px;">Techo: +{pct_sobre_vs_media:.1f}% vs Media</span>
+            <span style="font-size: 1.75rem; font-weight: 800; color: #ff4b4b;">{f_num(precio_venta, 2)}{sym}</span>
+            <span style="font-size: 0.85rem; font-weight: 600; color: #ff4b4b;">Yield: {f_num(yield_sobrevalorado, 2, '%')} ({f_num(yield_sobrevalorado * net_mult, 2, '%')} neto)</span>
+            <span style="font-size: 0.78rem; color: #999; margin-top: 2px;">Techo: +{f_num(pct_sobre_vs_media, 1)}% vs Media</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # 3. TERMÓMETRO VISUAL DEL CANAL DE WEISS
+    # 3. TERMÓMETRO VISUAL
     if precio_venta > precio_compra:
         pos_canal = ((precio_actual - precio_compra) / (precio_venta - precio_compra)) * 100
         pos_canal_clamp = max(2.0, min(98.0, pos_canal))
         st.markdown(f"""
         <div style="background: rgba(255,255,255,0.04); padding: 10px 14px; border-radius: 8px; margin-bottom: 16px;">
             <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#bbb; margin-bottom:4px;">
-                <span>🟢 Suelo Compra ({precio_compra:.2f}{sym})</span>
-                <span>📍 <strong>Posición en Canal: {pos_canal:.0f}%</strong></span>
-                <span>🔴 Techo Venta ({precio_venta:.2f}{sym})</span>
+                <span>🟢 Suelo Compra ({f_num(precio_compra, 2)}{sym})</span>
+                <span>📍 <strong>Posición en Canal: {f_num(pos_canal, 0)}%</strong></span>
+                <span>🔴 Techo Venta ({f_num(precio_venta, 2)}{sym})</span>
             </div>
             <div style="position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #21c354 0%, #faca2b 50%, #ff4b4b 100%);">
-                <div style="position: absolute; left: {pos_canal_clamp:.1f}%; top: -4px; width: 18px; height: 18px; background: white; border: 3px solid #00d4ff; border-radius: 50%; transform: translateX(-50%);"></div>
+                <div style="position: absolute; left: {f_num(pos_canal_clamp, 1)}%; top: -4px; width: 18px; height: 18px; background: white; border: 3px solid #00d4ff; border-radius: 50%; transform: translateX(-50%);"></div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-    # 4. REGLA DE BOGLE + REVERSIÓN A LA MEDIA DE WEISS (CON SIMULADOR 500€/$)
+    # 4. BOGLE + REVERSIÓN WEISS
     st.markdown("#### 🔮 Retorno Total Esperado: Regla de Bogle + Reversión a la Media de Weiss (5 Años)")
     
     b_rev_cls = "badge-verde" if reversion_weiss_anual_acotada >= 0 else "badge-rojo"
@@ -666,16 +678,16 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         <div class="card-dgi">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <span style="color: #aaa; font-size: 0.85rem;">Ecuación Bogle: Yield + Crecimiento ± Reversión Weiss</span>
-                <span class="{b_tot_cls}">CAGR Bruto: {retorno_bogle_bruto_anual:+.1f}%/año</span>
+                <span class="{b_tot_cls}">CAGR Bruto: {f_num(retorno_bogle_bruto_anual, 1, '%')}/año</span>
             </div>
             <div style="font-size: 1.15rem; margin: 8px 0;">
-                <span style="color:#00d4ff; font-weight:bold;">{yield_actual:.2f}%</span> <span style="font-size:0.8rem; color:#888;">(Yield)</span> + 
-                <span style="color:#faca2b; font-weight:bold;">{crec_bogle:+.1f}%</span> <span style="font-size:0.8rem; color:#888;">(Crec.)</span> 
-                <span style="color:{'#21c354' if reversion_weiss_anual_acotada >= 0 else '#ff4b4b'}; font-weight:bold;"> {signo_rev}{reversion_weiss_anual_acotada:.1f}%</span> <span style="font-size:0.8rem; color:#888;">(Reversión)</span> = 
-                <strong style="font-size: 1.45rem; color: white;">{retorno_bogle_neto_anual:+.1f}% neto/año</strong>
+                <span style="color:#00d4ff; font-weight:bold;">{f_num(yield_actual, 2, '%')}</span> <span style="font-size:0.8rem; color:#888;">(Yield)</span> + 
+                <span style="color:#faca2b; font-weight:bold;">{f_num(crec_bogle, 1, '%')}</span> <span style="font-size:0.8rem; color:#888;">(Crec.)</span> 
+                <span style="color:{'#21c354' if reversion_weiss_anual_acotada >= 0 else '#ff4b4b'}; font-weight:bold;"> {signo_rev}{f_num(reversion_weiss_anual_acotada, 1, '%')}</span> <span style="font-size:0.8rem; color:#888;">(Reversión)</span> = 
+                <strong style="font-size: 1.45rem; color: white;">{f_num(retorno_bogle_neto_anual, 1, '%')} neto/año</strong>
             </div>
             <span style="font-size: 0.78rem; color: #999;">
-                Si en 5 años la acción vuelve a su Yield Medio ({yield_medio:.2f}%), su cotización rondaría los <strong>{precio_estimado_5a:.2f}{sym}</strong>, aportando un <strong>{signo_rev}{reversion_weiss_anual_acotada:.1f}% anual extra</strong> por expansión/contracción de múltiplo.
+                Si en 5 años vuelve a su Yield Medio ({f_num(yield_medio, 2, '%')}), su cotización rondará los <strong>{f_num(precio_estimado_5a, 2)}{sym}</strong> ({signo_rev}{f_num(reversion_weiss_anual_acotada, 1)}% anual por múltiplo).
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -684,17 +696,17 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         st.markdown(f"""
         <div class="card-dgi">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <span style="color: #aaa; font-size: 0.85rem;">🧮 Simulación de tu Orden de {capital_simulado:,.0f}{sym}</span>
-                <span class="{b_rev_cls}">A 5 Años: {capital_final_5a:,.0f}{sym} ({ganancia_neta_5a:+,.0f}{sym})</span>
+                <span style="color: #aaa; font-size: 0.85rem;">🧮 Simulación de tu Orden de {f_num(capital_simulado, 0)}{sym}</span>
+                <span class="{b_rev_cls}">A 5 Años: {f_num(capital_final_5a, 0)}{sym} ({f_num(ganancia_neta_5a, 0, sym)}+)</span>
             </div>
             <div style="font-size: 0.9rem; color: #ddd; line-height: 1.5; margin-top: 4px;">
-                • <strong>Comprando HOY ({precio_actual:.2f}{sym}):</strong> {acc_hoy:.2f} acc. ➔ Renta inicial: <strong style="color:#00d4ff;">{div_neto_hoy:.2f}{sym}/año netos</strong>.<br>
-                • <strong>Esperando al SUELO ({precio_compra:.2f}{sym}):</strong> {acc_suelo:.2f} acc. ➔ Renta inicial: <strong style="color:#21c354;">{div_neto_suelo:.2f}{sym}/año netos</strong>.
+                • <strong>Comprando HOY ({f_num(precio_actual, 2)}{sym}):</strong> {f_num(acc_hoy, 2)} acc. ➔ Renta anual neta: <strong style="color:#00d4ff;">{f_num(div_neto_hoy, 2)}{sym}/año</strong>.<br>
+                • <strong>Esperando al SUELO ({f_num(precio_compra, 2)}{sym}):</strong> {f_num(acc_suelo, 2)} acc. ➔ Renta anual neta: <strong style="color:#21c354;">{f_num(div_neto_suelo, 2)}{sym}/año</strong>.
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-    # 5. GRÁFICO 1: CANALES HISTÓRICOS DE WEISS + EXPLICACIÓN DINÁMICA
+    # 5. GRÁFICO 1: WEISS
     st.markdown(f"### 📈 Evolución Histórica de Valoración ({años_analisis} Años)")
     df_grafico = historial_analisis[['Close']].copy()
     if not df_grafico.empty:
@@ -722,16 +734,16 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         is_venta = df_grafico['Close'] >= df_grafico['Precio_Venta']
         toques_venta = int((is_venta & ~is_venta.shift(1, fill_value=False)).sum())
 
-        estado_canal_txt = f"un <strong>{abs(pct_actual_vs_media):.1f}% por debajo</strong> de su Precio Justo ({precio_justo:.2f}{sym})" if pct_actual_vs_media <= 0 else f"un <strong>+{pct_actual_vs_media:.1f}% por encima</strong> de su Precio Justo ({precio_justo:.2f}{sym})"
-        dist_compra_txt = f"ya cotiza un <strong>{abs(dist_suelo_pct):.1f}% por debajo de la línea verde</strong>" if dist_suelo_pct <= 0 else f"necesita caer un <strong>{dist_suelo_pct:.1f}% adicional</strong> para tocar la línea verde ({precio_compra:.2f}{sym})"
+        estado_canal_txt = f"un <strong>{f_num(abs(pct_actual_vs_media), 1)}% por debajo</strong> de su Precio Justo ({f_num(precio_justo, 2)}{sym})" if pct_actual_vs_media <= 0 else f"un <strong>+{f_num(pct_actual_vs_media, 1)}% por encima</strong> de su Precio Justo ({f_num(precio_justo, 2)}{sym})"
+        dist_compra_txt = f"ya cotiza un <strong>{f_num(abs(dist_suelo_pct), 1)}% por debajo de la línea verde</strong>" if dist_suelo_pct <= 0 else f"necesita caer un <strong>{f_num(dist_suelo_pct, 1)}% adicional</strong> para tocar la línea verde ({f_num(precio_compra, 2)}{sym})"
 
         st.markdown(f"""
         <div class="explicacion-graf">
-            💡 <strong>Lectura de este gráfico en {ticker_symbol}:</strong> Los escalones muestran cómo cada subida anual del dividendo eleva el suelo y el techo de valoración de la empresa. Hoy cotiza a <strong>{precio_actual:.2f}{sym}</strong> ({estado_canal_txt}) y {dist_compra_txt}. En los últimos {años_analisis} años ha tocado la zona de compra <strong>{toques_compra} veces</strong> (y {toques_venta} veces la zona de venta). Su Yield actual (<strong>{yield_actual:.2f}%</strong>) supera al <strong>{percentil_yield_actual:.1f}%</strong> de todas las sesiones de los últimos {años_analisis} años.
+            💡 <strong>Lectura en {ticker_symbol}:</strong> Hoy cotiza a <strong>{f_num(precio_actual, 2)}{sym}</strong> ({estado_canal_txt}) y {dist_compra_txt}. En los últimos {años_analisis} años ha tocado la zona de compra <strong>{toques_compra} veces</strong> y la de venta <strong>{toques_venta} veces</strong>. Su Yield actual (<strong>{f_num(yield_actual, 2, '%')}</strong>) supera al <strong>{f_num(percentil_yield_actual, 1)}%</strong> de las sesiones históricas.
         </div>
         """, unsafe_allow_html=True)
 
-    # 6. GRÁFICO 2: LUPA DE FRANCOTIRADOR (TIMING + SMA 200/1000 + RSI + MACD)
+    # 6. GRÁFICO 2: LUPA DE FRANCOTIRADOR
     st.divider()
     st.markdown("### 🎯 Lupa de Francotirador: Timing de Entrada (Últimos 2 Meses + SMA 200/1000 + RSI + MACD)")
 
@@ -791,9 +803,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['SMA_200'], name='SMA 200', line=dict(color='#faca2b', width=1.4, dash='dot'), showlegend=True), row=1, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['SMA_1000'], name='SMA 1000', line=dict(color='#ff9100', width=2.0), showlegend=True), row=1, col=1)
 
-            if 'Precio_Chowder' in df_tech.columns:
-                fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['Precio_Chowder'], name='Precio Obj. Chowder', line=dict(color='#e040fb', width=1.5, dash='dashdot'), showlegend=True, visible='legendonly'), row=1, col=1)
-
             fig_tech.add_trace(go.Bar(x=df_tech.index, y=df_tech['Volume'], name='Volumen', marker_color=colors_vol, showlegend=False), row=2, col=1)
             fig_tech.add_trace(go.Scatter(x=df_tech.index, y=df_tech['RSI'], name='RSI (14)', line=dict(color='#b388ff', width=1.8), showlegend=False), row=3, col=1)
             fig_tech.add_hline(y=70, line_dash="dot", line_color="#ff4b4b", row=3, col=1)
@@ -812,14 +821,14 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
             fig_tech.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
             st.plotly_chart(fig_tech, use_container_width=True)
 
-            txt_s200 = f"a un <strong>{((precio_actual - ult_sma200)/ult_sma200)*100:+.1f}%</strong> de su SMA 200 ({ult_sma200:.2f}{sym})" if ult_sma200 else "sin SMA 200"
-            txt_s1000 = f"y a un <strong>{((precio_actual - ult_sma1000)/ult_sma1000)*100:+.1f}%</strong> de su SMA 1000 ({ult_sma1000:.2f}{sym})" if ult_sma1000 else ""
-            estado_macd = "alcista (MACD sobre Señal)" if ult_macd > ult_signal else ("bajista pero perdiendo fuerza (posible giro)" if ult_hist > penult_hist else "bajista en caída")
-            estado_rsi = "en sobreventa (<32, agotamiento vendedor)" if ult_rsi <= 32 else ("en sobrecompra (>70)" if ult_rsi >= 70 else "en zona neutral")
+            txt_s200 = f"a un <strong>{f_num(((precio_actual - ult_sma200)/ult_sma200)*100, 1)}%</strong> de su SMA 200 ({f_num(ult_sma200, 2)}{sym})" if ult_sma200 else ""
+            txt_s1000 = f"y a un <strong>{f_num(((precio_actual - ult_sma1000)/ult_sma1000)*100, 1)}%</strong> de su SMA 1000 ({f_num(ult_sma1000, 2)}{sym})" if ult_sma1000 else ""
+            estado_macd = "alcista" if ult_macd > ult_signal else ("bajista perdiendo fuerza" if ult_hist > penult_hist else "bajista")
+            estado_rsi = "en sobreventa (<32)" if ult_rsi <= 32 else ("en sobrecompra (>70)" if ult_rsi >= 70 else "en zona neutral")
 
             st.markdown(f"""
             <div class="explicacion-graf">
-                💡 <strong>Lectura Técnica en Vivo ({precio_actual:.2f}{sym}):</strong> El precio se sitúa {txt_s200} {txt_s1000}. El <strong>RSI (14) marca {ult_rsi:.1f}</strong> ({estado_rsi}) y el <strong>MACD está {estado_macd}</strong>. El pico de volumen reciente equivale a <strong>{ratio_vol:.2f}x veces</strong> la media de 2 meses ({'señal de capitulación/volumen institucional' if ratio_vol >= 1.5 else 'volumen normal de sesión'}).
+                💡 <strong>Lectura Técnica:</strong> Cotiza {txt_s200} {txt_s1000}. RSI en <strong>{f_num(ult_rsi, 1)}</strong> ({estado_rsi}) y MACD <strong>{estado_macd}</strong>. Volumen reciente de <strong>{f_num(ratio_vol, 2)}x</strong> sobre la media.
             </div>
             """, unsafe_allow_html=True)
 
@@ -854,7 +863,6 @@ aplicar_merma = st.checkbox(
     value=st.session_state.merma_activa
 )
 
-# Sincronizar cambios en la memoria compartida para el resto de pestañas
 st.session_state.ticker_activo = ticker_input
 st.session_state.años_activo = años_analisis
 st.session_state.impuesto_activo = impuesto
