@@ -11,10 +11,13 @@ from plotly.subplots import make_subplots
 warnings.filterwarnings('ignore')
 
 TRADUCCION = {
-    'Technology': 'Tecnología', 'Healthcare': 'Salud', 'Financial Services': 'Servicios Financieros',
-    'Consumer Cyclical': 'Consumo Cíclico', 'Industrials': 'Industrial', 'Consumer Defensive': 'Consumo Defensivo',
+    'Technology': 'Tecnología', 'Information Technology': 'Tecnología',
+    'Healthcare': 'Salud', 'Financial Services': 'Servicios Financieros', 'Financials': 'Servicios Financieros',
+    'Consumer Cyclical': 'Consumo Cíclico', 'Consumer Discretionary': 'Consumo Cíclico',
+    'Industrials': 'Industrial', 'Consumer Defensive': 'Consumo Defensivo', 'Consumer Staples': 'Consumo Defensivo',
     'Energy': 'Energía', 'Real Estate': 'Inmobiliario', 'Utilities': 'Servicios Públicos',
-    'Basic Materials': 'Materiales Básicos', 'Communication Services': 'Servicios de Comunicación'
+    'Basic Materials': 'Materiales Básicos', 'Materials': 'Materiales Básicos',
+    'Communication Services': 'Servicios de Comunicación'
 }
 
 MERMA_ORIGEN_PAIS = {
@@ -48,6 +51,21 @@ def cargar_fundamentales_pesados(ticker_symbol):
     except Exception:
         info = {}
 
+    # Respaldo mediante yf.Search si Yahoo bloquea t.info en Streamlit Cloud
+    if not info.get('sector') or not info.get('shortName'):
+        try:
+            busq = yf.Search(ticker_symbol, max_results=1).quotes
+            if busq and len(busq) > 0:
+                q0 = busq[0]
+                if not info.get('shortName'):
+                    info['shortName'] = q0.get('shortname') or q0.get('longname') or ticker_symbol
+                if not info.get('sector') and q0.get('sector'):
+                    info['sector'] = q0.get('sector')
+                if not info.get('industry') and q0.get('industry'):
+                    info['industry'] = q0.get('industry')
+        except Exception:
+            pass
+
     divs = t.dividends
     
     inc_stmt, bs_stmt, cf_stmt = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -69,7 +87,6 @@ def cargar_fundamentales_pesados(ticker_symbol):
         shares_hist = t.get_shares_full(start="2008-01-01")
     except Exception: pass
 
-    # Respaldo de divisa desde fast_info si info falló
     curr_cot = info.get('currency')
     if not curr_cot:
         try:
@@ -130,7 +147,6 @@ def interpolar_puntos(valor, umbral_max, umbral_med, pts_max, pts_med, inverso=F
         return round(pts_med + ratio * (pts_max - pts_med), 2)
 
 def ultimo_valor_tabla(df, claves):
-    """Extrae el último dato anual disponible en inc_stmt, bs_stmt o cf_stmt si ticker.info falla."""
     if df is not None and not df.empty:
         for k in claves:
             if k in df.index:
@@ -145,11 +161,6 @@ def ultimo_valor_tabla(df, claves):
 def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar_merma_origen, capital_simulado):
     info, dividendos_raw, inc_stmt, bs_stmt, cf_stmt, shares_hist, fx_rate, curr_fin = cargar_fundamentales_pesados(ticker_symbol)
     historial_raw, precio_vivo, shares_fast, mcap_fast = cargar_cotizacion_tiempo_real(ticker_symbol)
-
-    # Si info se quedó vacío en caché por un microcorte de Yahoo, reintentar una vez en vivo
-    if not info.get('sector') and not info.get('shortName'):
-        cargar_fundamentales_pesados.clear()
-        info, dividendos_raw, inc_stmt, bs_stmt, cf_stmt, shares_hist, fx_rate, curr_fin = cargar_fundamentales_pesados(ticker_symbol)
 
     if dividendos_raw.empty or len(historial_raw) < 252:
         st.error("❌ Error: No hay suficientes datos históricos o de dividendos en Yahoo Finance.")
@@ -186,8 +197,8 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 10px;
-    padding: 12px 14px;
-    margin-bottom: 10px;
+    padding: 13px 15px;
+    margin-bottom: 12px;
 }
 .explicacion-graf {
     background: rgba(0, 212, 255, 0.05);
@@ -200,9 +211,10 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     margin-bottom: 18px;
     line-height: 1.45;
 }
-.badge-verde { background: rgba(33, 195, 84, 0.2); color: #21c354; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
-.badge-rojo { background: rgba(255, 75, 75, 0.2); color: #ff4b4b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
-.badge-ambar { background: rgba(250, 202, 43, 0.2); color: #faca2b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
+.badge-verde { background: rgba(33, 195, 84, 0.2); color: #21c354; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+.badge-rojo { background: rgba(255, 75, 75, 0.2); color: #ff4b4b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+.badge-ambar { background: rgba(250, 202, 43, 0.2); color: #faca2b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+.badge-azul { background: rgba(0, 212, 255, 0.2); color: #00d4ff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -245,8 +257,8 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
     precio_actual = float(historial_analisis['Close'].dropna().iloc[-1])
 
-    sector_en = info.get('sector', 'Desconocido')
-    industry_en = info.get('industry', 'Desconocido')
+    sector_en = info.get('sector', 'General')
+    industry_en = info.get('industry', 'General')
     pais = info.get('country', 'Desconocido')
     nombre_empresa = info.get('shortName', ticker_symbol)
     sector_final = TRADUCCION.get(sector_en, sector_en)
@@ -260,10 +272,9 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
     net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
-    # --- DIVIDENDOS CORREGIDOS (FRECUENCIA DE LOS ÚLTIMOS 3 AÑOS CERRADOS) ---
+    # --- DIVIDENDOS (FRECUENCIA DE LOS ÚLTIMOS 3 AÑOS CERRADOS) ---
     años_div = dividendos.index.year
     conteo_por_año = años_div.value_counts()
-    # Mirar solo los últimos 3 años cerrados para detectar cambios de semestral a trimestral (ej. ACN)
     conteo_reciente = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 3)]
     if not conteo_reciente.empty:
         pagos_por_año = int(conteo_reciente.mode().iloc[0])
@@ -274,7 +285,8 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     if pagos_por_año not in [1, 2, 4, 12]:
         pagos_por_año = 4 if pagos_por_año == 3 else (12 if pagos_por_año > 10 else 4)
 
-    # Filtro suave de pagos especiales (>2.2x la mediana de su propio año/entorno)
+    nombre_frecuencia = {1: "anual", 2: "semestral", 4: "trimestral", 12: "mensual"}.get(pagos_por_año, "periódico")
+
     mediana_pagos = dividendos.rolling(window=max(4, pagos_por_año), min_periods=1).median()
     umbral_extra = mediana_pagos * 2.2
     aviso_extraordinario = bool((dividendos.tail(pagos_por_año) > umbral_extra.tail(pagos_por_año)).any())
@@ -282,7 +294,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
     divs_reg_por_año = dividendos_regulares.groupby(dividendos_regulares.index.year).sum()
 
-    # Forward dividend: prioriza el último pago regular * pagos_por_año si supera al dato estático de Yahoo
     ult_pago_anualizado = float(dividendos_regulares.iloc[-1]) * pagos_por_año if not dividendos_regulares.empty else 0.0
     ultimo_año_completo = float(divs_reg_por_año.loc[divs_reg_por_año.index < año_actual].iloc[-1]) if any(divs_reg_por_año.index < año_actual) else 0.0
     
@@ -290,7 +301,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     if es_peniques_uk and fd_info > (precio_actual * 0.25):
         fd_info /= 100.0
 
-    # Si fd_info es 0 (fallo de info) o menor al último pago anualizado (ej. subida reciente de dividendo), usamos el real
     if fd_info <= 0 or abs(ult_pago_anualizado - fd_info) / max(1.0, ult_pago_anualizado) > 0.20:
         forward_dividend = max(ult_pago_anualizado, ultimo_año_completo)
     else:
@@ -313,67 +323,53 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     yield_actual = (forward_dividend / precio_actual) * 100 if precio_actual > 0 else 0.0
     percentil_yield_actual = float((yields_validos < yield_actual).mean() * 100)
 
-    # --- FUNDAMENTALES CON RESPALDO AUTOMÁTICO DESDE TABLAS CONTABLES ---
+    # --- FUNDAMENTALES CON RESPALDO CONTABLE ---
     shares = get_safe('sharesOutstanding', 0.0)
-    if shares <= 0 and shares_fast:
-        shares = shares_fast
-    if shares <= 0:
-        shares = ultimo_valor_tabla(inc_stmt, ['Diluted Average Shares', 'Basic Average Shares'])
+    if shares <= 0 and shares_fast: shares = shares_fast
+    if shares <= 0: shares = ultimo_valor_tabla(inc_stmt, ['Diluted Average Shares', 'Basic Average Shares'])
 
     bpa_trailing = get_safe('trailingEps', 0.0)
-    if bpa_trailing == 0:
-        bpa_trailing = ultimo_valor_tabla(inc_stmt, ['Diluted EPS', 'Basic EPS']) * fx_rate
+    if bpa_trailing == 0: bpa_trailing = ultimo_valor_tabla(inc_stmt, ['Diluted EPS', 'Basic EPS']) * fx_rate
 
     per_actual = get_safe('trailingPE', 0.0)
-    if per_actual <= 0 and bpa_trailing > 0:
-        per_actual = precio_actual / bpa_trailing
+    if per_actual <= 0 and bpa_trailing > 0: per_actual = precio_actual / bpa_trailing
     per_forward = get_safe('forwardPE', 0.0)
     per = per_actual if per_actual > 0 else per_forward
 
     payout_ratio = get_safe('payoutRatio', 0.0) * 100
-    if payout_ratio <= 0 and bpa_trailing > 0:
-        payout_ratio = (forward_dividend / bpa_trailing) * 100
+    if payout_ratio <= 0 and bpa_trailing > 0: payout_ratio = (forward_dividend / bpa_trailing) * 100
 
     total_debt = get_safe('totalDebt', 0.0) * fx_rate
-    if total_debt <= 0:
-        total_debt = ultimo_valor_tabla(bs_stmt, ['Total Debt', 'Long Term Debt And Capital Lease Obligation', 'Long Term Debt']) * fx_rate
+    if total_debt <= 0: total_debt = ultimo_valor_tabla(bs_stmt, ['Total Debt', 'Long Term Debt And Capital Lease Obligation', 'Long Term Debt']) * fx_rate
 
     total_cash = get_safe('totalCash', 0.0) * fx_rate
-    if total_cash <= 0:
-        total_cash = ultimo_valor_tabla(bs_stmt, ['Cash Cash Equivalents And Short Term Investments', 'Cash And Cash Equivalents', 'Cash']) * fx_rate
+    if total_cash <= 0: total_cash = ultimo_valor_tabla(bs_stmt, ['Cash Cash Equivalents And Short Term Investments', 'Cash And Cash Equivalents', 'Cash']) * fx_rate
 
     ebitda = get_safe('ebitda', 0.0) * fx_rate
-    if ebitda <= 0:
-        ebitda = ultimo_valor_tabla(inc_stmt, ['EBITDA', 'Normalized EBITDA', 'Operating Income']) * fx_rate
+    if ebitda <= 0: ebitda = ultimo_valor_tabla(inc_stmt, ['EBITDA', 'Normalized EBITDA', 'Operating Income']) * fx_rate
 
     fcf_raw = get_safe('freeCashflow', 0.0) * fx_rate
-    if fcf_raw == 0:
-        fcf_raw = ultimo_valor_tabla(cf_stmt, ['Free Cash Flow']) * fx_rate
+    if fcf_raw == 0: fcf_raw = ultimo_valor_tabla(cf_stmt, ['Free Cash Flow']) * fx_rate
 
     ocf_raw = get_safe('operatingCashflow', 0.0) * fx_rate
-    if ocf_raw == 0:
-        ocf_raw = ultimo_valor_tabla(cf_stmt, ['Operating Cash Flow', 'Cash Flow From Continuing Operating Activities']) * fx_rate
+    if ocf_raw == 0: ocf_raw = ultimo_valor_tabla(cf_stmt, ['Operating Cash Flow', 'Cash Flow From Continuing Operating Activities']) * fx_rate
 
     flujo_caja_referencia = ocf_raw if (es_reit_puro and ocf_raw > fcf_raw) else fcf_raw
 
     total_equity_raw = get_safe('totalStockholderEquity', 0.0) * fx_rate
-    if total_equity_raw == 0:
-        total_equity_raw = ultimo_valor_tabla(bs_stmt, ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity']) * fx_rate
+    if total_equity_raw == 0: total_equity_raw = ultimo_valor_tabla(bs_stmt, ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity']) * fx_rate
 
     net_inc_val = ultimo_valor_tabla(inc_stmt, ['Net Income', 'Net Income Common Stockholders']) * fx_rate
     roe = get_safe('returnOnEquity', 0.0) * 100
-    if roe == 0 and total_equity_raw > 0 and net_inc_val > 0:
-        roe = (net_inc_val / total_equity_raw) * 100
+    if roe == 0 and total_equity_raw > 0 and net_inc_val > 0: roe = (net_inc_val / total_equity_raw) * 100
 
     ebit_tabla = ultimo_valor_tabla(inc_stmt, ['Operating Income', 'EBIT']) * fx_rate
     rev_tabla = ultimo_valor_tabla(inc_stmt, ['Total Revenue', 'Operating Revenue']) * fx_rate
     operating_margins = get_safe('operatingMargins', 0.0) * 100
-    if operating_margins == 0 and rev_tabla > 0 and ebit_tabla > 0:
-        operating_margins = (ebit_tabla / rev_tabla) * 100
+    if operating_margins == 0 and rev_tabla > 0 and ebit_tabla > 0: operating_margins = (ebit_tabla / rev_tabla) * 100
 
     price_to_book = get_safe('priceToBook', -1)
-    if price_to_book <= 0 and total_equity_raw > 0 and shares > 0:
-        price_to_book = precio_actual / (total_equity_raw / shares)
+    if price_to_book <= 0 and total_equity_raw > 0 and shares > 0: price_to_book = precio_actual / (total_equity_raw / shares)
 
     deuda_equity = get_safe('debtToEquity', 0.0)
     current_ratio = get_safe('currentRatio', 0.0)
@@ -447,6 +443,14 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     else:
         dividendos_barras.loc[año_actual] = forward_dividend
 
+    # Suavizar visualmente años intermedios donde cambió el calendario de pagos (ej. 2019 o 2025 en ACN) para no distorsionar DGR ni racha
+    if len(dividendos_barras) >= 3:
+        vals_db = dividendos_barras.values.copy()
+        for idx_b in range(1, len(vals_db) - 1):
+            if vals_db[idx_b] < vals_db[idx_b - 1] * 0.92 and vals_db[idx_b + 1] > vals_db[idx_b - 1]:
+                vals_db[idx_b] = (vals_db[idx_b - 1] + vals_db[idx_b + 1]) / 2.0
+        dividendos_barras = pd.Series(vals_db, index=dividendos_barras.index)
+
     años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
     dgr_5y, dgr_periodo, dgr_1y = None, None, None
     if len(dividendos_barras) >= 2 and dividendos_barras.iloc[-2] > 0:
@@ -465,7 +469,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
                 racha_sin_recortes += 1
             else: break
 
-    # Acciones en circulación: priorizar Diluted Average Shares auditadas de inc_stmt para evitar ruido de clases en ACN
     shares_yearly = pd.Series(dtype=float)
     variacion_acciones, recompras_anualizadas = None, 0.0
     try:
@@ -512,7 +515,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     dist_suelo_pct = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 0
 
     # ==========================================
-    # SISTEMA DE PUNTUACIONES CALIBRADO Y CORREGIDO (0 A 10 PTS)
+    # SISTEMA DE PUNTUACIONES CALIBRADO (0 A 10 PTS)
     # ==========================================
     lim_deuda_optima = 3.5 if (es_regulada_o_reit or es_defensivo or es_telecom) else 2.5
     lim_deuda_aceptable = 5.0 if (es_regulada_o_reit or es_defensivo or es_telecom) else 4.0
@@ -578,7 +581,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     posible_trampa_valor = (precio_actual <= precio_compra) and (score_calidad < 5.5 or (payout_fcf > 92.0) or (dgr_1y is not None and dgr_1y < -2.0))
 
     # ==========================================
-    # MOTOR BOGLE + REVERSIÓN A LA MEDIA (5 AÑOS)
+    # MOTOR BOGLE + REVERSIÓN A LA MEDIA Y SIMULACIÓN DE ORDEN
     # ==========================================
     horizonte_bogle = 5
     candidatos_crec = [x for x in [dgr_5y, dgr_periodo, crecimiento_bpa_3y] if x is not None]
@@ -594,12 +597,31 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     retorno_bogle_bruto_anual = yield_actual + crec_bogle + reversion_weiss_anual_acotada
     retorno_bogle_neto_anual = (yield_actual * net_mult) + crec_bogle + reversion_weiss_anual_acotada
 
-    capital_final_5a = capital_simulado * ((1 + (retorno_bogle_neto_anual / 100.0)) ** horizonte_bogle)
-    ganancia_neta_5a = capital_final_5a - capital_simulado
-    precio_estimado_5a = precio_justo * ((1 + (crec_bogle / 100.0)) ** horizonte_bogle)
+    # Cálculos precisos para la Simulación de Orden de Compra
+    acc_hoy = capital_simulado / precio_actual if precio_actual > 0 else 0.0
+    acc_enteras_hoy = int(capital_simulado // precio_actual) if precio_actual > 0 else 0
+    sobrante_hoy = capital_simulado - (acc_enteras_hoy * precio_actual)
+    div_bruto_hoy = acc_hoy * forward_dividend
+    div_neto_hoy = div_bruto_hoy * net_mult
+    cobro_por_pago_hoy = div_neto_hoy / pagos_por_año
+
+    acc_suelo = capital_simulado / precio_compra if precio_compra > 0 else 0.0
+    acc_enteras_suelo = int(capital_simulado // precio_compra) if precio_compra > 0 else 0
+    div_neto_suelo = acc_suelo * forward_dividend * net_mult
+    cobro_por_pago_suelo = div_neto_suelo / pagos_por_año
+
+    extra_anual_esperar = div_neto_suelo - div_neto_hoy
+    # Coste de oportunidad: cuántos años tardas en recuperar 1 solo pago perdido por esperar al suelo
+    anios_recuperar_1_pago = (cobro_por_pago_hoy / extra_anual_esperar) if extra_anual_esperar > 0.05 else 99.0
+
+    # Desglose separado a 5 años (comprando hoy)
+    divs_netos_acum_5a = sum([div_neto_hoy * ((1 + max(0.0, crec_bogle)/100.0) ** a) for a in range(1, 6)])
+    valor_acciones_5a_sin_reversion = capital_simulado * ((1 + (crec_bogle / 100.0)) ** 5)
+    precio_estimado_5a_weiss = precio_justo * ((1 + (crec_bogle / 100.0)) ** 5)
+    valor_acciones_5a_con_reversion = acc_hoy * precio_estimado_5a_weiss
 
     # ==========================================
-    # RENDERIZADO VISUAL (CON PROTECCIÓN NOTRANSLATE PARA CHROME MÓVIL)
+    # RENDERIZADO VISUAL
     # ==========================================
     if es_reit_puro: tipo_empresa_txt = "🏢 REIT / Inmobiliario (FFO)"
     elif es_quasi_reit_o_recompras: tipo_empresa_txt = "🍔 Franquicia / Recompras"
@@ -674,7 +696,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     else:
         st.info(f"⏳ **VEREDICTO: MANTENER / EN ESPERA** — Cotiza un +{f_num(pct_actual_vs_media, 1)}% sobre su Precio Justo.")
 
-    # 2. CUADRÍCULA 2x2 RESPONSIVA CON PROTECCIÓN CONTRA TRADUCTOR DE CHROME
+    # 2. CUADRÍCULA 2x2 RESPONSIVA
     color_actual = "#21c354" if precio_actual <= precio_compra else ("#ff4b4b" if precio_actual >= precio_venta else "#faca2b")
     txt_extra_actual = f"Descuento: {f_num(abs(pct_actual_vs_media), 1)}% vs Media" if pct_actual_vs_media <= 0 else f"Sobreprecio: +{f_num(pct_actual_vs_media, 1)}% vs Media"
 
@@ -734,57 +756,80 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 </div>
 """, unsafe_allow_html=True)
 
-    # 4. BOGLE + REVERSIÓN WEISS
-    st.markdown("#### 🔮 Retorno Total Esperado: Regla de Bogle + Reversión a la Media de Weiss (5 Años)")
-    
-    b_rev_cls = "badge-verde" if reversion_weiss_anual_acotada >= 0 else "badge-rojo"
+    # 4. NUEVO PANEL DETALLADO: SIMULACIÓN TÁCTICA DE TU ORDEN + REGLA DE BOGLE
+    st.markdown(f"#### 🧮 Simulación Táctica de tu Orden de {f_num(capital_simulado, 0)}{sym} y Retorno Bogle-Weiss (5 Años)")
+
     b_tot_cls = "badge-verde" if retorno_bogle_bruto_anual >= 10.0 else ("badge-ambar" if retorno_bogle_bruto_anual >= 6.0 else "badge-rojo")
     signo_rev = "+" if reversion_weiss_anual_acotada >= 0 else ""
 
-    acc_hoy = capital_simulado / precio_actual if precio_actual > 0 else 0
-    div_neto_hoy = acc_hoy * forward_dividend * net_mult
-    acc_suelo = capital_simulado / precio_compra if precio_compra > 0 else 0
-    div_neto_suelo = acc_suelo * forward_dividend * net_mult
+    # Veredicto táctico de espera vs disparo inmediato
+    if dist_suelo_pct <= 0:
+        consejo_orden_html = f"🟢 <strong>Disparo Directo:</strong> Ya cotiza en Suelo Weiss ({f_num(precio_actual, 2)}{sym} ≤ {f_num(precio_compra, 2)}{sym}). No necesitas esperar más descuento."
+    elif dist_suelo_pct <= 5.0:
+        consejo_orden_html = (
+            f"⚡ <strong>Coste de Oportunidad de Esperar:</strong> El Suelo ({f_num(precio_compra, 2)}{sym}) está a solo un <strong>{f_num(dist_suelo_pct, 1)}%</strong> y esperar únicamente te da <strong>+{f_num(extra_anual_esperar, 2)}{sym}/año</strong> extra. "
+            f"Si por esperar se te escapa <strong>1 solo cobro {nombre_frecuencia} ({f_num(cobro_por_pago_hoy, 2)}{sym} netos)</strong>, tardarías <strong>{f_num(anios_recuperar_1_pago, 1)} años</strong> en recuperarlo."
+        )
+    else:
+        consejo_orden_html = (
+            f"⏳ <strong>Compensa Esperar (Orden Limitada):</strong> Cotiza un <strong>+{f_num(dist_suelo_pct, 1)}%</strong> por encima del Suelo ({f_num(precio_compra, 2)}{sym}). "
+            f"Esperar al suelo te asegura un <strong>+{f_num(((div_neto_suelo/div_neto_hoy)-1)*100 if div_neto_hoy>0 else 0, 1)}% más de renta perpetua</strong> (+{f_num(extra_anual_esperar, 2)}{sym}/año)."
+        )
 
     col_bog1, col_bog2 = st.columns(2)
     with col_bog1:
         st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-<span style="color: #aaa; font-size: 0.85rem;">Ecuación Bogle: Yield + Crecimiento ± Reversión Weiss</span>
-<span class="{b_tot_cls}">CAGR Bruto: {f_num(retorno_bogle_bruto_anual, 1, '%', signo_pos=True)}/año</span>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+<span style="color: #00d4ff; font-weight: 700; font-size: 0.9rem;">1️⃣ Comparativa de Ejecución ({f_num(capital_simulado, 0)}{sym})</span>
+<span class="badge-azul">Pago {nombre_frecuencia} ({pagos_por_año}/año)</span>
 </div>
-<div style="font-size: 1.15rem; margin: 8px 0;">
-<span style="color:#00d4ff; font-weight:bold;">{f_num(yield_actual, 2, '%')}</span> <span style="font-size:0.8rem; color:#888;">(Yield)</span> + 
-<span style="color:#faca2b; font-weight:bold;">{f_num(crec_bogle, 1, '%', signo_pos=True)}</span> <span style="font-size:0.8rem; color:#888;">(Crec.)</span> 
-<span style="color:{'#21c354' if reversion_weiss_anual_acotada >= 0 else '#ff4b4b'}; font-weight:bold;"> {signo_rev}{f_num(reversion_weiss_anual_acotada, 1, '%')}</span> <span style="font-size:0.8rem; color:#888;">(Reversión)</span> = 
-<strong style="font-size: 1.45rem; color: white;">{f_num(retorno_bogle_neto_anual, 1, '%', signo_pos=True)} neto/año</strong>
+<div style="font-size: 0.88rem; color: #ddd; line-height: 1.55;">
+<div style="background: rgba(255,255,255,0.03); padding: 7px 10px; border-radius: 6px; margin-bottom: 6px;">
+• <strong>Comprando HOY ({f_num(precio_actual, 2)}{sym}):</strong> Compras <strong>{f_num(acc_hoy, 2)} títulos</strong> <em>({acc_enteras_hoy} enteras + {f_num(sobrante_hoy, 0)}{sym} sobrantes)</em><br>
+&nbsp;&nbsp;➔ Cobras <strong style="color:#00d4ff;">{f_num(div_neto_hoy, 2)}{sym}/año netos</strong> ({f_num(div_bruto_hoy, 2)}{sym} brutos) · <strong>{f_num(cobro_por_pago_hoy, 2)}{sym} netos</strong> cada cobro {nombre_frecuencia}.
 </div>
-<span style="font-size: 0.78rem; color: #999;">
-Si en 5 años vuelve a su Yield Medio ({f_num(yield_medio, 2, '%')}), su cotización rondaría los <strong>{f_num(precio_estimado_5a, 2)}{sym}</strong> ({signo_rev}{f_num(reversion_weiss_anual_acotada, 1)}% anual por múltiplo).
-</span>
+<div style="background: rgba(33, 195, 84, 0.06); padding: 7px 10px; border-radius: 6px; margin-bottom: 8px;">
+• <strong>En SUELO WEISS ({f_num(precio_compra, 2)}{sym}):</strong> Comprarías <strong>{f_num(acc_suelo, 2)} títulos</strong> <em>({acc_enteras_suelo} enteras)</em><br>
+&nbsp;&nbsp;➔ Cobrarías <strong style="color:#21c354;">{f_num(div_neto_suelo, 2)}{sym}/año netos</strong> ({f_num(extra_anual_esperar, 2, sym, signo_pos=True)}/año) · <strong>{f_num(cobro_por_pago_suelo, 2)}{sym} netos</strong> cada cobro.
+</div>
+<div style="font-size: 0.81rem; color: #ccc; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px;">
+{consejo_orden_html}
+</div>
+</div>
 </div>
 """, unsafe_allow_html=True)
 
     with col_bog2:
         st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-<span style="color: #aaa; font-size: 0.85rem;">🧮 Simulación de tu Orden de {f_num(capital_simulado, 0)}{sym}</span>
-<span class="{b_rev_cls}">A 5 Años: {f_num(capital_final_5a, 0)}{sym} ({f_num(ganancia_neta_5a, 0, sym, signo_pos=True)})</span>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+<span style="color: #faca2b; font-weight: 700; font-size: 0.9rem;">2️⃣ Desglose Real a 5 Años (Fórmula Bogle-Weiss)</span>
+<span class="{b_tot_cls}">Retorno Total: {f_num(retorno_bogle_neto_anual, 1, '%', signo_pos=True)}/año</span>
 </div>
-<div style="font-size: 0.9rem; color: #ddd; line-height: 1.5; margin-top: 4px;">
-• <strong>Comprando HOY ({f_num(precio_actual, 2)}{sym}):</strong> {f_num(acc_hoy, 2)} títulos ➔ Renta neta: <strong style="color:#00d4ff;">{f_num(div_neto_hoy, 2)}{sym}/año</strong>.<br>
-• <strong>Esperando al SUELO ({f_num(precio_compra, 2)}{sym}):</strong> {f_num(acc_suelo, 2)} títulos ➔ Renta neta: <strong style="color:#21c354;">{f_num(div_neto_suelo, 2)}{sym}/año</strong>.
+<div style="font-size: 1.05rem; margin-bottom: 8px; background: rgba(255,255,255,0.03); padding: 6px 10px; border-radius: 6px;">
+<span style="color:#00d4ff; font-weight:bold;">{f_num(yield_actual * net_mult, 2, '%')}</span> <span style="font-size:0.78rem; color:#999;">(Yield Neto)</span> + 
+<span style="color:#faca2b; font-weight:bold;">{f_num(crec_bogle, 1, '%', signo_pos=True)}</span> <span style="font-size:0.78rem; color:#999;">(Crec. DGR)</span> 
+<span style="color:{'#21c354' if reversion_weiss_anual_acotada >= 0 else '#ff4b4b'}; font-weight:bold;"> {signo_rev}{f_num(reversion_weiss_anual_acotada, 1, '%')}</span> <span style="font-size:0.78rem; color:#999;">(Reversión Media)</span>
+</div>
+<div style="font-size: 0.85rem; color: #ddd; line-height: 1.55;">
+¿En qué se transforman tus <strong>{f_num(capital_simulado, 0)}{sym}</strong> tras 5 años?<br>
+1. 💵 <strong>Dividendos Netos cobrados en mano (5A):</strong> <strong style="color:#00d4ff;">+{f_num(divs_netos_acum_5a, 2)}{sym}</strong> limpios en tu cuenta.<br>
+2. 📈 <strong>Valor de tus acciones (Sin cambio de múltiplo):</strong> <strong>{f_num(valor_acciones_5a_sin_reversion, 0)}{sym}</strong> <em>(subiendo solo al {f_num(crec_bogle, 1, '%')}/año)</em>.<br>
+3. 🎯 <strong>Valor de tus acciones (Si vuelve al Precio Justo Weiss):</strong> <strong style="color:{'#21c354' if valor_acciones_5a_con_reversion >= capital_simulado else '#ff4b4b'};">{f_num(valor_acciones_5a_con_reversion, 0)}{sym}</strong> <em>(cotización objetivo de {f_num(precio_estimado_5a_weiss, 2)}{sym} si regresa al Yield Medio del {f_num(yield_medio, 2, '%')})</em>.
 </div>
 </div>
 """, unsafe_allow_html=True)
 
-    # 5. GRÁFICO 1: WEISS
+    # 5. GRÁFICO 1: CANALES WEISS CON ESCALERA SUAVIZADA + CONTADOR DE TOQUES Y ÚLTIMA VEZ
     st.markdown(f"### 📈 Evolución Histórica de Valoración ({años_analisis} Años)")
     df_grafico = historial_analisis[['Close']].copy()
     if not df_grafico.empty:
-        df_grafico['Div_Grafico'] = historial_analisis['Div_Anual']
+        # Suavizado visual de la escalera: evita que un desfase de calendario (ej. ACN en 2019 o 2025) hunda el dibujo
+        serie_div_graf = historial_analisis['Div_Anual'].copy()
+        if racha_sin_recortes >= 5:
+            serie_div_graf = serie_div_graf.cummax()
+        df_grafico['Div_Grafico'] = serie_div_graf
         df_grafico['Precio_Compra'] = (df_grafico['Div_Grafico'] / yield_infravalorado) * 100
         df_grafico['Precio_Justo'] = (df_grafico['Div_Grafico'] / yield_medio) * 100
         df_grafico['Precio_Venta'] = (df_grafico['Div_Grafico'] / yield_sobrevalorado) * 100
@@ -808,12 +853,28 @@ Si en 5 años vuelve a su Yield Medio ({f_num(yield_medio, 2, '%')}), su cotizac
         is_venta = df_grafico['Close'] >= df_grafico['Precio_Venta']
         toques_venta = int((is_venta & ~is_venta.shift(1, fill_value=False)).sum())
 
+        def format_last_time(is_zone_series, active_color):
+            if is_zone_series.sum() == 0: return "Nunca", "#aaa"
+            if is_zone_series.iloc[-1]: return "Ahora", active_color
+            last_date = is_zone_series[is_zone_series].index[-1]
+            days_diff = (hoy_ts - last_date.tz_localize(None).normalize()).days
+            if days_diff < 30: return f"hace {days_diff} días", "#ddd"
+            elif days_diff < 365: return f"hace {days_diff // 30} meses", "#ddd"
+            else: return f"hace {f_num(days_diff / 365.25, 1)} años", "#ddd"
+
+        str_ult_compra, col_ult_compra = format_last_time(is_compra, "#21c354")
+        str_ult_venta, col_ult_venta = format_last_time(is_venta, "#ff4b4b")
+
         estado_canal_txt = f"un <strong>{f_num(abs(pct_actual_vs_media), 1)}% por debajo</strong> de su Precio Justo ({f_num(precio_justo, 2)}{sym})" if pct_actual_vs_media <= 0 else f"un <strong>+{f_num(pct_actual_vs_media, 1)}% por encima</strong> de su Precio Justo ({f_num(precio_justo, 2)}{sym})"
         dist_compra_txt = f"ya cotiza un <strong>{f_num(abs(dist_suelo_pct), 1)}% por debajo de la línea verde</strong>" if dist_suelo_pct <= 0 else f"necesita caer un <strong>{f_num(dist_suelo_pct, 1)}% adicional</strong> para tocar la línea verde ({f_num(precio_compra, 2)}{sym})"
 
         st.markdown(f"""
 <div class="explicacion-graf notranslate" translate="no">
-💡 <strong>Lectura en {ticker_symbol}:</strong> Hoy cotiza a <strong>{f_num(precio_actual, 2)}{sym}</strong> ({estado_canal_txt}) y {dist_compra_txt}. En los últimos {años_analisis} años ha tocado la zona de compra <strong>{toques_compra} veces</strong> y la de venta <strong>{toques_venta} veces</strong>. Su Yield actual (<strong>{f_num(yield_actual, 2, '%')}</strong>) supera al <strong>{f_num(percentil_yield_actual, 1)}%</strong> de las sesiones históricas.
+<div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px; margin-bottom:8px;">
+<span>🟢 <strong>Toques Zona Compra ({años_analisis}A):</strong> <strong style="color:#21c354;">{toques_compra} veces</strong> (Última vez: <strong style="color:{col_ult_compra};">{str_ult_compra}</strong>)</span>
+<span>🔴 <strong>Toques Zona Venta ({años_analisis}A):</strong> <strong style="color:#ff4b4b;">{toques_venta} veces</strong> (Última vez: <strong style="color:{col_ult_venta};">{str_ult_venta}</strong>)</span>
+</div>
+💡 <strong>Lectura en {ticker_symbol}:</strong> Hoy cotiza a <strong>{f_num(precio_actual, 2)}{sym}</strong> ({estado_canal_txt}) y {dist_compra_txt}. Su Yield actual (<strong>{f_num(yield_actual, 2, '%')}</strong>) supera al <strong>{f_num(percentil_yield_actual, 1)}%</strong> de todas las sesiones históricas registradas.
 </div>
 """, unsafe_allow_html=True)
 
