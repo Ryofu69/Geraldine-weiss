@@ -10,10 +10,13 @@ import plotly.graph_objects as go
 warnings.filterwarnings('ignore')
 
 TRADUCCION = {
-    'Technology': 'Tecnología', 'Healthcare': 'Salud', 'Financial Services': 'Servicios Financieros',
-    'Consumer Cyclical': 'Consumo Cíclico', 'Industrials': 'Industrial', 'Consumer Defensive': 'Consumo Defensivo',
+    'Technology': 'Tecnología', 'Information Technology': 'Tecnología',
+    'Healthcare': 'Salud', 'Financial Services': 'Servicios Financieros', 'Financials': 'Servicios Financieros',
+    'Consumer Cyclical': 'Consumo Cíclico', 'Consumer Discretionary': 'Consumo Cíclico',
+    'Industrials': 'Industrial', 'Consumer Defensive': 'Consumo Defensivo', 'Consumer Staples': 'Consumo Defensivo',
     'Energy': 'Energía', 'Real Estate': 'Inmobiliario', 'Utilities': 'Servicios Públicos',
-    'Basic Materials': 'Materiales Básicos', 'Communication Services': 'Servicios de Comunicación'
+    'Basic Materials': 'Materiales Básicos', 'Materials': 'Materiales Básicos',
+    'Communication Services': 'Servicios de Comunicación'
 }
 
 MERMA_ORIGEN_PAIS = {
@@ -51,6 +54,8 @@ def f_millones(val, sym=""):
         return str(val)
 
 def interpolar_puntos(valor, umbral_max, umbral_med, pts_max, pts_med, inverso=False):
+    if valor is None or pd.isna(valor):
+        return 0.0
     if not inverso:
         if valor >= umbral_max: return pts_max
         if valor < umbral_med: return 0.0
@@ -58,20 +63,48 @@ def interpolar_puntos(valor, umbral_max, umbral_med, pts_max, pts_med, inverso=F
         ratio = (valor - umbral_med) / (umbral_max - umbral_med)
         return round(pts_med + ratio * (pts_max - pts_med), 2)
     else:
-        if valor <= 0: return 0.0
+        if valor < 0: return 0.0
         if valor <= umbral_max: return pts_max
         if valor > umbral_med: return 0.0
         if umbral_med == umbral_max: return pts_max
         ratio = (umbral_med - valor) / (umbral_med - umbral_max)
         return round(pts_med + ratio * (pts_max - pts_med), 2)
 
+def ultimo_valor_tabla(df, claves):
+    if df is not None and not df.empty:
+        for k in claves:
+            if k in df.index:
+                s = df.loc[k].dropna()
+                if not s.empty:
+                    return float(s.iloc[-1])
+    return 0.0
+
 # ==========================================
-# CACHÉ COMPARTIDA DE DATOS
+# CACHÉ COMPARTIDA CON RESPALDO CONTABLE
 # ==========================================
 @st.cache_data(ttl=900, show_spinner=False)
 def cargar_fundamentales_pesados(ticker_symbol):
     t = yf.Ticker(ticker_symbol)
-    info = t.info or {}
+    info = {}
+    try:
+        info = t.info or {}
+    except Exception:
+        info = {}
+
+    if not info.get('sector') or not info.get('shortName'):
+        try:
+            busq = yf.Search(ticker_symbol, max_results=1).quotes
+            if busq and len(busq) > 0:
+                q0 = busq[0]
+                if not info.get('shortName'):
+                    info['shortName'] = q0.get('shortname') or q0.get('longname') or ticker_symbol
+                if not info.get('sector') and q0.get('sector'):
+                    info['sector'] = q0.get('sector')
+                if not info.get('industry') and q0.get('industry'):
+                    info['industry'] = q0.get('industry')
+        except Exception:
+            pass
+
     divs = t.dividends
     
     inc_stmt, bs_stmt, cf_stmt = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -90,10 +123,17 @@ def cargar_fundamentales_pesados(ticker_symbol):
 
     shares_hist = None
     try:
-        shares_hist = t.get_shares_full(start="2004-01-01")
+        shares_hist = t.get_shares_full(start="2008-01-01")
     except Exception: pass
 
-    curr_cot = info.get('currency', 'USD')
+    curr_cot = info.get('currency')
+    if not curr_cot:
+        try:
+            curr_cot = t.fast_info.currency or 'USD'
+        except Exception:
+            curr_cot = 'USD'
+        info['currency'] = curr_cot
+
     curr_Base = 'GBP' if curr_cot == 'GBp' else curr_cot
     curr_fin = info.get('financialCurrency', curr_Base) or curr_Base
     if curr_fin == 'GBp': curr_fin = 'GBP'
@@ -115,18 +155,25 @@ def cargar_cotizacion_tiempo_real(ticker_symbol):
     t = yf.Ticker(ticker_symbol)
     hist = t.history(period="max", auto_adjust=False)
     precio_vivo = None
+    shares_fast = None
+    mcap_fast = None
     try:
         precio_vivo = float(t.fast_info.last_price)
-    except Exception:
-        pass
-    return hist, precio_vivo
+    except Exception: pass
+    try:
+        shares_fast = float(t.fast_info.shares)
+    except Exception: pass
+    try:
+        mcap_fast = float(t.fast_info.market_cap)
+    except Exception: pass
+    return hist, precio_vivo, shares_fast, mcap_fast
 
 # ==========================================
 # FUNCIÓN PRINCIPAL PESTAÑA 4: DECÁLOGO DGI (20 PTS)
 # ==========================================
 def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_merma_origen):
     info, dividendos_raw, inc_stmt, bs_stmt, cf_stmt, shares_hist, fx_rate, curr_fin = cargar_fundamentales_pesados(ticker_symbol)
-    historial_raw, precio_vivo = cargar_cotizacion_tiempo_real(ticker_symbol)
+    historial_raw, precio_vivo, shares_fast, mcap_fast = cargar_cotizacion_tiempo_real(ticker_symbol)
 
     if dividendos_raw.empty or len(historial_raw) < 252:
         st.error("❌ Error: No hay suficientes datos históricos o de dividendos en Yahoo Finance.")
@@ -166,7 +213,7 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
 """, unsafe_allow_html=True)
 
     def render_item_auditoria(titulo, valor_txt, pts_ganados, pts_max, diagnostico_txt, meta_txt):
-        """Dibuja una tarjeta de auditoría sin sangrías HTML para evitar bloques de código en Markdown."""
+        """Dibuja una tarjeta de auditoría sin sangrías HTML y protegida frente al traductor móvil."""
         if pts_max > 0:
             pct = min(100.0, max(0.0, (pts_ganados / pts_max) * 100))
             if pct >= 75:
@@ -185,7 +232,7 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             barra_html = '<div style="height: 6px;"></div>'
 
         html_card = (
-            f'<div class="card-audit">'
+            f'<div class="card-audit notranslate" translate="no">'
             f'<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">'
             f'<span style="font-size: 0.92rem; font-weight: 600; color: #eee;">{titulo}: <strong style="color:#00d4ff;">{valor_txt}</strong></span>'
             f'{badge_html}'
@@ -207,7 +254,6 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     dividendos = dividendos_raw.copy()
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
-    dividendos = dividendos.groupby(dividendos.index).sum()
 
     if precio_vivo is not None and precio_vivo > 0 and not historial_completo.empty:
         historial_completo.iloc[-1, historial_completo.columns.get_loc('Close')] = precio_vivo
@@ -227,54 +273,49 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     historial_analisis = historial_completo[historial_completo.index >= fecha_corte_analisis].copy()
     precio_actual = float(historial_analisis['Close'].dropna().iloc[-1])
 
-    sector_en = info.get('sector', 'Desconocido')
-    industry_en = info.get('industry', 'Desconocido')
+    sector_en = info.get('sector', 'General')
+    industry_en = info.get('industry', 'General')
     pais = info.get('country', 'Desconocido')
     nombre_empresa = info.get('shortName', ticker_symbol)
     sector_final = TRADUCCION.get(sector_en, sector_en)
 
     es_reit_puro = 'reit' in industry_en.lower() or 'real estate' in sector_en.lower()
     es_utility_pura = 'utility' in sector_en.lower() or 'utilities' in sector_en.lower()
-    es_telecom = 'communication' in sector_en.lower() or 'telecom' in industry_en.lower()
+    es_telecom = 'telecom' in industry_en.lower()
     es_tecnologica = 'technology' in sector_en.lower() or 'software' in industry_en.lower()
     es_financiera = 'financial' in sector_en.lower() or 'bank' in industry_en.lower() or 'insurance' in industry_en.lower()
     es_industrial = 'industrial' in sector_en.lower() or 'basic materials' in sector_en.lower()
-    es_defensivo = 'consumer defensive' in sector_en.lower() or 'healthcare' in sector_en.lower()
+    es_defensivo = 'consumer defensive' in sector_en.lower() or 'consumer staples' in sector_en.lower() or 'healthcare' in sector_en.lower()
 
     merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
     net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
-    # --- DIVIDENDOS ANUALES ---
-    años = dividendos.index.year
-    conteo_por_año = años.value_counts()
-    conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
-    pagos_por_año = int(conteo_closed.mode().iloc[0]) if not conteo_closed.empty else 4
-    if pagos_por_año not in [1, 2, 4, 12]:
-        pagos_por_año = 4 if pagos_por_año == 3 else (12 if pagos_por_año > 10 else 4)
+    # ==========================================
+    # MOTOR ORIGINAL DE DIVIDENDOS SINCRONIZADO CON PESTAÑA 1
+    # ==========================================
+    divs_por_año = dividendos.groupby(dividendos.index.year).sum()
 
-    ventana_med = max(4, pagos_por_año * 2)
-    mediana_pagos = dividendos.rolling(window=ventana_med, min_periods=1).median()
-    dividendos_regulares = dividendos.where(dividendos <= mediana_pagos * 1.75, mediana_pagos)
+    años_div = dividendos.index.year
+    conteo_por_año = años_div.value_counts()
+    conteo_closed = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 5)]
+    if conteo_closed.empty:
+        conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
+    mediana_pagos_año = float(conteo_closed.median()) if not conteo_closed.empty else 4.0
 
-    suma_anual_reg = dividendos_regulares.groupby(dividendos_regulares.index.year).sum()
-    conteo_anual_reg = dividendos_regulares.groupby(dividendos_regulares.index.year).count()
-    divs_reg_por_año = suma_anual_reg.copy()
-
-    for y in divs_reg_por_año.index:
-        if y < año_actual and pagos_por_año in [2, 4, 12]:
-            c = conteo_anual_reg.loc[y]
-            if c > 0 and c != pagos_por_año and abs(c - pagos_por_año) == 1:
-                divs_reg_por_año.loc[y] = (suma_anual_reg.loc[y] / c) * pagos_por_año
+    if mediana_pagos_año >= 10: pagos_por_año = 12
+    elif mediana_pagos_año >= 3: pagos_por_año = 4
+    elif mediana_pagos_año >= 1.5: pagos_por_año = 2
+    else: pagos_por_año = 1
 
     forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
     if es_peniques_uk and forward_dividend > (precio_actual * 0.25):
         forward_dividend /= 100.0
-    if forward_dividend == 0 and not dividendos_regulares.empty:
-        ultimo_año_completo = divs_reg_por_año.iloc[-2] if len(divs_reg_por_año) > 1 else 0
-        forward_dividend = max(dividendos_regulares.iloc[-1] * pagos_por_año, ultimo_año_completo)
+    if forward_dividend == 0 and not dividendos.empty:
+        ultimo_año_completo = divs_por_año.iloc[-2] if len(divs_por_año) > 1 else 0.0
+        forward_dividend = max(float(dividendos.iloc[-1]) * pagos_por_año, float(ultimo_año_completo))
 
     historial_analisis['Year'] = historial_analisis.index.year
-    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_reg_por_año)
+    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_por_año)
     historial_analisis.loc[historial_analisis['Year'] == año_actual, 'Div_Anual'] = forward_dividend
     historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
     historial_analisis['Yield_Diario'] = (historial_analisis['Div_Anual'] / historial_analisis['Close']) * 100
@@ -290,44 +331,70 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
 
     precio_compra_weiss = (forward_dividend / yield_infravalorado) * 100 if yield_infravalorado > 0 else 0.0
 
-    # --- FUNDAMENTALES ---
-    payout_ratio = get_safe('payoutRatio') * 100
-    per_actual = get_safe('trailingPE')
-    per_forward = get_safe('forwardPE')
+    # --- FUNDAMENTALES CON RESPALDO CONTABLE ---
+    shares = get_safe('sharesOutstanding', 0.0)
+    if shares <= 0 and shares_fast: shares = shares_fast
+    if shares <= 0: shares = ultimo_valor_tabla(inc_stmt, ['Diluted Average Shares', 'Basic Average Shares'])
+
+    bpa_trailing = get_safe('trailingEps', 0.0)
+    if bpa_trailing == 0: bpa_trailing = ultimo_valor_tabla(inc_stmt, ['Diluted EPS', 'Basic EPS']) * fx_rate
+    bpa_forward = get_safe('forwardEps', 0.0)
+
+    per_actual = get_safe('trailingPE', 0.0)
+    if per_actual <= 0 and bpa_trailing > 0: per_actual = precio_actual / bpa_trailing
+    per_forward = get_safe('forwardPE', 0.0)
     per = per_actual if per_actual > 0 else per_forward
-    bpa_forward = get_safe('forwardEps')
-    deuda_equity = get_safe('debtToEquity')
-    market_cap = get_safe('marketCap') * fx_rate
-    current_ratio = get_safe('currentRatio')
-    price_to_book = get_safe('priceToBook', -1)
-    roe = get_safe('returnOnEquity', 0.0) * 100
-    operating_margins = get_safe('operatingMargins', 0.0) * 100
-    respaldo_institucional = get_safe('heldPercentInstitutions') * 100
+
+    payout_ratio = get_safe('payoutRatio', 0.0) * 100
+    if payout_ratio <= 0 and bpa_trailing > 0: payout_ratio = (forward_dividend / bpa_trailing) * 100
+
+    market_cap = get_safe('marketCap', 0.0) * fx_rate
+    if market_cap <= 0 and mcap_fast: market_cap = mcap_fast * fx_rate
+    if market_cap <= 0 and shares > 0: market_cap = precio_actual * shares
+
+    current_ratio = get_safe('currentRatio', 0.0)
+    respaldo_institucional = get_safe('heldPercentInstitutions', 0.0) * 100
 
     total_debt = get_safe('totalDebt', 0.0) * fx_rate
+    if total_debt <= 0: total_debt = ultimo_valor_tabla(bs_stmt, ['Total Debt', 'Long Term Debt And Capital Lease Obligation', 'Long Term Debt']) * fx_rate
+
     total_cash = get_safe('totalCash', 0.0) * fx_rate
+    if total_cash <= 0: total_cash = ultimo_valor_tabla(bs_stmt, ['Cash Cash Equivalents And Short Term Investments', 'Cash And Cash Equivalents', 'Cash']) * fx_rate
+
     ebitda = get_safe('ebitda', 0.0) * fx_rate
+    if ebitda <= 0: ebitda = ultimo_valor_tabla(inc_stmt, ['EBITDA', 'Normalized EBITDA', 'Operating Income']) * fx_rate
+
     fcf_raw = get_safe('freeCashflow', 0.0) * fx_rate
+    if fcf_raw == 0: fcf_raw = ultimo_valor_tabla(cf_stmt, ['Free Cash Flow']) * fx_rate
+
     ocf_raw = get_safe('operatingCashflow', 0.0) * fx_rate
-    shares = get_safe('sharesOutstanding', 0.0)
+    if ocf_raw == 0: ocf_raw = ultimo_valor_tabla(cf_stmt, ['Operating Cash Flow', 'Cash Flow From Continuing Operating Activities']) * fx_rate
 
     flujo_caja_referencia = ocf_raw if (es_reit_puro and ocf_raw > fcf_raw) else fcf_raw
     etiqueta_fcf = "FFO" if (es_reit_puro and ocf_raw > fcf_raw) else "FCF"
 
     total_equity_raw = get_safe('totalStockholderEquity', 0.0) * fx_rate
-    if total_equity_raw == 0 and not bs_stmt.empty:
-        for eq_k in ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity']:
-            if eq_k in bs_stmt.index:
-                s_eq = bs_stmt.loc[eq_k].dropna()
-                if not s_eq.empty:
-                    total_equity_raw = float(s_eq.iloc[-1]) * fx_rate
-                    break
+    if total_equity_raw == 0: total_equity_raw = ultimo_valor_tabla(bs_stmt, ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity']) * fx_rate
 
-    es_quasi_reit_o_recompras = (not es_reit_puro) and (not es_financiera) and (operating_margins >= 22.0) and (total_equity_raw <= 0 or price_to_book < 0 or deuda_equity == 0.0)
+    net_inc_val = ultimo_valor_tabla(inc_stmt, ['Net Income', 'Net Income Common Stockholders']) * fx_rate
+    roe = get_safe('returnOnEquity', 0.0) * 100
+    if roe == 0 and total_equity_raw > 0 and net_inc_val > 0: roe = (net_inc_val / total_equity_raw) * 100
+
+    ebit_tabla = ultimo_valor_tabla(inc_stmt, ['Operating Income', 'EBIT']) * fx_rate
+    rev_tabla = ultimo_valor_tabla(inc_stmt, ['Total Revenue', 'Operating Revenue']) * fx_rate
+    operating_margins = get_safe('operatingMargins', 0.0) * 100
+    if operating_margins == 0 and rev_tabla > 0 and ebit_tabla > 0: operating_margins = (ebit_tabla / rev_tabla) * 100
+
+    price_to_book = get_safe('priceToBook', -1)
+    if price_to_book <= 0 and total_equity_raw > 0 and shares > 0: price_to_book = precio_actual / (total_equity_raw / shares)
+
+    deuda_equity = get_safe('debtToEquity', 0.0)
+
+    es_quasi_reit_o_recompras = (not es_reit_puro) and (not es_financiera) and (operating_margins >= 24.0) and (total_equity_raw <= 0 or price_to_book < 0)
     es_regulada_o_reit = es_reit_puro or es_utility_pura or es_quasi_reit_o_recompras
 
-    payout_limite_fcf = 75.0 if es_regulada_o_reit else 65.0
-    payout_amarillo_fcf = 90.0 if es_regulada_o_reit else 85.0
+    payout_limite_fcf = 75.0 if es_regulada_o_reit else 55.0
+    payout_amarillo_fcf = 90.0 if es_regulada_o_reit else 80.0
     payout_forward = (forward_dividend / bpa_forward) * 100 if bpa_forward > 0 else -1
 
     deuda_neta = max(0.0, total_debt - total_cash)
@@ -346,14 +413,23 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
                     crecimiento_bpa_3y = (((eps_series.iloc[-1] / eps_series.iloc[-4]) ** (1 / 3)) - 1) * 100
                 break
 
+    crecimiento_ffo_sh_3y = None
+    if es_reit_puro and not cf_stmt.empty and not inc_stmt.empty:
+        try:
+            ocf_s = cf_stmt.loc['Operating Cash Flow'].dropna() if 'Operating Cash Flow' in cf_stmt.index else pd.Series(dtype=float)
+            sh_s = inc_stmt.loc['Diluted Average Shares'].dropna() if 'Diluted Average Shares' in inc_stmt.index else pd.Series(dtype=float)
+            common_idx = ocf_s.index.intersection(sh_s.index)
+            if len(common_idx) >= 4:
+                ffo_sh = (ocf_s.loc[common_idx] / sh_s.loc[common_idx]).sort_index()
+                if ffo_sh.iloc[-4] > 0 and ffo_sh.iloc[-1] > 0:
+                    crecimiento_ffo_sh_3y = (((ffo_sh.iloc[-1] / ffo_sh.iloc[-4]) ** (1 / 3)) - 1) * 100
+        except Exception:
+            pass
+
     roic = None
     try:
         ebit_val = get_safe('operatingIncome') * fx_rate
-        if ebit_val == 0 and not inc_stmt.empty:
-            for k in ['Operating Income', 'EBIT']:
-                if k in inc_stmt.index:
-                    ebit_val = float(inc_stmt.loc[k].dropna().iloc[-1]) * fx_rate
-                    break
+        if ebit_val == 0: ebit_val = ebit_tabla
         inv_cap = (total_debt + max(0.0, total_equity_raw)) - total_cash
         if inv_cap <= 0 and not bs_stmt.empty and 'Total Assets' in bs_stmt.index:
             tot_assets = float(bs_stmt.loc['Total Assets'].dropna().iloc[-1]) * fx_rate
@@ -376,7 +452,8 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     if not inc_stmt.empty:
         try:
             ebit_cov, int_exp = None, None
-            for k in ['Operating Income', 'EBIT']:
+            claves_op = ['EBITDA', 'Normalized EBITDA', 'Operating Income'] if es_reit_puro else ['Operating Income', 'EBIT']
+            for k in claves_op:
                 if k in inc_stmt.index:
                     ebit_cov = float(inc_stmt.loc[k].dropna().iloc[-1])
                     break
@@ -398,9 +475,11 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     if flujo_caja_referencia > 0:
         deuda_fcf = total_debt / flujo_caja_referencia
 
-    dividendos_barras = divs_reg_por_año.copy()
+    dividendos_barras = divs_por_año.copy()
     if año_actual in dividendos_barras.index:
         dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
+    else:
+        dividendos_barras.loc[año_actual] = forward_dividend
 
     años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
     divs_recientes = dividendos_barras.tail(años_analisis + 1)
@@ -419,94 +498,115 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     racha_sin_recortes = 0
     if len(dividendos_barras) > 1:
         for i in range(1, len(dividendos_barras)):
-            if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.98:
+            if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.99:
                 racha_sin_recortes += 1
             else: break
 
     shares_yearly = pd.Series(dtype=float)
-    variacion_acciones = None
+    variacion_acciones, recompras_anualizadas = None, 0.0
     try:
-        if shares_hist is not None and len(shares_hist) > 1:
-            fecha_corte_shares = hoy_ts - pd.DateOffset(years=años_analisis + 3)
-            sh_sub = shares_hist[shares_hist.index.tz_localize(None) >= fecha_corte_shares]
-            sy = sh_sub.groupby(sh_sub.index.year).last()
-            sy = sy[sy > 0]
-            sy = sy[sy.pct_change().fillna(0) > -0.50]
-            if len(sy) >= 2:
-                shares_yearly = sy
-                acc_ini = shares_yearly.iloc[-(años_analisis + 1)] if len(shares_yearly) >= (años_analisis + 1) else shares_yearly.iloc[0]
-                acc_fin = shares_yearly.iloc[-1]
-                if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+        if not inc_stmt.empty:
+            for key in ['Diluted Average Shares', 'Basic Average Shares']:
+                if key in inc_stmt.index:
+                    sh_data = inc_stmt.loc[key].dropna()
+                    sh_data = sh_data[sh_data > 0]
+                    if len(sh_data) >= 2:
+                        shares_yearly = sh_data.groupby(pd.to_datetime(sh_data.index).year).last().sort_index()
+                        acc_ini, acc_fin = float(shares_yearly.iloc[0]), float(shares_yearly.iloc[-1])
+                        n_anios_sh = max(1, int(shares_yearly.index[-1] - shares_yearly.index[0]))
+                        if acc_ini > 0:
+                            variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                            recompras_anualizadas = -(((acc_fin / acc_ini) ** (1 / n_anios_sh)) - 1) * 100
+                            break
     except Exception: pass
 
-    if variacion_acciones is None or shares_yearly.empty:
-        try:
-            if not inc_stmt.empty:
-                for key in ['Basic Average Shares', 'Diluted Average Shares']:
-                    if key in inc_stmt.index:
-                        sh_data = inc_stmt.loc[key].dropna()
-                        sh_data = sh_data[sh_data > 0]
-                        sh_data = sh_data[sh_data.pct_change().fillna(0) > -0.50]
-                        if len(sh_data) >= 2:
-                            shares_yearly = sh_data.groupby(pd.to_datetime(sh_data.index).year).last()
-                            acc_ini, acc_fin = shares_yearly.iloc[0], shares_yearly.iloc[-1]
-                            if acc_ini > 0:
-                                variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-                                break
-        except Exception: pass
+    recompras_anualizadas = max(-5.0, min(8.0, recompras_anualizadas))
 
     # ==========================================
-    # CÁLCULO RIGUROSO DE PUNTOS
+    # MOTOR DE PUNTUACIÓN IDÉNTICO AL DE LA PESTAÑA 1 (SINCRONIZADO AL DECIMAL)
     # ==========================================
-    lim_deuda_optima = 3.5 if (es_regulada_o_reit or es_defensivo or es_telecom) else 2.5
-    lim_deuda_aceptable = 5.0 if (es_regulada_o_reit or es_defensivo or es_telecom) else 4.0
+    if es_reit_puro:
+        lim_deuda_optima, lim_deuda_aceptable = 5.2, 6.8
+    elif es_utility_pura or es_quasi_reit_o_recompras:
+        lim_deuda_optima, lim_deuda_aceptable = 3.5, 5.0
+    elif es_defensivo or es_telecom:
+        lim_deuda_optima, lim_deuda_aceptable = 2.5, 3.8
+    else:
+        lim_deuda_optima, lim_deuda_aceptable = 1.8, 3.2
 
     if es_financiera:
-        pts_deuda = 2.0 if roe >= 14.0 else (1.0 if roe >= 9.0 else 0.0)
-        pts_cob = 0.5 if current_ratio >= 1.1 else 0.0
+        pts_deuda = interpolar_puntos(roe, 15.0, 8.0, 2.0, 0.4, inverso=False)
+        pts_cob = 0.5 if (current_ratio >= 1.0 or roe >= 11.0) else 0.0
     else:
-        pts_deuda = interpolar_puntos(deuda_ebitda, lim_deuda_optima, lim_deuda_aceptable, 2.0, 0.5, inverso=True)
-        pts_cob = (0.5 if cobertura_intereses >= 5.0 else (0.25 if cobertura_intereses >= 3.0 else 0.0)) if cobertura_intereses is not None else (0.5 if deuda_neta == 0 else 0.0)
+        pts_deuda = interpolar_puntos(deuda_ebitda, lim_deuda_optima, lim_deuda_aceptable, 2.0, 0.3, inverso=True)
+        umbral_cob_max = 3.2 if es_reit_puro else 7.0
+        umbral_cob_min = 1.8 if es_reit_puro else 3.0
+        pts_cob = interpolar_puntos(cobertura_intereses, umbral_cob_max, umbral_cob_min, 0.5, 0.1, inverso=False) if cobertura_intereses is not None else (0.5 if deuda_neta == 0 else 0.0)
 
     if es_financiera and payout_fcf == -1:
-        pts_fcf = interpolar_puntos(payout_ratio, 45.0, 70.0, 2.0, 0.5, inverso=True) if payout_ratio > 0 else 0.0
+        pts_fcf = interpolar_puntos(payout_ratio, 45.0, 75.0, 2.0, 0.4, inverso=True) if payout_ratio > 0 else 0.0
     else:
-        pts_fcf = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 2.0, 0.5, inverso=True) if payout_fcf > 0 else 0.0
+        pts_fcf = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 2.0, 0.4, inverso=True) if payout_fcf > 0 else 0.0
 
-    if (años_pagando >= 25 and racha_sin_recortes >= 12) or racha_sin_recortes >= 20: pts_hist = 2.0
-    elif (años_pagando >= 12 and racha_sin_recortes >= 8) or racha_sin_recortes >= 10: pts_hist = 1.2
-    elif racha_sin_recortes >= 5: pts_hist = 0.6
-    else: pts_hist = 0.0
-    if fatiga_dividendo and pts_hist > 0.5: pts_hist -= 0.6
-    pts_hist = max(0.0, pts_hist)
+    racha_efectiva = racha_sin_recortes + (3 if años_pagando >= 25 else 0)
+    pts_hist = interpolar_puntos(racha_efectiva, 20.0, 6.0, 2.0, 0.5, inverso=False)
+    if fatiga_dividendo:
+        pts_hist = max(0.0, round(pts_hist - 0.5, 2))
 
     metrica_rentabilidad = roe if (es_financiera or (roic is None and roe > 0)) else roic
-    cond_roic = (metrica_rentabilidad is not None and metrica_rentabilidad >= 12.0) or (es_reit_puro and operating_margins >= 28.0)
-    cond_rev = (revenue_cagr_3y is not None and revenue_cagr_3y > 1.0)
-    pts_foso = 1.5 if (cond_roic and cond_rev) else (0.75 if (cond_roic or cond_rev) else 0.0)
+    if es_reit_puro:
+        pts_roic_sub = interpolar_puntos(operating_margins, 35.0, 20.0, 0.9, 0.3, inverso=False)
+    else:
+        pts_roic_sub = interpolar_puntos(metrica_rentabilidad, 16.0, 7.0, 0.9, 0.2, inverso=False) if metrica_rentabilidad is not None else 0.0
+    pts_rev_sub = interpolar_puntos(revenue_cagr_3y, 5.0, 1.0, 0.6, 0.1, inverso=False) if revenue_cagr_3y is not None else 0.0
+    pts_foso = round(pts_roic_sub + pts_rev_sub, 2)
 
-    pts_dgr = 1.0 if (dgr_5y is not None and dgr_5y >= 6.0) else (0.5 if (dgr_5y is not None and dgr_5y >= 3.0) else 0.0)
-    pts_cap = 1.0 if (variacion_acciones is not None and variacion_acciones < -1.0) else (0.5 if (crecimiento_bpa_3y is not None and crecimiento_bpa_3y > 2.0) else 0.0)
+    pts_dgr = interpolar_puntos(dgr_5y, 7.5, 2.5, 1.0, 0.25, inverso=False) if dgr_5y is not None else 0.0
+
+    if es_reit_puro:
+        crec_reit_ref = crecimiento_ffo_sh_3y if crecimiento_ffo_sh_3y is not None else (dgr_5y or 0.0)
+        pts_cap = interpolar_puntos(crec_reit_ref, 4.5, 1.0, 1.0, 0.3, inverso=False)
+    else:
+        pts_recompra_sub = interpolar_puntos(recompras_anualizadas, 2.5, 0.4, 0.6, 0.2, inverso=False)
+        pts_bpa_sub = interpolar_puntos(crecimiento_bpa_3y, 7.0, 2.0, 0.6, 0.2, inverso=False) if crecimiento_bpa_3y is not None else 0.0
+        pts_cap = min(1.0, round(pts_recompra_sub + pts_bpa_sub, 2))
 
     score_calidad = min(10.0, round(pts_deuda + pts_cob + pts_fcf + pts_hist + pts_foso + pts_dgr + pts_cap, 1))
 
-    if yield_actual >= yield_infravalorado: pts_yield = 4.0
-    elif yield_actual >= yield_medio: pts_yield = interpolar_puntos(yield_actual, yield_infravalorado, yield_medio, 4.0, 2.0, inverso=False)
-    elif yield_actual >= yield_sobrevalorado: pts_yield = interpolar_puntos(yield_actual, yield_medio, yield_sobrevalorado, 2.0, 0.0, inverso=False)
-    else: pts_yield = 0.0
+    # --- PUNTOS DE VALORACIÓN ---
+    if yield_actual >= yield_infravalorado:
+        pts_yield = 4.0
+    elif yield_actual >= yield_medio:
+        pts_yield = interpolar_puntos(yield_actual, yield_infravalorado, yield_medio, 4.0, 1.8, inverso=False)
+    elif yield_actual >= yield_sobrevalorado:
+        pts_yield = interpolar_puntos(yield_actual, yield_medio, yield_sobrevalorado, 1.8, 0.0, inverso=False)
+    else:
+        pts_yield = 0.0
+
+    tasas_crec_negocio = [x for x in [dgr_5y, revenue_cagr_3y, crecimiento_bpa_3y] if x is not None]
+    crec_negocio_val = float(np.median(tasas_crec_negocio)) if tasas_crec_negocio else 2.0
+    if revenue_cagr_3y is not None and revenue_cagr_3y < 0.5:
+        crec_negocio_val = min(crec_negocio_val, 1.5)
+
+    mult_optimo = float(np.clip(8.5 + max(0.0, crec_negocio_val) * 0.9, 8.5, 17.0))
+    mult_aceptable = mult_optimo + 7.0
 
     if es_financiera and p_fcf <= 0:
-        pts_pfcf = interpolar_puntos(price_to_book, 1.1, 2.0, 2.5, 0.8, inverso=True) if price_to_book > 0 else 0.0
+        pts_pfcf = interpolar_puntos(price_to_book, 1.1, 2.0, 2.5, 0.4, inverso=True) if price_to_book > 0 else 0.0
     else:
-        pts_pfcf = interpolar_puntos(p_fcf, 15.0, 22.0, 2.5, 0.8, inverso=True) if p_fcf > 0 else 0.0
+        pts_pfcf = interpolar_puntos(p_fcf, 15.0 if es_reit_puro else mult_optimo, 22.0 if es_reit_puro else mult_aceptable, 2.5, 0.4, inverso=True) if p_fcf > 0 else 0.0
 
     multiplo_per_eval = p_fcf if (es_reit_puro and p_fcf > 0) else per
-    pts_per = interpolar_puntos(multiplo_per_eval, 16.0, 24.0, 2.0, 0.6, inverso=True) if multiplo_per_eval > 0 else 0.0
+    pts_per = interpolar_puntos(multiplo_per_eval, mult_optimo + 0.5, mult_aceptable + 1.0, 2.0, 0.3, inverso=True) if multiplo_per_eval > 0 else 0.0
 
-    chowder_target = 9.0 if ((es_utility_pura or es_telecom or es_reit_puro) and yield_actual > 4.0) else (13.0 if yield_actual >= 3.0 else 16.0)
+    chowder_target = 8.0 if ((es_utility_pura or es_telecom or es_reit_puro) and yield_actual > 4.0) else (12.0 if yield_actual >= 3.0 else 15.0)
     if dgr_5y is not None:
         chowder_number = yield_actual + dgr_5y
-        pts_chowder = interpolar_puntos(chowder_number, chowder_target, chowder_target - 3.0, 1.5, 0.3, inverso=False)
+        if dgr_5y < 2.0 or (dgr_1y is not None and dgr_1y <= 0):
+            pts_chowder = 0.0
+        else:
+            chowder_efectivo = min(yield_actual, 6.5) + dgr_5y
+            pts_chowder = interpolar_puntos(chowder_efectivo, chowder_target, chowder_target - 3.0, 1.5, 0.3, inverso=False)
     else:
         chowder_number, pts_chowder = None, 0.0
 
@@ -528,13 +628,12 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     categorias_radar = [
         f"1. Yield Weiss ({f_num(pilar_yield_pct, 0)}%)",
         f"2. Múltiplos ({f_num(pilar_mult_pct, 0)}%)",
-        f"3. Caja FCF ({f_num(pilar_caja_pct, 0)}%)",
+        f"3. Caja {etiqueta_fcf} ({f_num(pilar_caja_pct, 0)}%)",
         f"4. Solvencia ({f_num(pilar_solv_pct, 0)}%)",
         f"5. Foso e Hist. ({f_num(pilar_foso_pct, 0)}%)"
     ]
     valores_radar = [pilar_yield_pct, pilar_mult_pct, pilar_caja_pct, pilar_solv_pct, pilar_foso_pct]
 
-    # staticPlot=True bloquea giros y zooms táctiles accidentales al hacer scroll en el móvil
     config_estatico = {'staticPlot': True, 'displayModeBar': False}
 
     col_rad1, col_rad2 = st.columns(2)
@@ -569,8 +668,8 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
         bloques_nombres = [
             "Yield Histórico Weiss",
             "Múltiplos (P/FCF, PER, Chowder)",
-            "Payout Efectivo (FCF)",
-            "Solvencia y Recompras",
+            f"Payout Efectivo ({etiqueta_fcf})",
+            "Solvencia y Capital",
             "Foso, Historial y DGR"
         ]
         pts_obt = [pts_yield, round(pts_pfcf + pts_per + pts_chowder, 2), pts_fcf, round(pts_deuda + pts_cob + pts_cap, 2), round(pts_hist + pts_foso + pts_dgr, 2)]
@@ -599,7 +698,7 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
     idx_mejor = int(np.argmax(valores_radar))
     idx_peor = int(np.argmin(valores_radar))
     st.markdown(
-        f'<div class="explicacion-graf">'
+        f'<div class="explicacion-graf notranslate" translate="no">'
         f'💡 <strong>Diagnóstico Global en {ticker_symbol}:</strong> Suma <strong>{f_num(score_total_20, 1)} de 20 puntos posibles</strong>. '
         f'Su mayor fortaleza actual es <strong>{nombres_limpios[idx_mejor]}</strong> (al <strong>{f_num(valores_radar[idx_mejor], 0, "%")}</strong> de su capacidad máxima), '
         f'mientras que su punto más exigente hoy es <strong>{nombres_limpios[idx_peor]}</strong> (al <strong>{f_num(valores_radar[idx_peor], 0, "%")}</strong>).'
@@ -629,33 +728,34 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
             meta_pf = "Logra los 2,5 pts con un P/B ≤ 1,10x."
             val_pf_txt = f"{f_num(price_to_book, 2, 'x')} P/B"
         elif p_fcf > 0:
-            precio_meta_pfcf = (flujo_caja_referencia / shares) * 15.0 if shares > 0 else 0.0
-            diag_pf = f"Yield de Caja Libre ({etiqueta_fcf} Yield) del {f_num(fcf_yield, 2, '%')}. Óptimo ≤ 15x, aceptable ≤ 22x."
-            meta_pf = f"Logra los 2,5 pts a un precio ≤ {f_num(precio_meta_pfcf, 2, sym)} (múltiplo ≤ 15,0x)." if pts_pfcf < 2.5 else "¡Máxima puntuación conseguida! Múltiplo de caja ≤ 15,0x."
+            m_opt_pf = 15.0 if es_reit_puro else mult_optimo
+            precio_meta_pfcf = (flujo_caja_referencia / shares) * m_opt_pf if shares > 0 else 0.0
+            diag_pf = f"Yield de Caja ({etiqueta_fcf} Yield) del {f_num(fcf_yield, 2, '%')}. Múltiplo exigido según su crecimiento: ≤ {f_num(m_opt_pf, 1, 'x')}."
+            meta_pf = f"Logra los 2,5 pts a un precio ≤ {f_num(precio_meta_pfcf, 2, sym)} (múltiplo ≤ {f_num(m_opt_pf, 1, 'x')})." if pts_pfcf < 2.5 else f"¡Máxima puntuación! Cotiza por debajo de {f_num(m_opt_pf, 1, 'x')} su caja."
             val_pf_txt = f"{f_num(p_fcf, 1, 'x')} P/{etiqueta_fcf}"
         else:
             diag_pf = "Flujo de caja libre negativo o no disponible en el último ejercicio."
-            meta_pf = "Requiere generación de caja libre positiva y múltiplo ≤ 22,0x."
+            meta_pf = "Requiere generación de caja libre positiva."
             val_pf_txt = "Negativo / N/D"
         render_item_auditoria(f"Múltiplo de Caja (Precio / {etiqueta_fcf})", val_pf_txt, pts_pfcf, 2.5, diag_pf, meta_pf)
 
         if es_reit_puro and p_fcf > 0:
             diag_per = f"En REITs se evalúa P/FFO ({f_num(p_fcf, 1, 'x')}) en lugar del PER contable ({f_num(per, 1, 'x')}) distorsionado por amortizaciones."
-            meta_per = "Logra los 2,0 pts con P/FFO ≤ 16,0x."
+            meta_per = f"Logra los 2,0 pts con P/FFO ≤ {f_num(mult_optimo + 0.5, 1, 'x')}."
             val_per_txt = f"{f_num(p_fcf, 1, 'x')} P/FFO"
         elif multiplo_per_eval > 0:
-            diag_per = "Múltiplo sobre beneficio contable. Óptimo ≤ 16,0x, aceptable ≤ 24,0x."
-            meta_per = "Logra los 2,0 pts cuando el PER baja a ≤ 16,0x." if pts_per < 2.0 else "¡Máxima puntuación conseguida! PER ≤ 16,0x."
+            diag_per = f"Múltiplo sobre beneficio contable ajustado por crecimiento. Óptimo exigido: ≤ {f_num(mult_optimo + 0.5, 1, 'x')}."
+            meta_per = f"Logra los 2,0 pts cuando el PER baja a ≤ {f_num(mult_optimo + 0.5, 1, 'x')}." if pts_per < 2.0 else f"¡Máxima puntuación! PER ≤ {f_num(mult_optimo + 0.5, 1, 'x')}."
             val_per_txt = f"{f_num(per, 1, 'x')}"
         else:
             diag_per = "Beneficio contable negativo en los últimos 12 meses."
-            meta_per = "Requiere BPA positivo y PER ≤ 24,0x."
+            meta_per = "Requiere BPA positivo."
             val_per_txt = "N/D"
         render_item_auditoria("Múltiplo Beneficio (PER)", val_per_txt, pts_per, 2.0, diag_per, meta_per)
 
         if chowder_number is not None:
-            diag_ch = f"Suma de Yield ({f_num(yield_actual, 2, '%')}) + DGR 5A ({f_num(dgr_5y, 2, '%')}). Meta exigida para su perfil: ≥ {f_num(chowder_target, 0)} pts."
-            meta_ch = f"Logra los 1,5 pts alcanzando un número Chowder ≥ {f_num(chowder_target, 0)}." if pts_chowder < 1.5 else "¡Máxima puntuación conseguida! Supera el umbral exigido de Chowder."
+            diag_ch = f"Suma de Yield ({f_num(yield_actual, 2, '%')}) + DGR 5A ({f_num(dgr_5y, 2, '%')}). Meta exigida para su perfil: ≥ {f_num(chowder_target, 0)} pts (con DGR ≥ 2%)."
+            meta_ch = f"Logra los 1,5 pts alcanzando Chowder ≥ {f_num(chowder_target, 0)} con crecimiento activo del dividendo." if pts_chowder < 1.5 else "¡Máxima puntuación conseguida! Supera el umbral exigido de Chowder."
             val_ch_txt = f"{f_num(chowder_number, 1)} pts"
         else:
             diag_ch = "Sin historial completo de 5 años para calcular DGR 5A."
@@ -677,7 +777,7 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
         st.subheader(f"🛡️ 2. Auditoría de Calidad del Negocio ({f_num(score_calidad, 1)} / 10,0 Pts)")
 
         if payout_fcf > 0:
-            diag_pfcf = f"Porcentaje del {etiqueta_fcf} real consumido por el dividendo. Límite sano: ≤ {f_num(payout_limite_fcf, 0, '%')}, alerta: > {f_num(payout_amarillo_fcf, 0, '%')}."
+            diag_pfcf = f"Porcentaje del {etiqueta_fcf} real consumido por el dividendo. Óptimo: ≤ {f_num(payout_limite_fcf, 0, '%')}, límite: {f_num(payout_amarillo_fcf, 0, '%')}."
             meta_pfcf = f"Logra los 2,0 pts manteniendo el Payout {etiqueta_fcf} ≤ {f_num(payout_limite_fcf, 0, '%')}." if pts_fcf < 2.0 else f"¡Máxima puntuación! El dividendo está holgadamente cubierto por el {etiqueta_fcf}."
             val_pay_txt = f"{f_num(payout_fcf, 1, '%')}"
         else:
@@ -688,39 +788,50 @@ def render_decalogo_weiss(ticker_symbol, años_analisis, impuesto_pct, aplicar_m
 
         if es_financiera:
             diag_deb = f"En banca y seguros se evalúa mediante la rentabilidad sobre recursos propios (ROE: {f_num(roe, 1, '%')})."
-            meta_deb = "Logra los 2,0 pts con un ROE ≥ 14,0%."
+            meta_deb = "Logra los 2,0 pts con un ROE ≥ 15,0%."
             val_deb_txt = f"ROE {f_num(roe, 1, '%')}"
         else:
-            diag_deb = f"Años de EBITDA para pagar la Deuda Neta. Límite óptimo sectorial: ≤ {f_num(lim_deuda_optima, 1, 'x')} (máx. {f_num(lim_deuda_aceptable, 1, 'x')})."
+            diag_deb = f"Años de EBITDA para pagar la Deuda Neta. Límite óptimo para su sector: ≤ {f_num(lim_deuda_optima, 1, 'x')} (máx. {f_num(lim_deuda_aceptable, 1, 'x')})."
             meta_deb = f"Logra los 2,0 pts con Deuda Neta / EBITDA ≤ {f_num(lim_deuda_optima, 1, 'x')}." if pts_deuda < 2.0 else "¡Máxima puntuación! Balance con endeudamiento muy bajo."
             val_deb_txt = f"{f_num(deuda_ebitda, 2, 'x')}" if deuda_ebitda < 900 else "Elevada"
         render_item_auditoria("Solvencia Operativa (Deuda Neta / EBITDA)", val_deb_txt, pts_deuda, 2.0, diag_deb, meta_deb)
 
+        lbl_cob_aud = "EBITDA / Intereses" if es_reit_puro else "EBIT / Intereses"
+        u_cob_m = "3,2x" if es_reit_puro else "7,0x"
         val_cob_txt = f"{f_num(cobertura_intereses, 1, 'x')}" if cobertura_intereses is not None else ("Sin Deuda Neta" if deuda_neta == 0 else "N/D")
-        diag_cob = "Veces que el beneficio operativo (EBIT) cubre la factura anual de intereses bancarios."
-        meta_cob = "Logra los 0,5 pts con un ratio EBIT / Intereses ≥ 5,0x (o deuda neta cero)."
-        render_item_auditoria("Cobertura de Intereses (EBIT / Intereses)", val_cob_txt, pts_cob, 0.5, diag_cob, meta_cob)
+        diag_cob = f"Veces que el resultado operativo cubre la factura anual de intereses ({lbl_cob_aud})."
+        meta_cob = f"Logra los 0,5 pts con un ratio {lbl_cob_aud} ≥ {u_cob_m} (o deuda neta cero)."
+        render_item_auditoria(f"Cobertura de Intereses ({lbl_cob_aud})", val_cob_txt, pts_cob, 0.5, diag_cob, meta_cob)
 
-        aviso_fat = " ⚠️ Penalizado en -0,6 pts por fatiga en la última subida anual." if fatiga_dividendo else ""
+        aviso_fat = " ⚠️ Penalizado en -0,5 pts por desaceleración en la última subida anual." if fatiga_dividendo else ""
         diag_hist = f"Lleva {años_pagando} años repartiendo dividendos y encadena {racha_sin_recortes} años sin recortes.{aviso_fat}"
-        meta_hist = "Logra los 2,0 pts con ≥ 20 años sin recortes (o 25 años pagando y 12 sin recortes) sin fatiga reciente."
+        meta_hist = "Logra los 2,0 pts con ≥ 20 años sin recortes (o 25 años pagando y 17 sin recortes) sin fatiga reciente."
         render_item_auditoria("Resiliencia e Historial de Pagos", f"{años_pagando}A pagando | {racha_sin_recortes}A sin recorte", pts_hist, 2.0, diag_hist, meta_hist)
 
-        lbl_foso_m = "ROE" if es_financiera else "ROIC"
-        val_foso_txt = f"{lbl_foso_m}: {f_num(metrica_rentabilidad, 1, '%')} | Ventas 3A: {f_num(revenue_cagr_3y, 1, '%', signo_pos=True)}"
+        if es_reit_puro:
+            val_foso_txt = f"Margen Op.: {f_num(operating_margins, 1, '%')} | Ventas 3A: {f_num(revenue_cagr_3y, 1, '%', signo_pos=True)}"
+            meta_foso = "Logra los 1,5 pts con Margen Operativo ≥ 35% (0,9p) y crecimiento de ingresos ≥ 5%/año (0,6p)."
+        else:
+            lbl_foso_m = "ROE" if es_financiera else "ROIC"
+            val_foso_txt = f"{lbl_foso_m}: {f_num(metrica_rentabilidad, 1, '%')} | Ventas 3A: {f_num(revenue_cagr_3y, 1, '%', signo_pos=True)}"
+            meta_foso = f"Logra los 1,5 pts con {lbl_foso_m} ≥ 16,0% (0,9p) y crecimiento de ventas ≥ +5,0%/año (0,6p)."
         diag_foso = "Combina la rentabilidad sobre el capital invertido con la expansión real de facturación a 3 años."
-        meta_foso = f"Logra los 1,5 pts con {lbl_foso_m} ≥ 12,0% y crecimiento de ventas > +1,0% anual."
         render_item_auditoria("Foso Económico (Rentabilidad + Ventas)", val_foso_txt, pts_foso, 1.5, diag_foso, meta_foso)
 
         val_dgr_txt = f_num(dgr_5y, 2, '%') if dgr_5y is not None else "N/D"
         diag_dgr = "Crecimiento anual compuesto del dividendo en los últimos 5 años frente a la inflación."
-        meta_dgr = "Logra 1,0 pt completo con DGR 5A ≥ 6,0% anual (0,5 pts si está entre 3,0% y 6,0%)."
+        meta_dgr = "Logra 1,0 pt completo con DGR 5A ≥ 7,5% anual (progresivo desde 2,5%)."
         render_item_auditoria("Crecimiento Real del Dividendo (DGR 5A)", val_dgr_txt, pts_dgr, 1.0, diag_dgr, meta_dgr)
 
-        val_cap_txt = f"Acciones: {f_num(variacion_acciones, 1, '%', signo_pos=True)} | BPA 3A: {f_num(crecimiento_bpa_3y, 1, '%', signo_pos=True)}"
-        diag_cap = "Evalúa si la directiva crea valor recomprando acciones netas o expandiendo el beneficio por acción."
-        meta_cap = "Logra 1,0 pt reduciendo acciones en circulación (> 1%) o 0,5 pts con BPA 3A creciendo > 2%/año."
-        render_item_auditoria("Asignación de Capital (Recompras / BPA)", val_cap_txt, pts_cap, 1.0, diag_cap, meta_cap)
+        if es_reit_puro:
+            crec_r_txt = f_num(crecimiento_ffo_sh_3y if crecimiento_ffo_sh_3y is not None else dgr_5y, 1, '%', signo_pos=True)
+            val_cap_txt = f"FFO/Acción 3A: {crec_r_txt}"
+            meta_cap = "En REITs logra 1,0 pt si el flujo operativo por acción (FFO/sh) crece ≥ 4,5%/año tras ampliaciones."
+        else:
+            val_cap_txt = f"Acciones: {f_num(variacion_acciones, 1, '%', signo_pos=True)} | BPA 3A: {f_num(crecimiento_bpa_3y, 1, '%', signo_pos=True)}"
+            meta_cap = "Suma hasta 0,6 pts por recompras netas (≥ 2,5%/año) + hasta 0,6 pts por crecimiento BPA 3A (≥ 7%/año)."
+        diag_cap = "Evalúa si la directiva crea valor por acción combinando recompras y crecimiento del beneficio."
+        render_item_auditoria("Asignación de Capital (Creación de Valor/Acción)", val_cap_txt, pts_cap, 1.0, diag_cap, meta_cap)
 
     # ==========================================
     # SECCIÓN 3: FORTALEZA INSTITUCIONAL Y MÉTRICAS COMPLEMENTARIAS
