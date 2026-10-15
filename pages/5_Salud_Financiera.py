@@ -11,10 +11,13 @@ from plotly.subplots import make_subplots
 warnings.filterwarnings('ignore')
 
 TRADUCCION = {
-    'Technology': 'Tecnología', 'Healthcare': 'Salud', 'Financial Services': 'Servicios Financieros',
-    'Consumer Cyclical': 'Consumo Cíclico', 'Industrials': 'Industrial', 'Consumer Defensive': 'Consumo Defensivo',
+    'Technology': 'Tecnología', 'Information Technology': 'Tecnología',
+    'Healthcare': 'Salud', 'Financial Services': 'Servicios Financieros', 'Financials': 'Servicios Financieros',
+    'Consumer Cyclical': 'Consumo Cíclico', 'Consumer Discretionary': 'Consumo Cíclico',
+    'Industrials': 'Industrial', 'Consumer Defensive': 'Consumo Defensivo', 'Consumer Staples': 'Consumo Defensivo',
     'Energy': 'Energía', 'Real Estate': 'Inmobiliario', 'Utilities': 'Servicios Públicos',
-    'Basic Materials': 'Materiales Básicos', 'Communication Services': 'Servicios de Comunicación'
+    'Basic Materials': 'Materiales Básicos', 'Materials': 'Materiales Básicos',
+    'Communication Services': 'Servicios de Comunicación'
 }
 
 # ==========================================
@@ -48,13 +51,41 @@ def f_millones(val, sym=""):
     except Exception:
         return str(val)
 
+def ultimo_valor_tabla(df, claves):
+    if df is not None and not df.empty:
+        for k in claves:
+            if k in df.index:
+                s = df.loc[k].dropna()
+                if not s.empty:
+                    return float(s.iloc[-1])
+    return 0.0
+
 # ==========================================
-# CACHÉ COMPARTIDA DE DATOS
+# CACHÉ COMPARTIDA CON RESPALDO CONTABLE
 # ==========================================
 @st.cache_data(ttl=900, show_spinner=False)
 def cargar_fundamentales_pesados(ticker_symbol):
     t = yf.Ticker(ticker_symbol)
-    info = t.info or {}
+    info = {}
+    try:
+        info = t.info or {}
+    except Exception:
+        info = {}
+
+    if not info.get('sector') or not info.get('shortName'):
+        try:
+            busq = yf.Search(ticker_symbol, max_results=1).quotes
+            if busq and len(busq) > 0:
+                q0 = busq[0]
+                if not info.get('shortName'):
+                    info['shortName'] = q0.get('shortname') or q0.get('longname') or ticker_symbol
+                if not info.get('sector') and q0.get('sector'):
+                    info['sector'] = q0.get('sector')
+                if not info.get('industry') and q0.get('industry'):
+                    info['industry'] = q0.get('industry')
+        except Exception:
+            pass
+
     divs = t.dividends
     
     inc_stmt, bs_stmt, cf_stmt = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -73,10 +104,17 @@ def cargar_fundamentales_pesados(ticker_symbol):
 
     shares_hist = None
     try:
-        shares_hist = t.get_shares_full(start="2004-01-01")
+        shares_hist = t.get_shares_full(start="2008-01-01")
     except Exception: pass
 
-    curr_cot = info.get('currency', 'USD')
+    curr_cot = info.get('currency')
+    if not curr_cot:
+        try:
+            curr_cot = t.fast_info.currency or 'USD'
+        except Exception:
+            curr_cot = 'USD'
+        info['currency'] = curr_cot
+
     curr_Base = 'GBP' if curr_cot == 'GBp' else curr_cot
     curr_fin = info.get('financialCurrency', curr_Base) or curr_Base
     if curr_fin == 'GBp': curr_fin = 'GBP'
@@ -98,18 +136,25 @@ def cargar_cotizacion_tiempo_real(ticker_symbol):
     t = yf.Ticker(ticker_symbol)
     hist = t.history(period="max", auto_adjust=False)
     precio_vivo = None
+    shares_fast = None
+    mcap_fast = None
     try:
         precio_vivo = float(t.fast_info.last_price)
-    except Exception:
-        pass
-    return hist, precio_vivo
+    except Exception: pass
+    try:
+        shares_fast = float(t.fast_info.shares)
+    except Exception: pass
+    try:
+        mcap_fast = float(t.fast_info.market_cap)
+    except Exception: pass
+    return hist, precio_vivo, shares_fast, mcap_fast
 
 # ==========================================
 # FUNCIÓN PRINCIPAL PESTAÑA 2: SALUD FINANCIERA
 # ==========================================
 def render_salud_financiera(ticker_symbol, años_analisis):
     info, dividendos_raw, inc_stmt, bs_stmt, cf_stmt, shares_hist, fx_rate, curr_fin = cargar_fundamentales_pesados(ticker_symbol)
-    historial_raw, precio_vivo = cargar_cotizacion_tiempo_real(ticker_symbol)
+    historial_raw, precio_vivo, shares_fast, mcap_fast = cargar_cotizacion_tiempo_real(ticker_symbol)
 
     if dividendos_raw.empty or len(historial_raw) < 252:
         st.error("❌ Error: No hay suficientes datos históricos o de dividendos en Yahoo Finance.")
@@ -122,30 +167,30 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         except (ValueError, TypeError): return default
 
     st.markdown("""
-    <style>
-    .card-dgi {
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 10px;
-        padding: 12px 14px;
-        margin-bottom: 10px;
-    }
-    .explicacion-graf {
-        background: rgba(0, 212, 255, 0.05);
-        border-left: 3px solid #00d4ff;
-        padding: 10px 14px;
-        border-radius: 0 8px 8px 0;
-        font-size: 0.88rem;
-        color: #d0d0d8;
-        margin-top: -8px;
-        margin-bottom: 18px;
-        line-height: 1.45;
-    }
-    .badge-verde { background: rgba(33, 195, 84, 0.2); color: #21c354; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
-    .badge-rojo { background: rgba(255, 75, 75, 0.2); color: #ff4b4b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
-    .badge-ambar { background: rgba(250, 202, 43, 0.2); color: #faca2b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+.card-dgi {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+}
+.explicacion-graf {
+    background: rgba(0, 212, 255, 0.05);
+    border-left: 3px solid #00d4ff;
+    padding: 10px 14px;
+    border-radius: 0 8px 8px 0;
+    font-size: 0.88rem;
+    color: #d0d0d8;
+    margin-top: -8px;
+    margin-bottom: 18px;
+    line-height: 1.45;
+}
+.badge-verde { background: rgba(33, 195, 84, 0.2); color: #21c354; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+.badge-rojo { background: rgba(255, 75, 75, 0.2); color: #ff4b4b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+.badge-ambar { background: rgba(250, 202, 43, 0.2); color: #faca2b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+</style>
+""", unsafe_allow_html=True)
 
     currency_raw = info.get('currency', 'USD')
     es_peniques_uk = (currency_raw == 'GBp')
@@ -156,7 +201,6 @@ def render_salud_financiera(ticker_symbol, años_analisis):
     dividendos = dividendos_raw.copy()
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
-    dividendos = dividendos.groupby(dividendos.index).sum()
 
     if precio_vivo is not None and precio_vivo > 0 and not historial_completo.empty:
         historial_completo.iloc[-1, historial_completo.columns.get_loc('Close')] = precio_vivo
@@ -176,48 +220,43 @@ def render_salud_financiera(ticker_symbol, años_analisis):
     historial_analisis = historial_completo[historial_completo.index >= fecha_corte_analisis].copy()
     precio_actual = float(historial_analisis['Close'].dropna().iloc[-1])
 
-    sector_en = info.get('sector', 'Desconocido')
-    industry_en = info.get('industry', 'Desconocido')
+    sector_en = info.get('sector', 'General')
+    industry_en = info.get('industry', 'General')
     nombre_empresa = info.get('shortName', ticker_symbol)
     sector_final = TRADUCCION.get(sector_en, sector_en)
 
     es_reit_puro = 'reit' in industry_en.lower() or 'real estate' in sector_en.lower()
     es_utility_pura = 'utility' in sector_en.lower() or 'utilities' in sector_en.lower()
-    es_telecom = 'communication' in sector_en.lower() or 'telecom' in industry_en.lower()
+    es_telecom = 'telecom' in industry_en.lower()
     es_financiera = 'financial' in sector_en.lower() or 'bank' in industry_en.lower() or 'insurance' in industry_en.lower()
-    es_defensivo = 'consumer defensive' in sector_en.lower() or 'healthcare' in sector_en.lower()
+    es_defensivo = 'consumer defensive' in sector_en.lower() or 'consumer staples' in sector_en.lower() or 'healthcare' in sector_en.lower()
 
-    # Dividendos regulares anuales
-    años = dividendos.index.year
-    conteo_por_año = años.value_counts()
-    conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
-    pagos_por_año = int(conteo_closed.mode().iloc[0]) if not conteo_closed.empty else 4
-    if pagos_por_año not in [1, 2, 4, 12]:
-        pagos_por_año = 4 if pagos_por_año == 3 else (12 if pagos_por_año > 10 else 4)
+    # ==========================================
+    # MOTOR DE DIVIDENDOS SINCRONIZADO CON PESTAÑA 1
+    # ==========================================
+    divs_por_año = dividendos.groupby(dividendos.index.year).sum()
 
-    ventana_med = max(4, pagos_por_año * 2)
-    mediana_pagos = dividendos.rolling(window=ventana_med, min_periods=1).median()
-    dividendos_regulares = dividendos.where(dividendos <= mediana_pagos * 1.75, mediana_pagos)
+    años_div = dividendos.index.year
+    conteo_por_año = años_div.value_counts()
+    conteo_closed = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 5)]
+    if conteo_closed.empty:
+        conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
+    mediana_pagos_año = float(conteo_closed.median()) if not conteo_closed.empty else 4.0
 
-    suma_anual_reg = dividendos_regulares.groupby(dividendos_regulares.index.year).sum()
-    conteo_anual_reg = dividendos_regulares.groupby(dividendos_regulares.index.year).count()
-    divs_reg_por_año = suma_anual_reg.copy()
-
-    for y in divs_reg_por_año.index:
-        if y < año_actual and pagos_por_año in [2, 4, 12]:
-            c = conteo_anual_reg.loc[y]
-            if c > 0 and c != pagos_por_año and abs(c - pagos_por_año) == 1:
-                divs_reg_por_año.loc[y] = (suma_anual_reg.loc[y] / c) * pagos_por_año
+    if mediana_pagos_año >= 10: pagos_por_año = 12
+    elif mediana_pagos_año >= 3: pagos_por_año = 4
+    elif mediana_pagos_año >= 1.5: pagos_por_año = 2
+    else: pagos_por_año = 1
 
     forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
     if es_peniques_uk and forward_dividend > (precio_actual * 0.25):
         forward_dividend /= 100.0
-    if forward_dividend == 0 and not dividendos_regulares.empty:
-        ultimo_año_completo = divs_reg_por_año.iloc[-2] if len(divs_reg_por_año) > 1 else 0
-        forward_dividend = max(dividendos_regulares.iloc[-1] * pagos_por_año, ultimo_año_completo)
+    if forward_dividend == 0 and not dividendos.empty:
+        ultimo_año_completo = divs_por_año.iloc[-2] if len(divs_por_año) > 1 else 0.0
+        forward_dividend = max(float(dividendos.iloc[-1]) * pagos_por_año, float(ultimo_año_completo))
 
     historial_analisis['Year'] = historial_analisis.index.year
-    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_reg_por_año)
+    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_por_año)
     historial_analisis.loc[historial_analisis['Year'] == año_actual, 'Div_Anual'] = forward_dividend
     historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
     historial_analisis['Yield_Diario'] = (historial_analisis['Div_Anual'] / historial_analisis['Close']) * 100
@@ -231,40 +270,65 @@ def render_salud_financiera(ticker_symbol, años_analisis):
     yield_actual = (forward_dividend / precio_actual) * 100 if precio_actual > 0 else 0.0
     percentil_yield_actual = float((yields_validos < yield_actual).mean() * 100)
 
-    # Fundamentales
-    bpa_trailing = get_safe('trailingEps')
-    bpa_forward = get_safe('forwardEps')
-    per_actual = get_safe('trailingPE')
-    per_forward = get_safe('forwardPE')
-    price_to_book = get_safe('priceToBook', -1)
-    deuda_equity = get_safe('debtToEquity')
-    roe = get_safe('returnOnEquity', 0.0) * 100
-    operating_margins = get_safe('operatingMargins', 0.0) * 100
+    # --- FUNDAMENTALES CON RESPALDO AUTOMÁTICO ---
+    shares = get_safe('sharesOutstanding', 0.0)
+    if shares <= 0 and shares_fast: shares = shares_fast
+    if shares <= 0: shares = ultimo_valor_tabla(inc_stmt, ['Diluted Average Shares', 'Basic Average Shares'])
+
+    bpa_trailing = get_safe('trailingEps', 0.0)
+    if bpa_trailing == 0: bpa_trailing = ultimo_valor_tabla(inc_stmt, ['Diluted EPS', 'Basic EPS']) * fx_rate
+    bpa_forward = get_safe('forwardEps', 0.0)
+
+    per_actual = get_safe('trailingPE', 0.0)
+    if per_actual <= 0 and bpa_trailing > 0: per_actual = precio_actual / bpa_trailing
+    per_forward = get_safe('forwardPE', 0.0)
 
     total_debt = get_safe('totalDebt', 0.0) * fx_rate
+    if total_debt <= 0: total_debt = ultimo_valor_tabla(bs_stmt, ['Total Debt', 'Long Term Debt And Capital Lease Obligation', 'Long Term Debt']) * fx_rate
+
     total_cash = get_safe('totalCash', 0.0) * fx_rate
+    if total_cash <= 0: total_cash = ultimo_valor_tabla(bs_stmt, ['Cash Cash Equivalents And Short Term Investments', 'Cash And Cash Equivalents', 'Cash']) * fx_rate
+
     ebitda = get_safe('ebitda', 0.0) * fx_rate
+    if ebitda <= 0: ebitda = ultimo_valor_tabla(inc_stmt, ['EBITDA', 'Normalized EBITDA', 'Operating Income']) * fx_rate
+
     fcf_raw = get_safe('freeCashflow', 0.0) * fx_rate
+    if fcf_raw == 0: fcf_raw = ultimo_valor_tabla(cf_stmt, ['Free Cash Flow']) * fx_rate
+
     ocf_raw = get_safe('operatingCashflow', 0.0) * fx_rate
-    shares = get_safe('sharesOutstanding', 0.0)
+    if ocf_raw == 0: ocf_raw = ultimo_valor_tabla(cf_stmt, ['Operating Cash Flow', 'Cash Flow From Continuing Operating Activities']) * fx_rate
 
     flujo_caja_referencia = ocf_raw if (es_reit_puro and ocf_raw > fcf_raw) else fcf_raw
     etiqueta_fcf = "FFO (Flujo Operativo)" if (es_reit_puro and ocf_raw > fcf_raw) else "FCF (Flujo Caja Libre)"
 
     total_equity_raw = get_safe('totalStockholderEquity', 0.0) * fx_rate
-    if total_equity_raw == 0 and not bs_stmt.empty:
-        for eq_k in ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity']:
-            if eq_k in bs_stmt.index:
-                s_eq = bs_stmt.loc[eq_k].dropna()
-                if not s_eq.empty:
-                    total_equity_raw = float(s_eq.iloc[-1]) * fx_rate
-                    break
+    if total_equity_raw == 0: total_equity_raw = ultimo_valor_tabla(bs_stmt, ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity']) * fx_rate
 
-    es_quasi_reit_o_recompras = (not es_reit_puro) and (not es_financiera) and (operating_margins >= 22.0) and (total_equity_raw <= 0 or price_to_book < 0 or deuda_equity == 0.0)
+    net_inc_val = ultimo_valor_tabla(inc_stmt, ['Net Income', 'Net Income Common Stockholders']) * fx_rate
+    roe = get_safe('returnOnEquity', 0.0) * 100
+    if roe == 0 and total_equity_raw > 0 and net_inc_val > 0: roe = (net_inc_val / total_equity_raw) * 100
+
+    ebit_tabla = ultimo_valor_tabla(inc_stmt, ['Operating Income', 'EBIT']) * fx_rate
+    rev_tabla = ultimo_valor_tabla(inc_stmt, ['Total Revenue', 'Operating Revenue']) * fx_rate
+    operating_margins = get_safe('operatingMargins', 0.0) * 100
+    if operating_margins == 0 and rev_tabla > 0 and ebit_tabla > 0: operating_margins = (ebit_tabla / rev_tabla) * 100
+
+    price_to_book = get_safe('priceToBook', -1)
+    if price_to_book <= 0 and total_equity_raw > 0 and shares > 0: price_to_book = precio_actual / (total_equity_raw / shares)
+
+    deuda_equity = get_safe('debtToEquity', 0.0)
+
+    es_quasi_reit_o_recompras = (not es_reit_puro) and (not es_financiera) and (operating_margins >= 24.0) and (total_equity_raw <= 0 or price_to_book < 0)
     es_regulada_o_reit = es_reit_puro or es_utility_pura or es_quasi_reit_o_recompras
 
-    lim_deuda_optima = 3.5 if (es_regulada_o_reit or es_defensivo or es_telecom) else 2.5
-    lim_deuda_aceptable = 5.0 if (es_regulada_o_reit or es_defensivo or es_telecom) else 4.0
+    if es_reit_puro:
+        lim_deuda_optima, lim_deuda_aceptable = 5.2, 6.8
+    elif es_utility_pura or es_quasi_reit_o_recompras:
+        lim_deuda_optima, lim_deuda_aceptable = 3.5, 5.0
+    elif es_defensivo or es_telecom:
+        lim_deuda_optima, lim_deuda_aceptable = 2.5, 3.8
+    else:
+        lim_deuda_optima, lim_deuda_aceptable = 1.8, 3.2
 
     deuda_neta = max(0.0, total_debt - total_cash)
     deuda_ebitda = (deuda_neta / ebitda) if ebitda > 0 else (999.0 if (total_debt > 0 and not es_financiera) else 0.0)
@@ -273,11 +337,7 @@ def render_salud_financiera(ticker_symbol, años_analisis):
     roic = None
     try:
         ebit_val = get_safe('operatingIncome') * fx_rate
-        if ebit_val == 0 and not inc_stmt.empty:
-            for k in ['Operating Income', 'EBIT']:
-                if k in inc_stmt.index:
-                    ebit_val = float(inc_stmt.loc[k].dropna().iloc[-1]) * fx_rate
-                    break
+        if ebit_val == 0: ebit_val = ebit_tabla
         inv_cap = (total_debt + max(0.0, total_equity_raw)) - total_cash
         if inv_cap <= 0 and not bs_stmt.empty and 'Total Assets' in bs_stmt.index:
             tot_assets = float(bs_stmt.loc['Total Assets'].dropna().iloc[-1]) * fx_rate
@@ -299,12 +359,13 @@ def render_salud_financiera(ticker_symbol, años_analisis):
                     revenue_cagr_3y = (((rev_series.iloc[-1] / rev_series.iloc[-4]) ** (1 / 3)) - 1) * 100
                 break
 
-    # Cobertura de intereses
+    # Cobertura de intereses (EBITDA/Intereses en REITs; EBIT/Intereses en el resto)
     cobertura_intereses = None
     if not inc_stmt.empty:
         try:
             ebit_cov, int_exp = None, None
-            for k in ['Operating Income', 'EBIT']:
+            claves_op = ['EBITDA', 'Normalized EBITDA', 'Operating Income'] if es_reit_puro else ['Operating Income', 'EBIT']
+            for k in claves_op:
                 if k in inc_stmt.index:
                     ebit_cov = float(inc_stmt.loc[k].dropna().iloc[-1])
                     break
@@ -329,9 +390,11 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         meses_caja_div = (total_cash / gasto_anual_div) * 12
 
     # Dividendos y DGR
-    dividendos_barras = divs_reg_por_año.copy()
+    dividendos_barras = divs_por_año.copy()
     if año_actual in dividendos_barras.index:
         dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
+    else:
+        dividendos_barras.loc[año_actual] = forward_dividend
 
     dgr_5y, dgr_1y = None, None
     if len(dividendos_barras) >= 2 and dividendos_barras.iloc[-2] > 0:
@@ -345,37 +408,34 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         inercia_ratio = dgr_1y / dgr_5y
         if inercia_ratio < 0.5: fatiga_dividendo = True
 
-    # Acciones en circulación
+    # Acciones en circulación (Prioriza Diluted Average Shares auditadas)
     shares_yearly = pd.Series(dtype=float)
     variacion_acciones = None
     try:
-        if shares_hist is not None and len(shares_hist) > 1:
+        if not inc_stmt.empty:
+            for key in ['Diluted Average Shares', 'Basic Average Shares']:
+                if key in inc_stmt.index:
+                    sh_data = inc_stmt.loc[key].dropna()
+                    sh_data = sh_data[sh_data > 0]
+                    if len(sh_data) >= 2:
+                        shares_yearly = sh_data.groupby(pd.to_datetime(sh_data.index).year).last().sort_index()
+                        acc_ini, acc_fin = float(shares_yearly.iloc[0]), float(shares_yearly.iloc[-1])
+                        if acc_ini > 0:
+                            variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
+                            break
+    except Exception: pass
+
+    if variacion_acciones is None and shares_hist is not None and len(shares_hist) > 1:
+        try:
             fecha_corte_shares = hoy_ts - pd.DateOffset(years=años_analisis + 3)
             sh_sub = shares_hist[shares_hist.index.tz_localize(None) >= fecha_corte_shares]
-            sy = sh_sub.groupby(sh_sub.index.year).last()
+            sy = sh_sub.groupby(sh_sub.index.year).median()
             sy = sy[sy > 0]
-            sy = sy[sy.pct_change().fillna(0) > -0.50]
             if len(sy) >= 2:
                 shares_yearly = sy
                 acc_ini = shares_yearly.iloc[-(años_analisis + 1)] if len(shares_yearly) >= (años_analisis + 1) else shares_yearly.iloc[0]
                 acc_fin = shares_yearly.iloc[-1]
                 if acc_ini > 0: variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-    except Exception: pass
-
-    if variacion_acciones is None or shares_yearly.empty:
-        try:
-            if not inc_stmt.empty:
-                for key in ['Basic Average Shares', 'Diluted Average Shares']:
-                    if key in inc_stmt.index:
-                        sh_data = inc_stmt.loc[key].dropna()
-                        sh_data = sh_data[sh_data > 0]
-                        sh_data = sh_data[sh_data.pct_change().fillna(0) > -0.50]
-                        if len(sh_data) >= 2:
-                            shares_yearly = sh_data.groupby(pd.to_datetime(sh_data.index).year).last()
-                            acc_ini, acc_fin = shares_yearly.iloc[0], shares_yearly.iloc[-1]
-                            if acc_ini > 0:
-                                variacion_acciones = ((acc_fin / acc_ini) - 1) * 100
-                                break
         except Exception: pass
 
     # ==========================================
@@ -390,178 +450,185 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             var_bpa = ((bpa_forward - bpa_trailing) / abs(bpa_trailing)) * 100
             b_class = "badge-verde" if var_bpa >= 0 else "badge-rojo"
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">💵 Beneficio por Acción (BPA)</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(bpa_trailing, 2, sym)} <span style="font-size: 1rem; color: #888;">➔</span> {f_num(bpa_forward, 2, sym)}</span>
-                    <span class="{b_class}">{f_num(var_bpa, 1, '%', signo_pos=True)}</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">Actual ➔ Estimado a 12 meses por consenso</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">💵 Beneficio por Acción (BPA)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(bpa_trailing, 2, sym)} <span style="font-size: 1rem; color: #888;">➔</span> {f_num(bpa_forward, 2, sym)}</span>
+<span class="{b_class}">{f_num(var_bpa, 1, '%', signo_pos=True)}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Actual ➔ Estimado a 12 meses por consenso</span>
+</div>
+""", unsafe_allow_html=True)
         else:
             st.metric("BPA Actual", f_num(bpa_trailing, 2, sym) if bpa_trailing != 0 else "N/D")
 
     with col_bpa2:
         if es_reit_puro and p_fcf > 0:
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">🏢 Múltiplo Inmobiliario (Precio / FFO)</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(p_fcf, 1, 'x')}</span>
-                    <span class="{'badge-verde' if p_fcf <= 18 else ('badge-ambar' if p_fcf <= 24 else 'badge-rojo')}">FFO Yield: {f_num(fcf_yield, 2, '%')}</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">Múltiplo real REIT sin distorsión por depreciación</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">🏢 Múltiplo Inmobiliario (Precio / FFO)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(p_fcf, 1, 'x')}</span>
+<span class="{'badge-verde' if p_fcf <= 18 else ('badge-ambar' if p_fcf <= 24 else 'badge-rojo')}">FFO Yield: {f_num(fcf_yield, 2, '%')}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Múltiplo real REIT sin distorsión por depreciación</span>
+</div>
+""", unsafe_allow_html=True)
         elif per_actual > 0 and per_forward > 0:
             var_per = ((per_forward - per_actual) / per_actual) * 100
             p_class = "badge-verde" if var_per <= 0 else "badge-rojo"
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">🏷️ Múltiplo de Valoración (PER)</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(per_actual, 1, 'x')} <span style="font-size: 1rem; color: #888;">➔</span> {f_num(per_forward, 1, 'x')}</span>
-                    <span class="{p_class}">{f_num(var_per, 1, '%', signo_pos=True)}</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">PER Actual ➔ PER Futuro estimado</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">🏷️ Múltiplo de Valoración (PER)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(per_actual, 1, 'x')} <span style="font-size: 1rem; color: #888;">➔</span> {f_num(per_forward, 1, 'x')}</span>
+<span class="{p_class}">{f_num(var_per, 1, '%', signo_pos=True)}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">PER Actual ➔ PER Futuro estimado</span>
+</div>
+""", unsafe_allow_html=True)
         else:
             st.metric("PER Actual", f_num(per_actual, 1, 'x') if per_actual > 0 else "N/D")
 
     col_foso1, col_foso2 = st.columns(2)
     with col_foso1:
-        lbl_rent = "🏰 Retorno s/ Capital (ROE)" if es_financiera else "🏰 Retorno s/ Capital Invertido (ROIC)"
-        if metrica_rentabilidad is not None:
-            if metrica_rentabilidad >= 12.0: r_badge, r_txt = "badge-verde", "Foso Amplio (≥ 12%)"
-            elif metrica_rentabilidad >= 8.0: r_badge, r_txt = "badge-ambar", "Foso Medio (≥ 8%)"
-            else: r_badge, r_txt = "badge-rojo", "Foso Débil (< 8%)"
+        lbl_rent = "🏰 Retorno s/ Capital (ROE)" if es_financiera else ("🏢 Margen Operativo REIT" if (es_reit_puro and (metrica_rentabilidad is None or metrica_rentabilidad < 8.0)) else "🏰 Retorno s/ Capital Invertido (ROIC)")
+        val_rent_mostrar = operating_margins if (es_reit_puro and (metrica_rentabilidad is None or metrica_rentabilidad < 8.0)) else metrica_rentabilidad
+        if val_rent_mostrar is not None and val_rent_mostrar > 0:
+            umbral_alto = 28.0 if (es_reit_puro and val_rent_mostrar == operating_margins) else 15.0
+            umbral_medio = 18.0 if (es_reit_puro and val_rent_mostrar == operating_margins) else 9.0
+            if val_rent_mostrar >= umbral_alto: r_badge, r_txt = "badge-verde", f"Foso Amplio (≥ {f_num(umbral_alto, 0, '%')})"
+            elif val_rent_mostrar >= umbral_medio: r_badge, r_txt = "badge-ambar", f"Foso Medio (≥ {f_num(umbral_medio, 0, '%')})"
+            else: r_badge, r_txt = "badge-rojo", f"Foso Débil (< {f_num(umbral_medio, 0, '%')})"
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">{lbl_rent}</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(metrica_rentabilidad, 2, '%')}</span>
-                    <span class="{r_badge}">{r_txt}</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">Rentabilidad real que genera el capital invertido en el negocio</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">{lbl_rent}</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(val_rent_mostrar, 2, '%')}</span>
+<span class="{r_badge}">{r_txt}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Rentabilidad real que genera el negocio sobre su capital</span>
+</div>
+""", unsafe_allow_html=True)
         else:
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">{lbl_rent}</span>
-                <div style="font-size: 1.3rem; font-weight: bold; margin-top: 4px;">N/D</div>
-                <span style="font-size: 0.75rem; color: #888;">Datos de balance insuficientes</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">{lbl_rent}</span>
+<div style="font-size: 1.3rem; font-weight: bold; margin-top: 4px;">N/D</div>
+<span style="font-size: 0.75rem; color: #888;">Datos de balance insuficientes</span>
+</div>
+""", unsafe_allow_html=True)
 
     with col_foso2:
         if revenue_cagr_3y is not None:
-            v_badge = "badge-verde" if revenue_cagr_3y > 0 else "badge-rojo"
-            v_txt = "Expandiendo" if revenue_cagr_3y > 0 else "Contrayendo"
+            v_badge = "badge-verde" if revenue_cagr_3y >= 3.0 else ("badge-ambar" if revenue_cagr_3y > 0 else "badge-rojo")
+            v_txt = "Expandiendo" if revenue_cagr_3y >= 3.0 else ("Crec. Lento" if revenue_cagr_3y > 0 else "Contrayendo")
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">📊 Crecimiento de Ventas (Top-Line 3A)</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(revenue_cagr_3y, 2, '%', signo_pos=True)}</span>
-                    <span class="{v_badge}">{v_txt}</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">CAGR anualizado de ingresos netos (filtro anti trampa de valor)</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">📊 Crecimiento de Ventas (Top-Line 3A)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(revenue_cagr_3y, 2, '%', signo_pos=True)}</span>
+<span class="{v_badge}">{v_txt}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">CAGR anualizado de ingresos netos (filtro anti trampa de valor)</span>
+</div>
+""", unsafe_allow_html=True)
         else:
             st.markdown("""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">📊 Crecimiento de Ventas (Top-Line 3A)</span>
-                <div style="font-size: 1.3rem; font-weight: bold; margin-top: 4px;">N/D</div>
-                <span style="font-size: 0.75rem; color: #888;">Historial de facturación insuficiente</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">📊 Crecimiento de Ventas (Top-Line 3A)</span>
+<div style="font-size: 1.3rem; font-weight: bold; margin-top: 4px;">N/D</div>
+<span style="font-size: 0.75rem; color: #888;">Historial de facturación insuficiente</span>
+</div>
+""", unsafe_allow_html=True)
 
     col_sol1, col_sol2 = st.columns(2)
     with col_sol1:
         if es_financiera:
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">🏦 Precio / Valor Contable (P/B)</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(price_to_book, 2, 'x')}</span>
-                    <span class="{'badge-verde' if 0 < price_to_book <= 1.5 else 'badge-ambar'}">Banca/Seguros</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">En entidades financieras no aplica Deuda/EBITDA</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">🏦 Precio / Valor Contable (P/B)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(price_to_book, 2, 'x')}</span>
+<span class="{'badge-verde' if 0 < price_to_book <= 1.5 else 'badge-ambar'}">Banca/Seguros</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">En entidades financieras no aplica Deuda/EBITDA</span>
+</div>
+""", unsafe_allow_html=True)
         elif deuda_ebitda < 900:
             if deuda_ebitda <= lim_deuda_optima: b_deb, t_deb = "badge-verde", f"Óptimo (≤ {f_num(lim_deuda_optima, 1, 'x')})"
             elif deuda_ebitda <= lim_deuda_aceptable: b_deb, t_deb = "badge-ambar", f"Aceptable (≤ {f_num(lim_deuda_aceptable, 1, 'x')})"
             else: b_deb, t_deb = "badge-rojo", "Apalancada"
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">🛡️ Deuda Neta / EBITDA</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(deuda_ebitda, 2, 'x')}</span>
-                    <span class="{b_deb}">{t_deb}</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">Años de EBITDA necesarios para extinguir la deuda neta</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">🛡️ Deuda Neta / EBITDA</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(deuda_ebitda, 2, 'x')}</span>
+<span class="{b_deb}">{t_deb}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Años de EBITDA necesarios para extinguir la deuda neta</span>
+</div>
+""", unsafe_allow_html=True)
 
     with col_sol2:
+        lbl_cob = "⚡ Cobertura Intereses (EBITDA / Int.)" if es_reit_puro else "⚡ Cobertura Intereses (EBIT / Int.)"
+        u_cob_ok = 3.0 if es_reit_puro else 5.0
+        u_cob_med = 1.8 if es_reit_puro else 3.0
         if cobertura_intereses is not None:
-            if cobertura_intereses >= 5.0: b_cob, t_cob = "badge-verde", "Holgada (≥ 5,0x)"
-            elif cobertura_intereses >= 3.0: b_cob, t_cob = "badge-ambar", "Aceptable (≥ 3,0x)"
-            else: b_cob, t_cob = "badge-rojo", "Riesgo (< 3,0x)"
+            if cobertura_intereses >= u_cob_ok: b_cob, t_cob = "badge-verde", f"Holgada (≥ {f_num(u_cob_ok, 1, 'x')})"
+            elif cobertura_intereses >= u_cob_med: b_cob, t_cob = "badge-ambar", f"Aceptable (≥ {f_num(u_cob_med, 1, 'x')})"
+            else: b_cob, t_cob = "badge-rojo", f"Riesgo (< {f_num(u_cob_med, 1, 'x')})"
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">⚡ Cobertura de Intereses (EBIT / Intereses)</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(cobertura_intereses, 2, 'x')}</span>
-                    <span class="{b_cob}">{t_cob}</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">Veces que el beneficio operativo cubre los intereses de la deuda</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">{lbl_cob}</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(cobertura_intereses, 2, 'x')}</span>
+<span class="{b_cob}">{t_cob}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Veces que el flujo operativo cubre los intereses de la deuda</span>
+</div>
+""", unsafe_allow_html=True)
         else:
             txt_caja_neta = "Caja Neta (Sin Deuda)" if deuda_neta == 0 else "N/D"
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">⚡ Cobertura de Intereses</span>
-                <div style="font-size: 1.3rem; font-weight: bold; margin-top: 4px;">{txt_caja_neta}</div>
-                <span style="font-size: 0.75rem; color: #888;">Sin cargos netos por intereses bancarios</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">{lbl_cob}</span>
+<div style="font-size: 1.3rem; font-weight: bold; margin-top: 4px;">{txt_caja_neta}</div>
+<span style="font-size: 0.75rem; color: #888;">Sin cargos netos por intereses bancarios</span>
+</div>
+""", unsafe_allow_html=True)
 
     col_caj1, col_caj2 = st.columns(2)
     with col_caj1:
         if meses_caja_div is not None:
             b_caj = "badge-verde" if meses_caja_div >= 12.0 else ("badge-ambar" if meses_caja_div >= 6.0 else "badge-rojo")
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">💰 Colchón de Caja para Dividendos</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(meses_caja_div, 1)} Meses</span>
-                    <span class="{b_caj}">{f_num(meses_caja_div / 12, 1)} Años</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">Tiempo que podría pagar el dividendo solo con su liquidez actual ({f_millones(total_cash, sym)})</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">💰 Colchón de Caja para Dividendos</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(meses_caja_div, 1)} Meses</span>
+<span class="{b_caj}">{f_num(meses_caja_div / 12, 1)} Años</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Tiempo cubierto solo con su liquidez actual ({f_millones(total_cash, sym)})</span>
+</div>
+""", unsafe_allow_html=True)
 
     with col_caj2:
         if variacion_acciones is not None:
             if variacion_acciones < -0.5: t_acc, c_acc_b, sub_acc = "🟢 Recomprando", "badge-verde", "Destruye acciones y aumenta tu participación"
             elif variacion_acciones <= 2.0: t_acc, c_acc_b, sub_acc = "🟡 Estable", "badge-ambar", "Capital social prácticamente constante"
+            elif es_reit_puro: t_acc, c_acc_b, sub_acc = "🏢 Ampliación REIT", "badge-ambar", "Emite capital para adquirir nuevos inmuebles"
             else: t_acc, c_acc_b, sub_acc = "🔴 Diluyendo", "badge-rojo", "Emite acciones nuevas (diluye al accionista)"
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">🔄 Variación de Acciones ({años_analisis} Años)</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.5rem; font-weight: bold;">{f_num(variacion_acciones, 1, '%', signo_pos=True)}</span>
-                    <span class="{c_acc_b}">{t_acc}</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">{sub_acc}</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">🔄 Variación de Acciones ({años_analisis} Años)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.5rem; font-weight: bold;">{f_num(variacion_acciones, 1, '%', signo_pos=True)}</span>
+<span class="{c_acc_b}">{t_acc}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">{sub_acc}</span>
+</div>
+""", unsafe_allow_html=True)
 
     col_dgr1, col_dgr2 = st.columns(2)
     with col_dgr1:
@@ -569,15 +636,15 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             inf_diff = dgr_5y - 2.5
             b_inf = "badge-verde" if inf_diff >= 2.0 else ("badge-ambar" if inf_diff >= 0 else "badge-rojo")
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">🚀 DGR 5 Años (Crecimiento Medio Plazo)</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.6rem; font-weight: bold; color: #faca2b;">{f_num(dgr_5y, 2, '%')}</span>
-                    <span class="{b_inf}">{f_num(inf_diff, 1, '%', signo_pos=True)} vs Inflación</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">Poder adquisitivo ganado anualmente sobre una inflación media del 2,5%</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">🚀 DGR 5 Años (Crecimiento Medio Plazo)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.6rem; font-weight: bold; color: #faca2b;">{f_num(dgr_5y, 2, '%')}</span>
+<span class="{b_inf}">{f_num(inf_diff, 1, '%', signo_pos=True)} vs Inflación</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Poder adquisitivo ganado anualmente sobre una inflación media del 2,5%</span>
+</div>
+""", unsafe_allow_html=True)
 
     with col_dgr2:
         if dgr_1y is not None and dgr_5y is not None:
@@ -585,15 +652,15 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             elif inercia_ratio is not None and inercia_ratio >= 1.0: t_iner, b_iner = "⚡ Acelerando", "badge-verde"
             else: t_iner, b_iner = "➡️ Ritmo Estable", "badge-ambar"
             st.markdown(f"""
-            <div class="card-dgi">
-                <span style="color: #aaa; font-size: 0.85rem;">⏱️ Inercia del Dividendo (Último Año vs Media 5A)</span>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                    <span style="font-size: 1.6rem; font-weight: bold; color: #00d4ff;">{f_num(dgr_1y, 2, '%', signo_pos=True)}</span>
-                    <span class="{b_iner}">{t_iner}</span>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">Última subida anual comparada con su media quinquenal ({f_num(dgr_5y, 2, '%')})</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">⏱️ Inercia del Dividendo (Último Año vs Media 5A)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.6rem; font-weight: bold; color: #00d4ff;">{f_num(dgr_1y, 2, '%', signo_pos=True)}</span>
+<span class="{b_iner}">{t_iner}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Última subida anual comparada con su media quinquenal ({f_num(dgr_5y, 2, '%')})</span>
+</div>
+""", unsafe_allow_html=True)
 
     # ==========================================
     # GRÁFICOS DE ACCIONES Y DIVIDENDOS CON EXPLICACIONES
@@ -616,16 +683,16 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 
             ult_sh_yoy = float(yoy_shares_analisis.iloc[-1])
             anios_recompra = int((yoy_shares_analisis < -0.1).sum())
-            accion_txt = "recomprando y retirando acciones del mercado" if (variacion_acciones or 0) < 0 else "emitiendo nuevas acciones (diluyendo tu porcentaje)"
+            accion_txt = "recomprando y retirando acciones del mercado" if (variacion_acciones or 0) < 0 else "emitiendo nuevas acciones"
             st.markdown(f"""
-            <div class="explicacion-graf">
-                💡 <strong>Qué vemos en {ticker_symbol}:</strong> En el conjunto del periodo el número total de acciones ha variado un <strong>{f_num(variacion_acciones, 1, '%', signo_pos=True)}</strong> ({f_num(ult_sh_yoy, 2, '%', signo_pos=True)} en el último año), {accion_txt}. Ha reducido su capital social en <strong>{anios_recompra} de los {len(yoy_shares_analisis)} años</strong> mostrados (barras verdes): cuantas menos acciones quedan, a más beneficio y dividendo toca cada acción tuya.
-            </div>
-            """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos en {ticker_symbol}:</strong> En el conjunto del periodo el número total de acciones ha variado un <strong>{f_num(variacion_acciones, 1, '%', signo_pos=True)}</strong> ({f_num(ult_sh_yoy, 2, '%', signo_pos=True)} en el último año), {accion_txt}. Ha reducido su capital social en <strong>{anios_recompra} de los {len(yoy_shares_analisis)} años</strong> mostrados (barras verdes).
+</div>
+""", unsafe_allow_html=True)
 
     with col_sh_div2:
         if not dividendos_barras.empty:
-            st.markdown(f"#### 💰 Dividendos Anuales Regulares y Subida YoY ({años_analisis} Años)")
+            st.markdown(f"#### 💰 Historial de Dividendos Anuales y Subida YoY ({años_analisis} Años)")
             crecimiento_yoy_total = dividendos_barras.pct_change() * 100
             divs_analisis = dividendos_barras.tail(años_analisis)
             crecimiento_yoy_analisis = crecimiento_yoy_total.tail(años_analisis)
@@ -647,13 +714,13 @@ def render_salud_financiera(ticker_symbol, años_analisis):
                 div_fin_per = float(divs_analisis.iloc[-1])
                 mult_div = (div_fin_per / div_ini_per) if div_ini_per > 0 else 1.0
                 st.markdown(f"""
-                <div class="explicacion-graf">
-                    💡 <strong>Qué vemos en {ticker_symbol}:</strong> El dividendo anual por acción ha pasado de <strong>{f_num(div_ini_per, 2, sym)}</strong> en {divs_analisis.index[0]} a <strong>{f_num(div_fin_per, 2, sym)}</strong> hoy (se ha multiplicado por <strong>{f_num(mult_div, 2, 'x')}</strong>). La última variación anual ha sido del <strong>{f_num(dgr_1y, 2, '%', signo_pos=True)}</strong> frente a una media de 5 años del <strong>{f_num(dgr_5y, 2, '%')}</strong>.
-                </div>
-                """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos en {ticker_symbol}:</strong> El dividendo anual por acción ha pasado de <strong>{f_num(div_ini_per, 2, sym)}</strong> en {divs_analisis.index[0]} a <strong>{f_num(div_fin_per, 2, sym)}</strong> hoy (se ha multiplicado por <strong>{f_num(mult_div, 2, 'x')}</strong>). La última variación anual ha sido del <strong>{f_num(dgr_1y, 2, '%', signo_pos=True)}</strong> frente a una media de 5 años del <strong>{f_num(dgr_5y, 2, '%')}</strong>.
+</div>
+""", unsafe_allow_html=True)
 
     # ==========================================
-    # LOS 8 GRÁFICOS FUNDAMENTALES Y DE SOLVENCIA CON EXPLICACIONES
+    # LOS 9 GRÁFICOS FUNDAMENTALES Y DE SOLVENCIA CON EXPLICACIONES
     # ==========================================
     st.divider()
     st.markdown("### 📉 Gráficos de Valoración, Caja y Estructura de Deuda")
@@ -699,10 +766,10 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         st.plotly_chart(fig_yield, use_container_width=True)
 
         st.markdown(f"""
-        <div class="explicacion-graf">
-            💡 <strong>Qué vemos hoy:</strong> La rentabilidad actual (<strong>{f_num(yield_actual, 2, '%')}</strong>) se encuentra en el <strong>percentil {f_num(percentil_yield_actual, 1)}%</strong> de los últimos {años_analisis} años. Cuando la línea azul sube hasta tocar o superar el techo verde punteado (<strong>{f_num(yield_infravalorado, 2, '%')}</strong>), indica máxima infravaloración histórica por dividendo.
-        </div>
-        """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos hoy:</strong> La rentabilidad actual (<strong>{f_num(yield_actual, 2, '%')}</strong>) se encuentra en el <strong>percentil {f_num(percentil_yield_actual, 1)}%</strong> de los últimos {años_analisis} años. Cuando la línea azul sube hasta tocar o superar el techo verde punteado (<strong>{f_num(yield_infravalorado, 2, '%')}</strong>), indica máxima infravaloración histórica por dividendo.
+</div>
+""", unsafe_allow_html=True)
 
     with col_graf2:
         st.markdown("#### 📉 2. Drawdown Histórico (Caída desde Máximos)")
@@ -721,10 +788,10 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         st.plotly_chart(fig_dd, use_container_width=True)
 
         st.markdown(f"""
-        <div class="explicacion-graf">
-            💡 <strong>Qué vemos hoy:</strong> {ticker_symbol} acumula actualmente una caída del <strong>{f_num(dd_actual, 1, '%')}</strong> desde su máximo de {años_analisis} años (<strong>{f_num(max_precio_periodo, 2, sym)}</strong>). Su peor caída registrada en todo este periodo (Max Drawdown) fue del <strong>{f_num(max_dd_hist, 1, '%')}</strong> en <strong>{fecha_max_dd}</strong>.
-        </div>
-        """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos hoy:</strong> {ticker_symbol} acumula actualmente una caída del <strong>{f_num(dd_actual, 1, '%')}</strong> desde su máximo de {años_analisis} años (<strong>{f_num(max_precio_periodo, 2, sym)}</strong>). Su peor caída registrada en todo este periodo (Max Drawdown) fue del <strong>{f_num(max_dd_hist, 1, '%')}</strong> en <strong>{fecha_max_dd}</strong>.
+</div>
+""", unsafe_allow_html=True)
 
     # 3. YIELD ON COST HISTÓRICO
     st.markdown("---")
@@ -748,10 +815,10 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         st.plotly_chart(fig_yoc_hist, use_container_width=True)
 
         st.markdown(f"""
-        <div class="explicacion-graf">
-            💡 <strong>Qué vemos hoy:</strong> La línea amarilla muestra qué rentabilidad anual sobre tu inversión inicial estarías cobrando hoy con el dividendo actual (<strong>{f_num(forward_dividend, 2, sym)}</strong>) según la fecha en que hubieras comprado. Un inversor que compró al inicio del gráfico hace {años_analisis} años empezó cobrando un <strong>{f_num(yield_inicial_entonces, 2, '%')}</strong> (línea gris), pero hoy recibe un <strong>Yield on Cost del {f_num(yoc_hace_n_anios, 2, '%')}</strong> (con picos de hasta el <strong>{f_num(max_yoc_hist, 2, '%')}</strong> para quien compró en mínimos).
-        </div>
-        """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos hoy:</strong> La línea amarilla muestra qué rentabilidad anual sobre tu inversión inicial estarías cobrando hoy con el dividendo actual (<strong>{f_num(forward_dividend, 2, sym)}</strong>) según la fecha en que hubieras comprado. Quien compró hace {años_analisis} años empezó cobrando un <strong>{f_num(yield_inicial_entonces, 2, '%')}</strong> (línea gris), pero hoy recibe un <strong>Yield on Cost del {f_num(yoc_hace_n_anios, 2, '%')}</strong> (con picos de hasta el <strong>{f_num(max_yoc_hist, 2, '%')}</strong> en mínimos).
+</div>
+""", unsafe_allow_html=True)
 
     # 4. SOSTENIBILIDAD FCF VS DIVIDENDOS Y 5. INGRESOS VS BENEFICIO NETO
     st.markdown("---")
@@ -781,10 +848,10 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             txt_sobrante = f"le sobran <strong>{f_millones(sobrante_caja, sym)} libres</strong> tras pagar a los accionistas para amortizar deuda o recomprar acciones" if sobrante_caja >= 0 else f"presenta un <strong>déficit de {f_millones(abs(sobrante_caja), sym)}</strong> (el dividendo superó al flujo libre ese ejercicio)"
 
             st.markdown(f"""
-            <div class="explicacion-graf">
-                💡 <strong>Qué vemos en el último cierre ({x_years[-1]}):</strong> Generó <strong>{f_millones(ult_fcf_v, sym)}</strong> de {etiqueta_fcf} (barra azul) y desembolsó <strong>{f_millones(ult_div_v, sym)}</strong> en dividendos (barra naranja), lo que supone un <strong>Payout sobre caja del {f_num(ult_pay_v, 1, '%')}</strong>. Con ello, {txt_sobrante}.
-            </div>
-            """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos en el último cierre ({x_years[-1]}):</strong> Generó <strong>{f_millones(ult_fcf_v, sym)}</strong> de {etiqueta_fcf} (barra azul) y desembolsó <strong>{f_millones(ult_div_v, sym)}</strong> en dividendos (barra naranja), lo que supone un <strong>Payout sobre caja del {f_num(ult_pay_v, 1, '%')}</strong>. Con ello, {txt_sobrante}.
+</div>
+""", unsafe_allow_html=True)
         else:
             st.info("Datos anuales insuficientes para el gráfico de Sostenibilidad.")
 
@@ -808,13 +875,13 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 
             ult_rev_v, ult_net_v, ult_mar_v = rev_vals[-1], net_vals[-1], margin_vals[-1]
             ini_mar_v = margin_vals[0]
-            tend_margen = "expandiendo márgenes (mayor poder de fijación de precios)" if ult_mar_v >= ini_mar_v else "comprimiendo márgenes respecto a hace unos años"
+            tend_margen = "expandiendo márgenes" if ult_mar_v >= ini_mar_v else "comprimiendo márgenes respecto a hace unos años"
 
             st.markdown(f"""
-            <div class="explicacion-graf">
-                💡 <strong>Qué vemos en el último cierre ({x_years_rev[-1]}):</strong> Facturó <strong>{f_millones(ult_rev_v, sym)}</strong> y obtuvo un beneficio neto limpio de <strong>{f_millones(ult_net_v, sym)}</strong>. Su <strong>Margen Neto es del {f_num(ult_mar_v, 1, '%')}</strong> (en {x_years_rev[0]} era del {f_num(ini_mar_v, 1, '%')}), lo que indica que por cada 100{sym} vendidos gana <strong>{f_num(ult_mar_v, 2, sym)} limpios</strong>, {tend_margen}.
-            </div>
-            """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos en el último cierre ({x_years_rev[-1]}):</strong> Facturó <strong>{f_millones(ult_rev_v, sym)}</strong> y obtuvo un beneficio neto limpio de <strong>{f_millones(ult_net_v, sym)}</strong>. Su <strong>Margen Neto es del {f_num(ult_mar_v, 1, '%')}</strong> (en {x_years_rev[0]} era del {f_num(ini_mar_v, 1, '%')}), por lo que de cada 100{sym} vendidos gana <strong>{f_num(ult_mar_v, 2, sym)} limpios</strong>, {tend_margen}.
+</div>
+""", unsafe_allow_html=True)
         else:
             st.info("Datos anuales insuficientes para el gráfico de Ingresos.")
 
@@ -841,10 +908,10 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             ult_ev_fcf = ratio_vals[-1]
             comp_ev_txt = "más barata que su media reciente" if ult_ev_fcf <= media_ev_fcf else "por encima de su media reciente"
             st.markdown(f"""
-            <div class="explicacion-graf">
-                💡 <strong>Qué vemos hoy:</strong> Incluyendo su capitalización más su deuda neta (Enterprise Value de <strong>{f_millones(ev_vals[-1], sym)}</strong>), cerró en un múltiplo de <strong>{f_num(ult_ev_fcf, 1, 'x')} EV/{etiqueta_fcf.split()[0]}</strong> frente a su media histórica reciente de <strong>{f_num(media_ev_fcf, 1, 'x')}</strong> ({comp_ev_txt}). Un valor ≤ 18x indica un negocio generador de caja a precio muy atractivo.
-            </div>
-            """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos hoy:</strong> Incluyendo su capitalización más su deuda neta (Enterprise Value de <strong>{f_millones(ev_vals[-1], sym)}</strong>), cerró en un múltiplo de <strong>{f_num(ult_ev_fcf, 1, 'x')} EV/{etiqueta_fcf.split()[0]}</strong> frente a su media histórica reciente de <strong>{f_num(media_ev_fcf, 1, 'x')}</strong> ({comp_ev_txt}).
+</div>
+""", unsafe_allow_html=True)
         else:
             st.info("Datos insuficientes para el gráfico EV/FCF.")
 
@@ -867,10 +934,10 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 
             ult_ev_eb = ratio_eb_vals[-1]
             st.markdown(f"""
-            <div class="explicacion-graf">
-                💡 <strong>Qué vemos hoy:</strong> Con un EBITDA anual de <strong>{f_millones(ebitda_vals[-1], sym)}</strong>, el múltiplo operativo EV/EBITDA se sitúa en <strong>{f_num(ult_ev_eb, 1, 'x')}</strong> (siendo su media de los últimos años de <strong>{f_num(media_ev_eb, 1, 'x')}</strong>). Generalmente, múltiplos EV/EBITDA por debajo de 12x-14x reflejan valoraciones exigentes muy bajas.
-            </div>
-            """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos hoy:</strong> Con un EBITDA anual de <strong>{f_millones(ebitda_vals[-1], sym)}</strong>, el múltiplo operativo EV/EBITDA se sitúa en <strong>{f_num(ult_ev_eb, 1, 'x')}</strong> (siendo su media de los últimos años de <strong>{f_num(media_ev_eb, 1, 'x')}</strong>).
+</div>
+""", unsafe_allow_html=True)
         else:
             st.info("Datos insuficientes para el gráfico EV/EBITDA.")
 
@@ -898,10 +965,10 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             ult_nd_v = net_debt_vals[-1]
             ult_rat_d = ratio_d_vals[-1]
             st.markdown(f"""
-            <div class="explicacion-graf">
-                💡 <strong>Qué vemos hoy:</strong> La Deuda Neta es de <strong>{f_millones(ult_nd_v, sym)}</strong> frente a <strong>{f_millones(fcf_d_vals[-1], sym)}</strong> de caja anual generada. Esto significa que la empresa tardaría exactamente <strong>{f_num(ult_rat_d, 2)} años</strong> de su flujo libre en dejar su deuda neta a cero (un nivel inferior a 3,5 años indica gran fortaleza financiera).
-            </div>
-            """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos hoy:</strong> La Deuda Neta es de <strong>{f_millones(ult_nd_v, sym)}</strong> frente a <strong>{f_millones(fcf_d_vals[-1], sym)}</strong> de caja anual generada. Tardaría exactamente <strong>{f_num(ult_rat_d, 2)} años</strong> de su flujo libre en dejar su deuda neta a cero.
+</div>
+""", unsafe_allow_html=True)
         else:
             st.info("Datos insuficientes para el gráfico de Deuda Neta / FCF.")
 
@@ -913,7 +980,6 @@ def render_salud_financiera(ticker_symbol, años_analisis):
                 for k in keys:
                     if k in bs_cols:
                         s = bs_stmt.loc[k].dropna()
-                        # Al estar bs_stmt ordenado cronológicamente de menor a mayor fecha, iloc[-1] es el último año actual
                         if not s.empty: return float(s.iloc[-1]) * fx_rate
                 return 0.0
 
@@ -934,10 +1000,10 @@ def render_salud_financiera(ticker_symbol, años_analisis):
                 estado_liquidez = f"cubre el <strong>{f_num(cobertura_corto_pct, 0, '%')}</strong> de los vencimientos a corto plazo sin necesidad de refinanciarse" if st_debt > 0 else "no tiene deuda con vencimiento inferior a 12 meses"
 
                 st.markdown(f"""
-                <div class="explicacion-graf">
-                    💡 <strong>Qué vemos en el último balance:</strong> Cuenta con <strong>{f_millones(caja_actual_bs, sym)}</strong> en liquidez inmediata (verde) frente a <strong>{f_millones(st_debt, sym)}</strong> de deuda que vence en menos de 12 meses (naranja) y <strong>{f_millones(lt_debt, sym)}</strong> a largo plazo (roja). Su tesorería {estado_liquidez}.
-                </div>
-                """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos en el último balance:</strong> Cuenta con <strong>{f_millones(caja_actual_bs, sym)}</strong> en liquidez inmediata (verde) frente a <strong>{f_millones(st_debt, sym)}</strong> de deuda que vence en menos de 12 meses (naranja) y <strong>{f_millones(lt_debt, sym)}</strong> a largo plazo (roja). Su tesorería {estado_liquidez}.
+</div>
+""", unsafe_allow_html=True)
             else:
                 st.info("No hay desglose de deuda a corto/largo plazo en Yahoo Finance para esta empresa.")
 
@@ -963,6 +1029,7 @@ with col_top3:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     if st.button("🔄 Actualizar Datos de Salud Financiera", use_container_width=True):
         cargar_cotizacion_tiempo_real.clear()
+        cargar_fundamentales_pesados.clear()
         st.session_state.analizar_activo = True
 
 st.session_state.ticker_activo = ticker_input
