@@ -11,10 +11,13 @@ from plotly.subplots import make_subplots
 warnings.filterwarnings('ignore')
 
 TRADUCCION = {
-    'Technology': 'Tecnología', 'Healthcare': 'Salud', 'Financial Services': 'Servicios Financieros',
-    'Consumer Cyclical': 'Consumo Cíclico', 'Industrials': 'Industrial', 'Consumer Defensive': 'Consumo Defensivo',
+    'Technology': 'Tecnología', 'Information Technology': 'Tecnología',
+    'Healthcare': 'Salud', 'Financial Services': 'Servicios Financieros', 'Financials': 'Servicios Financieros',
+    'Consumer Cyclical': 'Consumo Cíclico', 'Consumer Discretionary': 'Consumo Cíclico',
+    'Industrials': 'Industrial', 'Consumer Defensive': 'Consumo Defensivo', 'Consumer Staples': 'Consumo Defensivo',
     'Energy': 'Energía', 'Real Estate': 'Inmobiliario', 'Utilities': 'Servicios Públicos',
-    'Basic Materials': 'Materiales Básicos', 'Communication Services': 'Servicios de Comunicación'
+    'Basic Materials': 'Materiales Básicos', 'Materials': 'Materiales Básicos',
+    'Communication Services': 'Servicios de Comunicación'
 }
 
 MERMA_ORIGEN_PAIS = {
@@ -37,12 +40,31 @@ def f_num(val, dec=2, sufijo="", signo_pos=False):
         return str(val)
 
 # ==========================================
-# CACHÉ COMPARTIDA DE DATOS
+# CACHÉ COMPARTIDA CON RESPALDO
 # ==========================================
 @st.cache_data(ttl=900, show_spinner=False)
 def cargar_fundamentales_pesados(ticker_symbol):
     t = yf.Ticker(ticker_symbol)
-    info = t.info or {}
+    info = {}
+    try:
+        info = t.info or {}
+    except Exception:
+        info = {}
+
+    if not info.get('sector') or not info.get('shortName'):
+        try:
+            busq = yf.Search(ticker_symbol, max_results=1).quotes
+            if busq and len(busq) > 0:
+                q0 = busq[0]
+                if not info.get('shortName'):
+                    info['shortName'] = q0.get('shortname') or q0.get('longname') or ticker_symbol
+                if not info.get('sector') and q0.get('sector'):
+                    info['sector'] = q0.get('sector')
+                if not info.get('industry') and q0.get('industry'):
+                    info['industry'] = q0.get('industry')
+        except Exception:
+            pass
+
     divs = t.dividends
     
     inc_stmt, bs_stmt, cf_stmt = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -61,10 +83,17 @@ def cargar_fundamentales_pesados(ticker_symbol):
 
     shares_hist = None
     try:
-        shares_hist = t.get_shares_full(start="2004-01-01")
+        shares_hist = t.get_shares_full(start="2008-01-01")
     except Exception: pass
 
-    curr_cot = info.get('currency', 'USD')
+    curr_cot = info.get('currency')
+    if not curr_cot:
+        try:
+            curr_cot = t.fast_info.currency or 'USD'
+        except Exception:
+            curr_cot = 'USD'
+        info['currency'] = curr_cot
+
     curr_Base = 'GBP' if curr_cot == 'GBp' else curr_cot
     curr_fin = info.get('financialCurrency', curr_Base) or curr_Base
     if curr_fin == 'GBp': curr_fin = 'GBP'
@@ -86,18 +115,25 @@ def cargar_cotizacion_tiempo_real(ticker_symbol):
     t = yf.Ticker(ticker_symbol)
     hist = t.history(period="max", auto_adjust=False)
     precio_vivo = None
+    shares_fast = None
+    mcap_fast = None
     try:
         precio_vivo = float(t.fast_info.last_price)
-    except Exception:
-        pass
-    return hist, precio_vivo
+    except Exception: pass
+    try:
+        shares_fast = float(t.fast_info.shares)
+    except Exception: pass
+    try:
+        mcap_fast = float(t.fast_info.market_cap)
+    except Exception: pass
+    return hist, precio_vivo, shares_fast, mcap_fast
 
 # ==========================================
 # FUNCIÓN PRINCIPAL PESTAÑA 3: CHOWDER Y YOC 15A
 # ==========================================
 def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplicar_merma_origen, capital_simulado, activar_drip):
     info, dividendos_raw, inc_stmt, bs_stmt, cf_stmt, shares_hist, fx_rate, curr_fin = cargar_fundamentales_pesados(ticker_symbol)
-    historial_raw, precio_vivo = cargar_cotizacion_tiempo_real(ticker_symbol)
+    historial_raw, precio_vivo, shares_fast, mcap_fast = cargar_cotizacion_tiempo_real(ticker_symbol)
 
     if dividendos_raw.empty or len(historial_raw) < 252:
         st.error("❌ Error: No hay suficientes datos históricos o de dividendos en Yahoo Finance.")
@@ -110,31 +146,31 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
         except (ValueError, TypeError): return default
 
     st.markdown("""
-    <style>
-    .card-dgi {
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 10px;
-        padding: 12px 14px;
-        margin-bottom: 10px;
-    }
-    .explicacion-graf {
-        background: rgba(0, 212, 255, 0.05);
-        border-left: 3px solid #00d4ff;
-        padding: 10px 14px;
-        border-radius: 0 8px 8px 0;
-        font-size: 0.88rem;
-        color: #d0d0d8;
-        margin-top: -8px;
-        margin-bottom: 18px;
-        line-height: 1.45;
-    }
-    .badge-verde { background: rgba(33, 195, 84, 0.2); color: #21c354; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
-    .badge-rojo { background: rgba(255, 75, 75, 0.2); color: #ff4b4b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
-    .badge-ambar { background: rgba(250, 202, 43, 0.2); color: #faca2b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
-    .badge-azul { background: rgba(0, 212, 255, 0.2); color: #00d4ff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+.card-dgi {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+}
+.explicacion-graf {
+    background: rgba(0, 212, 255, 0.05);
+    border-left: 3px solid #00d4ff;
+    padding: 10px 14px;
+    border-radius: 0 8px 8px 0;
+    font-size: 0.88rem;
+    color: #d0d0d8;
+    margin-top: -8px;
+    margin-bottom: 18px;
+    line-height: 1.45;
+}
+.badge-verde { background: rgba(33, 195, 84, 0.2); color: #21c354; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+.badge-rojo { background: rgba(255, 75, 75, 0.2); color: #ff4b4b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+.badge-ambar { background: rgba(250, 202, 43, 0.2); color: #faca2b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+.badge-azul { background: rgba(0, 212, 255, 0.2); color: #00d4ff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+</style>
+""", unsafe_allow_html=True)
 
     currency_raw = info.get('currency', 'USD')
     es_peniques_uk = (currency_raw == 'GBp')
@@ -145,7 +181,6 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
     dividendos = dividendos_raw.copy()
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
-    dividendos = dividendos.groupby(dividendos.index).sum()
 
     if precio_vivo is not None and precio_vivo > 0 and not historial_completo.empty:
         historial_completo.iloc[-1, historial_completo.columns.get_loc('Close')] = precio_vivo
@@ -165,50 +200,45 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
     historial_analisis = historial_completo[historial_completo.index >= fecha_corte_analisis].copy()
     precio_actual = float(historial_analisis['Close'].dropna().iloc[-1])
 
-    sector_en = info.get('sector', 'Desconocido')
-    industry_en = info.get('industry', 'Desconocido')
+    sector_en = info.get('sector', 'General')
+    industry_en = info.get('industry', 'General')
     pais = info.get('country', 'Desconocido')
     nombre_empresa = info.get('shortName', ticker_symbol)
     sector_final = TRADUCCION.get(sector_en, sector_en)
 
     es_reit_puro = 'reit' in industry_en.lower() or 'real estate' in sector_en.lower()
     es_utility_pura = 'utility' in sector_en.lower() or 'utilities' in sector_en.lower()
-    es_telecom = 'communication' in sector_en.lower() or 'telecom' in industry_en.lower()
+    es_telecom = 'telecom' in industry_en.lower()
 
     merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
     net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
-    # --- DIVIDENDOS Y CRECIMIENTOS (1A, 3A, 5A y PERIODO) ---
-    años = dividendos.index.year
-    conteo_por_año = años.value_counts()
-    conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
-    pagos_por_año = int(conteo_closed.mode().iloc[0]) if not conteo_closed.empty else 4
-    if pagos_por_año not in [1, 2, 4, 12]:
-        pagos_por_año = 4 if pagos_por_año == 3 else (12 if pagos_por_año > 10 else 4)
+    # ==========================================
+    # MOTOR ORIGINAL DE DIVIDENDOS SINCRONIZADO CON PESTAÑA 1 Y 2
+    # ==========================================
+    divs_por_año = dividendos.groupby(dividendos.index.year).sum()
 
-    ventana_med = max(4, pagos_por_año * 2)
-    mediana_pagos = dividendos.rolling(window=ventana_med, min_periods=1).median()
-    dividendos_regulares = dividendos.where(dividendos <= mediana_pagos * 1.75, mediana_pagos)
+    años_div = dividendos.index.year
+    conteo_por_año = años_div.value_counts()
+    conteo_closed = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 5)]
+    if conteo_closed.empty:
+        conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
+    mediana_pagos_año = float(conteo_closed.median()) if not conteo_closed.empty else 4.0
 
-    suma_anual_reg = dividendos_regulares.groupby(dividendos_regulares.index.year).sum()
-    conteo_anual_reg = dividendos_regulares.groupby(dividendos_regulares.index.year).count()
-    divs_reg_por_año = suma_anual_reg.copy()
-
-    for y in divs_reg_por_año.index:
-        if y < año_actual and pagos_por_año in [2, 4, 12]:
-            c = conteo_anual_reg.loc[y]
-            if c > 0 and c != pagos_por_año and abs(c - pagos_por_año) == 1:
-                divs_reg_por_año.loc[y] = (suma_anual_reg.loc[y] / c) * pagos_por_año
+    if mediana_pagos_año >= 10: pagos_por_año = 12
+    elif mediana_pagos_año >= 3: pagos_por_año = 4
+    elif mediana_pagos_año >= 1.5: pagos_por_año = 2
+    else: pagos_por_año = 1
 
     forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
     if es_peniques_uk and forward_dividend > (precio_actual * 0.25):
         forward_dividend /= 100.0
-    if forward_dividend == 0 and not dividendos_regulares.empty:
-        ultimo_año_completo = divs_reg_por_año.iloc[-2] if len(divs_reg_por_año) > 1 else 0
-        forward_dividend = max(dividendos_regulares.iloc[-1] * pagos_por_año, ultimo_año_completo)
+    if forward_dividend == 0 and not dividendos.empty:
+        ultimo_año_completo = divs_por_año.iloc[-2] if len(divs_por_año) > 1 else 0.0
+        forward_dividend = max(float(dividendos.iloc[-1]) * pagos_por_año, float(ultimo_año_completo))
 
     historial_analisis['Year'] = historial_analisis.index.year
-    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_reg_por_año)
+    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_por_año)
     historial_analisis.loc[historial_analisis['Year'] == año_actual, 'Div_Anual'] = forward_dividend
     historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
     historial_analisis['Yield_Diario'] = (historial_analisis['Div_Anual'] / historial_analisis['Close']) * 100
@@ -223,9 +253,11 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
     precio_compra_weiss = (forward_dividend / yield_infravalorado) * 100 if yield_infravalorado > 0 else 0.0
     precio_justo_weiss = (forward_dividend / yield_medio) * 100 if yield_medio > 0 else 0.0
 
-    dividendos_barras = divs_reg_por_año.copy()
+    dividendos_barras = divs_por_año.copy()
     if año_actual in dividendos_barras.index:
         dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
+    else:
+        dividendos_barras.loc[año_actual] = forward_dividend
 
     dgr_1y, dgr_3y, dgr_5y, dgr_periodo = None, None, None, None
     if len(dividendos_barras) >= 2 and dividendos_barras.iloc[-2] > 0:
@@ -238,7 +270,7 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
         dgr_periodo = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-(años_analisis + 1)]) ** (1/años_analisis) - 1) * 100
 
     # ==========================================
-    # SECCIÓN 1: REGLA DE CHOWDER DUAL (5A vs CONSERVADORA)
+    # SECCIÓN 1: REGLA DE CHOWDER DUAL (CLÁSICA 5A vs ESTRICTA)
     # ==========================================
     st.header(f"🥣 Regla de Chowder y Proyección a 15 Años — {nombre_empresa} ({ticker_symbol})")
     st.caption(f"Sector: {sector_final} | Cotización: {f_num(precio_actual, 2, sym)} | Dividendo Anual: {f_num(forward_dividend, 2, sym)} ({f_num(yield_actual, 2, '%')} Bruto / {f_num(yield_actual * net_mult, 2, '%')} Neto)")
@@ -253,27 +285,22 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
         chowder_target = 15.0
         criterio_txt = "Yield Inicial Bajo < 3,0% (Meta exigente ≥ 15,0 pts por alto crecimiento)"
 
-    # Tasa conservadora (el mínimo entre 5A y el periodo largo, penalizada si el último año frenó en seco)
+    # Tasa conservadora realista
     tasas_disp = [t for t in [dgr_5y, dgr_periodo, dgr_3y] if t is not None]
     dgr_conservador = min(tasas_disp) if tasas_disp else (dgr_1y if dgr_1y is not None else 0.0)
     if dgr_1y is not None and dgr_1y < (dgr_conservador * 0.6):
-        # Si el último año hubo frenazo severo, promediamos con dgr_1y para ser realistas
         dgr_conservador = (dgr_conservador + max(0.0, dgr_1y)) / 2.0
 
     chowder_5y = (yield_actual + dgr_5y) if dgr_5y is not None else None
-    chowder_cons = (yield_actual + dgr_conservador) if tasas_disp else None
+    # En Chowder Estricto limitamos el Yield computable al 6,5% para evitar que un Yield del 14% sin crecimiento apruebe solo
+    yield_topado_estricto = min(yield_actual, 6.5)
+    chowder_cons = (yield_topado_estricto + dgr_conservador) if tasas_disp else None
 
     precio_obj_chowder_5y, yield_req_5y = None, None
     if dgr_5y is not None:
         yield_req_5y = chowder_target - dgr_5y
         if yield_req_5y > 0:
             precio_obj_chowder_5y = (forward_dividend / yield_req_5y) * 100
-
-    precio_obj_chowder_cons, yield_req_cons = None, None
-    if tasas_disp:
-        yield_req_cons = chowder_target - dgr_conservador
-        if yield_req_cons > 0:
-            precio_obj_chowder_cons = (forward_dividend / yield_req_cons) * 100
 
     col_ch1, col_ch2, col_ch3 = st.columns(3)
 
@@ -287,25 +314,25 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
             c_bar = "#21c354" if pass_5y else ("#faca2b" if diff_5y >= -1.5 else "#ff4b4b")
 
             st.markdown(f"""
-            <div class="card-dgi">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <span style="color: #aaa; font-size: 0.85rem;">🥣 Chowder Clásico (DGR 5A)</span>
-                    <span class="{b_cls}">{b_txt}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
-                    <span style="font-size: 1.05rem; color: #ccc;">
-                        <strong style="color:#00d4ff;">{f_num(yield_actual, 2, '%')}</strong> + 
-                        <strong style="color:#faca2b;">{f_num(dgr_5y, 2, '%')}</strong> = 
-                        <strong style="font-size: 1.5rem; color: white;"> {f_num(chowder_5y, 1)}</strong>
-                    </span>
-                    <span style="font-size: 0.85rem; color: #888;">Meta: <strong>≥ {f_num(chowder_target, 0)}</strong></span>
-                </div>
-                <div style="background: rgba(255,255,255,0.1); border-radius: 6px; height: 8px; width: 100%; overflow: hidden; margin-bottom: 6px;">
-                    <div style="background: {c_bar}; width: {pct_prog_5y:.1f}%; height: 100%;"></div>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">{criterio_txt}</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+<span style="color: #aaa; font-size: 0.85rem;">🥣 Chowder Clásico (DGR 5A)</span>
+<span class="{b_cls}">{b_txt}</span>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+<span style="font-size: 1.05rem; color: #ccc;">
+<strong style="color:#00d4ff;">{f_num(yield_actual, 2, '%')}</strong> + 
+<strong style="color:#faca2b;">{f_num(dgr_5y, 2, '%')}</strong> = 
+<strong style="font-size: 1.5rem; color: white;"> {f_num(chowder_5y, 1)}</strong>
+</span>
+<span style="font-size: 0.85rem; color: #888;">Meta: <strong>≥ {f_num(chowder_target, 0)}</strong></span>
+</div>
+<div style="background: rgba(255,255,255,0.1); border-radius: 6px; height: 8px; width: 100%; overflow: hidden; margin-bottom: 6px;">
+<div style="background: {c_bar}; width: {pct_prog_5y:.1f}%; height: 100%;"></div>
+</div>
+<span style="font-size: 0.75rem; color: #888;">{criterio_txt}</span>
+</div>
+""", unsafe_allow_html=True)
         else:
             st.info("Sin historial de 5 años completo para Chowder Clásico.")
 
@@ -313,60 +340,61 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
         if chowder_cons is not None:
             pct_prog_c = min(100.0, max(0.0, (chowder_cons / chowder_target) * 100))
             diff_c = chowder_cons - chowder_target
-            pass_c = chowder_cons >= chowder_target
-            b_cls_c = "badge-verde" if pass_c else ("badge-ambar" if diff_c >= -1.5 else "badge-rojo")
+            pass_c = (chowder_cons >= chowder_target) and (dgr_conservador >= 2.0)
+            b_cls_c = "badge-verde" if pass_c else ("badge-ambar" if diff_c >= -1.5 and dgr_conservador >= 1.5 else "badge-rojo")
             b_txt_c = f"🟢 Aprobada ({f_num(diff_c, 1, ' pts', signo_pos=True)})" if pass_c else f"🔴 {f_num(diff_c, 1, ' pts', signo_pos=True)}"
             c_bar_c = "#21c354" if pass_c else ("#faca2b" if diff_c >= -1.5 else "#ff4b4b")
 
+            nota_tope_y = f" (Yield topado al 6,5%)" if yield_actual > 6.5 else ""
             st.markdown(f"""
-            <div class="card-dgi">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <span style="color: #aaa; font-size: 0.85rem;">🛡️ Chowder Estricto (Conservador)</span>
-                    <span class="{b_cls_c}">{b_txt_c}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
-                    <span style="font-size: 1.05rem; color: #ccc;">
-                        <strong style="color:#00d4ff;">{f_num(yield_actual, 2, '%')}</strong> + 
-                        <strong style="color:#b388ff;">{f_num(dgr_conservador, 2, '%')}</strong> = 
-                        <strong style="font-size: 1.5rem; color: white;"> {f_num(chowder_cons, 1)}</strong>
-                    </span>
-                    <span style="font-size: 0.85rem; color: #888;">Meta: <strong>≥ {f_num(chowder_target, 0)}</strong></span>
-                </div>
-                <div style="background: rgba(255,255,255,0.1); border-radius: 6px; height: 8px; width: 100%; overflow: hidden; margin-bottom: 6px;">
-                    <div style="background: {c_bar_c}; width: {pct_prog_c:.1f}%; height: 100%;"></div>
-                </div>
-                <span style="font-size: 0.75rem; color: #888;">Ajustado al menor ritmo entre 5A ({f_num(dgr_5y, 1, '%')}), {años_analisis}A ({f_num(dgr_periodo, 1, '%')}) e inercia</span>
-            </div>
-            """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+<span style="color: #aaa; font-size: 0.85rem;">🛡️ Chowder Estricto (Conservador)</span>
+<span class="{b_cls_c}">{b_txt_c}</span>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+<span style="font-size: 1.05rem; color: #ccc;">
+<strong style="color:#00d4ff;">{f_num(yield_topado_estricto, 2, '%')}</strong> + 
+<strong style="color:#b388ff;">{f_num(dgr_conservador, 2, '%')}</strong> = 
+<strong style="font-size: 1.5rem; color: white;"> {f_num(chowder_cons, 1)}</strong>
+</span>
+<span style="font-size: 0.85rem; color: #888;">Meta: <strong>≥ {f_num(chowder_target, 0)}</strong></span>
+</div>
+<div style="background: rgba(255,255,255,0.1); border-radius: 6px; height: 8px; width: 100%; overflow: hidden; margin-bottom: 6px;">
+<div style="background: {c_bar_c}; width: {pct_prog_c:.1f}%; height: 100%;"></div>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Usa el menor DGR entre 5A ({f_num(dgr_5y, 1, '%')}), {años_analisis}A ({f_num(dgr_periodo, 1, '%')}) e inercia{nota_tope_y}.</span>
+</div>
+""", unsafe_allow_html=True)
 
     with col_ch3:
         if chowder_5y is not None:
             if chowder_5y >= chowder_target or (yield_req_5y is not None and yield_req_5y <= 0):
                 st.markdown(f"""
-                <div class="card-dgi">
-                    <span style="color: #aaa; font-size: 0.85rem;">🎯 Precio Máximo de Entrada por Chowder</span>
-                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; margin-bottom: 8px;">
-                        <span style="font-size: 1.45rem; font-weight: bold; color: #21c354;">Ya Cumple en {f_num(precio_actual, 2, sym)}</span>
-                        <span class="badge-verde">En Zona</span>
-                    </div>
-                    <span style="font-size: 0.75rem; color: #888;">Su crecimiento ya compensa el Yield actual. Suelo Weiss: <strong>{f_num(precio_compra_weiss, 2, sym)}</strong>.</span>
-                </div>
-                """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">🎯 Precio Máximo de Entrada por Chowder</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; margin-bottom: 8px;">
+<span style="font-size: 1.45rem; font-weight: bold; color: #21c354;">Ya Cumple en {f_num(precio_actual, 2, sym)}</span>
+<span class="badge-verde">En Zona</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Su crecimiento ya compensa el Yield actual. Suelo Weiss: <strong>{f_num(precio_compra_weiss, 2, sym)}</strong>.</span>
+</div>
+""", unsafe_allow_html=True)
             else:
                 dist_chow = ((precio_actual - precio_obj_chowder_5y) / precio_obj_chowder_5y) * 100
                 st.markdown(f"""
-                <div class="card-dgi">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <span style="color: #aaa; font-size: 0.85rem;">🎯 Precio Objetivo Chowder</span>
-                        <span class="badge-rojo">{f_num(dist_chow, 1, '%', signo_pos=True)} sobre meta</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
-                        <span style="font-size: 1.5rem; font-weight: bold; color: #e040fb;">{f_num(precio_obj_chowder_5y, 2, sym)}</span>
-                        <span style="font-size: 0.85rem; color: #888;">Exige Yield de {f_num(yield_req_5y, 2, '%')}</span>
-                    </div>
-                    <span style="font-size: 0.75rem; color: #888;">Precio necesario para que el Yield inicial sume {f_num(chowder_target, 0)} pts junto al DGR 5A.</span>
-                </div>
-                """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+<span style="color: #aaa; font-size: 0.85rem;">🎯 Precio Objetivo Chowder</span>
+<span class="badge-rojo">{f_num(dist_chow, 1, '%', signo_pos=True)} sobre meta</span>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
+<span style="font-size: 1.5rem; font-weight: bold; color: #e040fb;">{f_num(precio_obj_chowder_5y, 2, sym)}</span>
+<span style="font-size: 0.85rem; color: #888;">Exige Yield de {f_num(yield_req_5y, 2, '%')}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Precio necesario para que el Yield inicial sume {f_num(chowder_target, 0)} pts junto al DGR 5A.</span>
+</div>
+""", unsafe_allow_html=True)
 
     # --- GRÁFICO 1 DE LA PÁGINA 3: COMPARATIVA DE NIVELES DE ENTRADA (WEISS VS CHOWDER) ---
     st.markdown("#### ⚖️ Mapa de Precios de Entrada: Cotización vs. Suelo Weiss vs. Precio Chowder")
@@ -396,10 +424,10 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
     suelo_maestro = min(precio_compra_weiss, precio_obj_chowder_5y) if (precio_obj_chowder_5y is not None and precio_obj_chowder_5y > 0) else precio_compra_weiss
     criterio_mas_estricto = "la Regla de Chowder" if (precio_obj_chowder_5y is not None and 0 < precio_obj_chowder_5y < precio_compra_weiss) else "el Suelo Histórico de Geraldine Weiss"
     st.markdown(f"""
-    <div class="explicacion-graf">
-        💡 <strong>Lectura de Niveles en {ticker_symbol}:</strong> Compara de un vistazo cuánto te pide cada estrategia para entrar. Actualmente el filtro más exigente es <strong>{criterio_mas_estricto}</strong>, situando el suelo maestro de máxima exigencia en <strong>{f_num(suelo_maestro, 2, sym)}</strong> frente a los <strong>{f_num(precio_actual, 2, sym)}</strong> a los que cotiza hoy.
-    </div>
-    """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Lectura de Niveles en {ticker_symbol}:</strong> Compara de un vistazo cuánto te pide cada estrategia para entrar. Actualmente el filtro más exigente es <strong>{criterio_mas_estricto}</strong>, situando el suelo maestro de máxima exigencia en <strong>{f_num(suelo_maestro, 2, sym)}</strong> frente a los <strong>{f_num(precio_actual, 2, sym)}</strong> a los que cotiza hoy.
+</div>
+""", unsafe_allow_html=True)
 
     # ==========================================
     # SECCIÓN 2: SIMULADOR DE PROYECCIÓN A 15 AÑOS (CON Y SIN DRIP)
@@ -407,14 +435,10 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
     st.divider()
     st.subheader(f"🔮 Proyección de Rentabilidad sobre Coste (YoC) y Renta a 15 Años (Orden de {f_num(capital_simulado, 0, sym)})")
 
-    # Tasa de proyección acotada entre 0% y 14% anual para evitar proyecciones irreales
     dgr_proyeccion = max(0.0, min(14.0, dgr_conservador))
-    txt_ritmo = f"Ritmo Conservador ({f_num(dgr_proyeccion, 2, '%')} anual)"
-
     años_proyeccion = list(range(1, 16))
     acciones_iniciales = (capital_simulado / precio_actual) if precio_actual > 0 else 0.0
 
-    # Listas de simulación Año a Año (1 a 15)
     div_por_accion_bruto = []
     renta_anual_neta_sin_drip = []
     renta_anual_neta_con_drip = []
@@ -429,20 +453,16 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
     for año in años_proyeccion:
         factor_crec = (1.0 + (dgr_proyeccion / 100.0)) ** año
         div_acc_año = forward_dividend * factor_crec
-        precio_acc_est_año = precio_actual * factor_crec  # Asume que el precio sube al ritmo del dividendo (Yield constante)
+        precio_acc_est_año = precio_actual * factor_crec
 
-        # Escenario 1: Sin reinversión de dividendos (Sin DRIP)
         cobro_neto_sin = acciones_iniciales * div_acc_año * net_mult
         yoc_n_sin = (cobro_neto_sin / capital_simulado) * 100 if capital_simulado > 0 else 0.0
 
-        # Escenario 2: Con reinversión de dividendos netos (Con DRIP)
         cobro_neto_con = acc_drip * div_acc_año * net_mult
         yoc_n_con = (cobro_neto_con / capital_simulado) * 100 if capital_simulado > 0 else 0.0
-        # Al final del año se reinvierte el dividendo neto cobrado comprando más fracciones de acción
         if precio_acc_est_año > 0:
             acc_drip += (cobro_neto_con / precio_acc_est_año)
 
-        # Ajuste a poder adquisitivo de hoy (descontando inflación)
         renta_elegida = cobro_neto_con if activar_drip else cobro_neto_sin
         renta_real_hoy = renta_elegida / ((1.0 + inflacion_anual) ** año)
 
@@ -457,7 +477,6 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
     serie_renta_activa = renta_anual_neta_con_drip if activar_drip else renta_anual_neta_sin_drip
     serie_yoc_activa = yoc_neto_con_drip if activar_drip else yoc_neto_sin_drip
 
-    # Cálculo de Hitos (Payback y Año en que YoC Neto supera el 7%)
     total_dividendos_15a = float(np.sum(serie_renta_activa))
     pct_payback_15a = (total_dividendos_15a / capital_simulado) * 100 if capital_simulado > 0 else 0.0
 
@@ -467,42 +486,41 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
             año_cruce_7pct = f"Año {a} ({año_actual + a})"
             break
 
-    # Tarjetas de Hitos de tu Inversión de 500 €/$
     col_h1, col_h2, col_h3 = st.columns(3)
     with col_h1:
         st.markdown(f"""
-        <div class="card-dgi">
-            <span style="color: #aaa; font-size: 0.85rem;">💵 Renta Neta Año 1 vs. Año 15</span>
-            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                <span style="font-size: 1.45rem; font-weight: bold;">{f_num(serie_renta_activa[0], 2, sym)} <span style="font-size: 1rem; color: #888;">➔</span> <span style="color:#21c354;">{f_num(serie_renta_activa[-1], 2, sym)}/año</span></span>
-            </div>
-            <span style="font-size: 0.75rem; color: #888;">Equivalente a <strong>{f_num(poder_adquisitivo_real_hoy[-1], 2, sym)} de hoy</strong> descontando un 2,5% de inflación anual</span>
-        </div>
-        """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">💵 Renta Neta Año 1 vs. Año 15</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.45rem; font-weight: bold;">{f_num(serie_renta_activa[0], 2, sym)} <span style="font-size: 1rem; color: #888;">➔</span> <span style="color:#21c354;">{f_num(serie_renta_activa[-1], 2, sym)}/año</span></span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Equivalente a <strong>{f_num(poder_adquisitivo_real_hoy[-1], 2, sym)} de hoy</strong> descontando un 2,5% de inflación anual</span>
+</div>
+""", unsafe_allow_html=True)
 
     with col_h2:
         st.markdown(f"""
-        <div class="card-dgi">
-            <span style="color: #aaa; font-size: 0.85rem;">💰 Capital Recuperado en Dividendos (15A)</span>
-            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                <span style="font-size: 1.45rem; font-weight: bold; color: #00d4ff;">{f_num(total_dividendos_15a, 2, sym)}</span>
-                <span class="{'badge-verde' if pct_payback_15a >= 50 else 'badge-ambar'}">{f_num(pct_payback_15a, 1, '%')} de tu orden</span>
-            </div>
-            <span style="font-size: 0.75rem; color: #888;">Efectivo neto total cobrado en 15 años sobre tus {f_num(capital_simulado, 0, sym)} iniciales</span>
-        </div>
-        """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">💰 Capital Recuperado en Dividendos (15A)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.45rem; font-weight: bold; color: #00d4ff;">{f_num(total_dividendos_15a, 2, sym)}</span>
+<span class="{'badge-verde' if pct_payback_15a >= 50 else 'badge-ambar'}">{f_num(pct_payback_15a, 1, '%')} de tu orden</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Efectivo neto total cobrado en 15 años sobre tus {f_num(capital_simulado, 0, sym)} iniciales</span>
+</div>
+""", unsafe_allow_html=True)
 
     with col_h3:
         st.markdown(f"""
-        <div class="card-dgi">
-            <span style="color: #aaa; font-size: 0.85rem;">🚀 Meta YoC Neto ≥ 7,0%</span>
-            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-                <span style="font-size: 1.45rem; font-weight: bold; color: #faca2b;">{año_cruce_7pct}</span>
-                <span class="badge-azul">YoC 15A: {f_num(serie_yoc_activa[-1], 2, '%')}</span>
-            </div>
-            <span style="font-size: 0.75rem; color: #888;">{'Con reinversión DRIP activa' if activar_drip else 'Sin reinvertir dividendos'} a un ritmo del {f_num(dgr_proyeccion, 2, '%')}/año</span>
-        </div>
-        """, unsafe_allow_html=True)
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">🚀 Meta YoC Neto ≥ 7,0%</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.45rem; font-weight: bold; color: #faca2b;">{año_cruce_7pct}</span>
+<span class="badge-azul">YoC 15A: {f_num(serie_yoc_activa[-1], 2, '%')}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">{'Con reinversión DRIP activa' if activar_drip else 'Sin reinvertir dividendos'} a un ritmo del {f_num(dgr_proyeccion, 2, '%')}/año</span>
+</div>
+""", unsafe_allow_html=True)
 
     # --- GRÁFICO 2 DE LA PÁGINA 3: PROYECCIÓN A 15 AÑOS ---
     x_labels_yoc = [f"{año_actual + a}<br><span style='color:#faca2b; font-size:11px'>{f_num(yoc_n, 1, '%')}</span>" for a, yoc_n in zip(años_proyeccion, serie_yoc_activa)]
@@ -549,12 +567,12 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
     fig_yoc_p.update_yaxes(title_text="Yield on Cost Neto (%)", secondary_y=True, showgrid=False)
     st.plotly_chart(fig_yoc_p, use_container_width=True)
 
-    modo_txt = f"reinvertidos automáticamente (pasando de <strong>{f_num(acciones_iniciales, 2)}</strong> a <strong>{f_num(acciones_acum_drip[-1], 2)} acciones</strong>)" if activar_drip else f"cobrados en cuenta sin reinvertir (manteniendo tus <strong>{f_num(acciones_iniciales, 2)} acciones</strong> iniciales)"
+    modo_txt = f"reinvertidos automáticamente (pasando de <strong>{f_num(acciones_iniciales, 2)}</strong> a <strong>{f_num(acciones_acum_drip[-1], 2)} títulos</strong>)" if activar_drip else f"cobrados en cuenta sin reinvertir (manteniendo tus <strong>{f_num(acciones_iniciales, 2)} títulos</strong> iniciales)"
     st.markdown(f"""
-    <div class="explicacion-graf">
-        💡 <strong>Qué vemos en esta proyección de {ticker_symbol}:</strong> Invirtiendo hoy <strong>{f_num(capital_simulado, 0, sym)}</strong> con los dividendos {modo_txt} y creciendo al <strong>{f_num(dgr_proyeccion, 2, '%')} anual</strong>, tu rentabilidad neta sobre el dinero que pusiste de tu bolsillo pasará del <strong>{f_num(yield_actual * net_mult, 2, '%')}</strong> actual al <strong>{f_num(serie_yoc_activa[-1], 2, '%')} neto anual</strong> en {año_actual + 15}. En total habrás cobrado <strong>{f_num(total_dividendos_15a, 2, sym)} limpios</strong> de impuestos (recuperando el <strong>{f_num(pct_payback_15a, 1, '%')}</strong> de tu inversión inicial solo en dividendos).
-    </div>
-    """, unsafe_allow_html=True)
+<div class="explicacion-graf notranslate" translate="no">
+💡 <strong>Qué vemos en esta proyección de {ticker_symbol}:</strong> Invirtiendo hoy <strong>{f_num(capital_simulado, 0, sym)}</strong> con los dividendos {modo_txt} y creciendo al <strong>{f_num(dgr_proyeccion, 2, '%')} anual</strong>, tu rentabilidad neta sobre el dinero que pusiste de tu bolsillo pasará del <strong>{f_num(yield_actual * net_mult, 2, '%')}</strong> actual al <strong>{f_num(serie_yoc_activa[-1], 2, '%')} neto anual</strong> en {año_actual + 15}. En total habrás cobrado <strong>{f_num(total_dividendos_15a, 2, sym)} limpios</strong> de impuestos (recuperando el <strong>{f_num(pct_payback_15a, 1, '%')}</strong> de tu inversión inicial solo en dividendos).
+</div>
+""", unsafe_allow_html=True)
 
     # --- TABLA RESUMEN DE HITOS (AÑOS 1, 5, 10 Y 15) ---
     st.markdown("#### 📅 Tabla de Hitos de tu Orden (Años 1, 5, 10 y 15)")
@@ -566,7 +584,7 @@ def render_chowder_proyeccion(ticker_symbol, años_analisis, impuesto_pct, aplic
         filas_tabla.append({
             "Horizonte": f"Año {a_num} ({año_actual + a_num})",
             f"Div./Acción Bruto ({sym})": f_num(div_por_accion_bruto[idx], 2, sym),
-            "Acciones Totales": f_num(acciones_acum_drip[idx] if activar_drip else acciones_iniciales, 2),
+            "Títulos Totales": f_num(acciones_acum_drip[idx] if activar_drip else acciones_iniciales, 2),
             f"Renta Neta Anual ({sym})": f_num(serie_renta_activa[idx], 2, sym),
             f"Poder Adquisitivo Hoy ({sym})": f_num(poder_adquisitivo_real_hoy[idx], 2, sym),
             "YoC Neto (%)": f_num(serie_yoc_activa[idx], 2, "%"),
