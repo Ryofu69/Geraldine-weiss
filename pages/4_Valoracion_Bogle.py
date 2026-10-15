@@ -154,49 +154,6 @@ def ultimo_valor_tabla(df, claves):
                     return float(s.iloc[-1])
     return 0.0
 
-def limpiar_dividendos_anuales(dividendos_series, pagos_por_año, año_actual, forward_dividend):
-    """
-    Filtra spin-offs (ej. Versant en CMCSA) y dividendos especiales sin añadir pagos fantasma,
-    y evita falsos saltos de escalón cuando una empresa congela su dividendo trimestral.
-    """
-    mediana_rodante = dividendos_series.rolling(window=max(4, pagos_por_año * 2), min_periods=1).median()
-    umbral_extra = mediana_rodante * 1.75
-    es_extra = dividendos_series > umbral_extra
-    aviso_extra = bool(es_extra.tail(pagos_por_año * 2).any())
-
-    divs_limpios_por_año = {}
-    for y, grupo in dividendos_series.groupby(dividendos_series.index.year):
-        med_y = mediana_rodante.loc[grupo.index]
-        normales = grupo[grupo <= (med_y * 1.75)]
-        # Si el año ya tiene todos sus pagos regulares y además hubo un pago especial/spin-off, descartamos el especial
-        if len(grupo) > pagos_por_año and len(normales) >= pagos_por_año:
-            divs_limpios_por_año[y] = float(normales.tail(pagos_por_año).sum())
-        else:
-            # Si el pago especial vino fusionado o hay <= pagos_por_año, topamos cada pago individual al máximo regular
-            reemplazados = np.where(grupo <= (med_y * 1.75), grupo.values, med_y.values)
-            if len(reemplazados) > pagos_por_año:
-                reemplazados = reemplazados[-pagos_por_año:]
-            divs_limpios_por_año[y] = float(np.sum(reemplazados))
-
-    s_anual = pd.Series(divs_limpios_por_año).sort_index()
-
-    # Detectar si el dividendo trimestral/semestral actual está CONGELADO respecto a hace 1 año
-    pagos_reg = dividendos_series[~es_extra]
-    if pagos_reg.empty:
-        pagos_reg = dividendos_series
-    ult_cupon = float(pagos_reg.iloc[-1])
-    cupon_hace_1a = float(pagos_reg.iloc[-(pagos_por_año + 1)]) if len(pagos_reg) >= (pagos_por_año + 1) else ult_cupon
-    dividendo_congelado = abs(ult_cupon - cupon_hace_1a) <= (cupon_hace_1a * 0.005)
-
-    # Si el dividendo está congelado en el año actual (ej. CMCSA en 2026 con $0.33 = $1.32/año)
-    # y el año anterior sumó $1.30 solo porque en enero aún pagó $0.31, igualamos al run-rate congelado
-    if dividendo_congelado and (año_actual - 1) in s_anual.index:
-        tasa_anual_congelada = round(ult_cupon * pagos_por_año, 4)
-        if abs(s_anual.loc[año_actual - 1] - tasa_anual_congelada) / max(0.01, tasa_anual_congelada) <= 0.04:
-            s_anual.loc[año_actual - 1] = tasa_anual_congelada
-
-    return s_anual, aviso_extra, dividendo_congelado, ult_cupon
-
 # ==========================================
 # FUNCIÓN PESTAÑA 1: VALORACIÓN, BOGLE Y TIMING
 # ==========================================
@@ -270,7 +227,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
-    dividendos = dividendos.groupby(dividendos.index).sum()
 
     if precio_vivo is not None and precio_vivo > 0 and not historial_completo.empty:
         historial_completo.iloc[-1, historial_completo.columns.get_loc('Close')] = precio_vivo
@@ -314,41 +270,39 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
     net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
-    # --- DIVIDENDOS LIMPIOS DE SPIN-OFFS Y DETECCIÓN DE CONGELACIÓN ---
+    # ==========================================
+    # MOTOR ORIGINAL DE DIVIDENDOS Y CANALES (SIN RECORTES QUE ROMPAN LOS GRÁFICOS)
+    # ==========================================
+    divs_por_año = dividendos.groupby(dividendos.index.year).sum()
+
     años_div = dividendos.index.year
     conteo_por_año = años_div.value_counts()
-    conteo_reciente = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 3)]
-    if not conteo_reciente.empty:
-        pagos_por_año = int(conteo_reciente.mode().iloc[0])
-    else:
+    conteo_closed = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 5)]
+    if conteo_closed.empty:
         conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
-        pagos_por_año = int(conteo_closed.mode().iloc[0]) if not conteo_closed.empty else 4
+    mediana_pagos_año = float(conteo_closed.median()) if not conteo_closed.empty else 4.0
 
-    if pagos_por_año not in [1, 2, 4, 12]:
-        pagos_por_año = 4 if pagos_por_año in [3, 5] else (12 if pagos_por_año > 10 else 4)
+    if mediana_pagos_año >= 10:
+        pagos_por_año = 12
+    elif mediana_pagos_año >= 3:
+        pagos_por_año = 4
+    elif mediana_pagos_año >= 1.5:
+        pagos_por_año = 2
+    else:
+        pagos_por_año = 1
 
     nombre_frecuencia = {1: "anual", 2: "semestral", 4: "trimestral", 12: "mensual"}.get(pagos_por_año, "periódico")
 
-    divs_reg_por_año, aviso_extraordinario, dividendo_congelado, ult_cupon_reg = limpiar_dividendos_anuales(
-        dividendos, pagos_por_año, año_actual, 0.0
-    )
+    forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
+    if es_peniques_uk and forward_dividend > (precio_actual * 0.25):
+        forward_dividend /= 100.0
 
-    ult_pago_anualizado = round(ult_cupon_reg * pagos_por_año, 4)
-    ultimo_año_completo = float(divs_reg_por_año.loc[divs_reg_por_año.index < año_actual].iloc[-1]) if any(divs_reg_por_año.index < año_actual) else 0.0
-    
-    fd_info = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
-    if es_peniques_uk and fd_info > (precio_actual * 0.25):
-        fd_info /= 100.0
-
-    if dividendo_congelado:
-        forward_dividend = ult_pago_anualizado
-    elif fd_info <= 0 or abs(ult_pago_anualizado - fd_info) / max(1.0, ult_pago_anualizado) > 0.20:
-        forward_dividend = max(ult_pago_anualizado, ultimo_año_completo)
-    else:
-        forward_dividend = max(fd_info, ult_pago_anualizado)
+    if forward_dividend == 0 and not dividendos.empty:
+        ultimo_año_completo = divs_por_año.iloc[-2] if len(divs_por_año) > 1 else 0.0
+        forward_dividend = max(float(dividendos.iloc[-1]) * pagos_por_año, float(ultimo_año_completo))
 
     historial_analisis['Year'] = historial_analisis.index.year
-    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_reg_por_año)
+    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_por_año)
     historial_analisis.loc[historial_analisis['Year'] == año_actual, 'Div_Anual'] = forward_dividend
     historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
 
@@ -433,7 +387,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
                     crecimiento_bpa_3y = (((eps_series.iloc[-1] / eps_series.iloc[-4]) ** (1 / 3)) - 1) * 100
                 break
 
-    # Para REITs puros, calcular también el crecimiento de FFO/OCF por acción a 3 años
     crecimiento_ffo_sh_3y = None
     if es_reit_puro and not cf_stmt.empty and not inc_stmt.empty:
         try:
@@ -469,7 +422,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
                     revenue_cagr_3y = (((rev_series.iloc[-1] / rev_series.iloc[-4]) ** (1 / 3)) - 1) * 100
                 break
 
-    # Cobertura de intereses (En REITs se usa EBITDA/Intereses para no penalizar la depreciación inmobiliaria)
     cobertura_intereses = None
     if not inc_stmt.empty:
         try:
@@ -494,37 +446,34 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
             payout_fcf = (forward_dividend / fcf_per_share) * 100
             p_fcf = precio_actual / fcf_per_share
 
-    dividendos_barras = divs_reg_por_año.copy()
+    dividendos_barras = divs_por_año.copy()
     if año_actual in dividendos_barras.index:
-        dividendos_barras[año_actual] = forward_dividend
+        dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
     else:
         dividendos_barras.loc[año_actual] = forward_dividend
 
-    if len(dividendos_barras) >= 3:
-        vals_db = dividendos_barras.values.copy()
-        for idx_b in range(1, len(vals_db) - 1):
-            if vals_db[idx_b] < vals_db[idx_b - 1] * 0.92 and vals_db[idx_b + 1] > vals_db[idx_b - 1]:
-                vals_db[idx_b] = (vals_db[idx_b - 1] + vals_db[idx_b + 1]) / 2.0
-        dividendos_barras = pd.Series(vals_db, index=dividendos_barras.index)
-
     años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
     dgr_5y, dgr_periodo, dgr_1y = None, None, None
-    if dividendo_congelado:
-        dgr_1y = 0.0
-    elif len(dividendos_barras) >= 2 and dividendos_barras.iloc[-2] > 0:
+    if len(dividendos_barras) >= 2 and dividendos_barras.iloc[-2] > 0:
         dgr_1y = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-2]) - 1) * 100
-
     if len(dividendos_barras) >= 6 and dividendos_barras.iloc[-6] > 0:
         dgr_5y = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-6]) ** (1/5) - 1) * 100
     if len(dividendos_barras) >= (años_analisis + 1) and dividendos_barras.iloc[-(años_analisis + 1)] > 0:
         dgr_periodo = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-(años_analisis + 1)]) ** (1/años_analisis) - 1) * 100
 
-    fatiga_dividendo = bool(dividendo_congelado or (dgr_1y is not None and dgr_5y is not None and dgr_5y > 2.0 and (dgr_1y / dgr_5y) < 0.5))
+    fatiga_dividendo = bool(dgr_1y is not None and dgr_5y is not None and dgr_5y > 2.0 and (dgr_1y / dgr_5y) < 0.5)
+
+    aviso_extraordinario = False
+    if len(dividendos_barras) >= 4:
+        mediana_reciente = dividendos_barras.iloc[-4:-1].median()
+        ultimo_div = dividendos_barras.iloc[-1]
+        if mediana_reciente > 0 and (ultimo_div / mediana_reciente) > 1.35:
+            aviso_extraordinario = True
 
     racha_sin_recortes = 0
     if len(dividendos_barras) > 1:
         for i in range(1, len(dividendos_barras)):
-            if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.98:
+            if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.99:
                 racha_sin_recortes += 1
             else: break
 
@@ -547,7 +496,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     except Exception: pass
 
     recompras_anualizadas = max(-5.0, min(8.0, recompras_anualizadas))
-    # En REITs puros, las ampliaciones de capital para comprar inmuebles no se restan del Yield en efectivo
     shareholder_yield = yield_actual if (es_reit_puro and recompras_anualizadas < 0) else (yield_actual + recompras_anualizadas)
 
     precio_compra = (forward_dividend / yield_infravalorado) * 100 if yield_infravalorado > 0 else 0
@@ -560,7 +508,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     dist_suelo_pct = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 0
 
     # ==========================================
-    # 1. SCORE DE CALIDAD DGI RIGUROSO Y CALIBRADO POR SECTOR (0 A 10 PTS)
+    # 1. SCORE DE CALIDAD DGI CALIBRADO POR SECTOR (0 A 10 PTS)
     # ==========================================
     if es_reit_puro:
         lim_deuda_optima, lim_deuda_aceptable = 5.2, 6.8
@@ -585,15 +533,11 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     else:
         pts_fcf = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 2.0, 0.4, inverso=True) if payout_fcf > 0 else 0.0
 
-    # Historial exigente (penaliza dividendos congelados o con fatiga)
     racha_efectiva = racha_sin_recortes + (3 if años_pagando >= 25 else 0)
     pts_hist = interpolar_puntos(racha_efectiva, 20.0, 6.0, 2.0, 0.5, inverso=False)
-    if dividendo_congelado:
-        pts_hist = max(0.0, round(pts_hist - 0.8, 2))
-    elif fatiga_dividendo:
-        pts_hist = max(0.0, round(pts_hist - 0.4, 2))
+    if fatiga_dividendo:
+        pts_hist = max(0.0, round(pts_hist - 0.5, 2))
 
-    # Foso Económico: exige ROIC alto (≥ 16%) y Crecimiento de Ventas real (≥ 4,5%/año)
     metrica_rentabilidad = roe if (es_financiera or (roic is None and roe > 0)) else roic
     if es_reit_puro:
         pts_roic_sub = interpolar_puntos(operating_margins, 35.0, 20.0, 0.9, 0.3, inverso=False)
@@ -602,12 +546,8 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     pts_rev_sub = interpolar_puntos(revenue_cagr_3y, 5.0, 1.0, 0.6, 0.1, inverso=False) if revenue_cagr_3y is not None else 0.0
     pts_foso = round(pts_roic_sub + pts_rev_sub, 2)
 
-    # DGR 5A exigente (≥ 7,5% para el punto completo; penalizado si hoy está congelado)
     pts_dgr = interpolar_puntos(dgr_5y, 7.5, 2.5, 1.0, 0.25, inverso=False) if dgr_5y is not None else 0.0
-    if dividendo_congelado:
-        pts_dgr = round(pts_dgr * 0.3, 2)
 
-    # Asignación de Capital: evita regalar 1.0 pt a empresas estancadas que solo recompran con deuda
     if es_reit_puro:
         crec_reit_ref = crecimiento_ffo_sh_3y if crecimiento_ffo_sh_3y is not None else (dgr_5y or 0.0)
         pts_cap = interpolar_puntos(crec_reit_ref, 4.5, 1.0, 1.0, 0.3, inverso=False)
@@ -630,13 +570,11 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     else:
         pts_yield = 0.0
 
-    # Tasa de crecimiento real del negocio para exigir múltiplos más bajos a empresas lentas/estancadas
     tasas_crec_negocio = [x for x in [dgr_5y, revenue_cagr_3y, crecimiento_bpa_3y] if x is not None]
     crec_negocio_val = float(np.median(tasas_crec_negocio)) if tasas_crec_negocio else 2.0
-    if dividendo_congelado or (revenue_cagr_3y is not None and revenue_cagr_3y < 0.5):
+    if revenue_cagr_3y is not None and revenue_cagr_3y < 0.5:
         crec_negocio_val = min(crec_negocio_val, 1.5)
 
-    # Múltiplo exigible según crecimiento (ej. 9,5x si crece al 1%; 16,5x si crece al 9%)
     mult_optimo = float(np.clip(8.5 + max(0.0, crec_negocio_val) * 0.9, 8.5, 17.0))
     mult_aceptable = mult_optimo + 7.0
 
@@ -648,21 +586,14 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     multiplo_per_eval = p_fcf if (es_reit_puro and p_fcf > 0) else per
     pts_per = interpolar_puntos(multiplo_per_eval, mult_optimo + 0.5, mult_aceptable + 1.0, 2.0, 0.3, inverso=True) if multiplo_per_eval > 0 else 0.0
 
-    # Si la empresa tiene el dividendo congelado o ventas en contracción, no puede llevarse el 100% de puntos por múltiplo bajo
-    if dividendo_congelado or (revenue_cagr_3y is not None and revenue_cagr_3y < 0):
-        pts_pfcf = round(pts_pfcf * 0.65, 2)
-        pts_per = round(pts_per * 0.65, 2)
-
-    # Regla de Chowder blindada: exige DGR 5A >= 2,5% y que el dividendo no esté congelado
     chowder_target = 8.0 if ((es_utility_pura or es_telecom or es_reit_puro) and yield_actual > 4.0) else (12.0 if yield_actual >= 3.0 else 15.0)
     yield_req_chowder = None
     if dgr_5y is not None:
         chowder_number = yield_actual + dgr_5y
         yield_req_chowder = chowder_target - dgr_5y
-        if dividendo_congelado or dgr_5y < 2.0 or (dgr_1y is not None and dgr_1y <= 0):
+        if dgr_5y < 2.0 or (dgr_1y is not None and dgr_1y <= 0):
             pts_chowder = 0.0
         else:
-            # Limitar el Yield computable en Chowder al 6,5% para evitar que un Yield del 14% sin crecimiento regale los puntos
             chowder_efectivo = min(yield_actual, 6.5) + dgr_5y
             pts_chowder = interpolar_puntos(chowder_efectivo, chowder_target, chowder_target - 3.0, 1.5, 0.3, inverso=False)
     else:
@@ -677,8 +608,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     horizonte_bogle = 5
     candidatos_crec = [x for x in [dgr_5y, dgr_periodo, crecimiento_bpa_3y] if x is not None]
     crec_bogle = float(np.median(candidatos_crec)) if candidatos_crec else 3.0
-    if dividendo_congelado:
-        crec_bogle = min(crec_bogle, 3.5)
     crec_bogle = max(-5.0, min(14.0, crec_bogle))
 
     if precio_actual > 0 and precio_justo > 0:
@@ -752,12 +681,10 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     elif pais in MERMA_ORIGEN_PAIS:
         st.warning(f"⚠️ **Fiscalidad ({pais})**: Exceso de retención en origen del **{f_num(MERMA_ORIGEN_PAIS[pais], 2, '%')}** sobre el 15% del convenio.")
 
-    if dividendo_congelado:
-        st.info(f"❄️ **Dividendo Congelado Detectado:** El cupón {nombre_frecuencia} actual ({f_num(ult_cupon_reg, 2, sym)}) no ha subido respecto al año pasado. Se ha nivelado el escalón anual ({f_num(forward_dividend, 2, sym)}/año) y ajustado la puntuación por falta de crecimiento reciente.")
-    elif aviso_extraordinario:
-        st.warning("⚠️ **Pago Extraordinario / Spin-Off Filtrado:** Se ha descartado un apunte no recurrente para no deformar los canales históricos.")
+    if aviso_extraordinario:
+        st.warning("⚠️ **Aviso de Dividendo Extraordinario:** Yahoo Finance registra un reparto un 35% superior a la mediana reciente. Comprueba si incluye un pago especial o spin-off.")
 
-    # 1. PUNTUACIONES Y VEREDICTO (SIN EL BUG +-20,3%)
+    # 1. PUNTUACIONES Y VEREDICTO
     col_sc1, col_sc2 = st.columns(2)
     with col_sc1:
         if score_calidad >= 8.0: 
@@ -914,14 +841,11 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 </div>
 """, unsafe_allow_html=True)
 
-    # 5. GRÁFICO 1: CANALES WEISS CON ESCALERA SUAVIZADA
+    # 5. GRÁFICO 1: CANALES WEISS (LÓGICA 100% ORIGINAL SIN CUMMAX NI RECORTES)
     st.markdown(f"### 📈 Evolución Histórica de Valoración ({años_analisis} Años)")
     df_grafico = historial_analisis[['Close']].copy()
     if not df_grafico.empty:
-        serie_div_graf = historial_analisis['Div_Anual'].copy()
-        if racha_sin_recortes >= 5:
-            serie_div_graf = serie_div_graf.cummax()
-        df_grafico['Div_Grafico'] = serie_div_graf
+        df_grafico['Div_Grafico'] = historial_analisis['Div_Anual']
         df_grafico['Precio_Compra'] = (df_grafico['Div_Grafico'] / yield_infravalorado) * 100
         df_grafico['Precio_Justo'] = (df_grafico['Div_Grafico'] / yield_medio) * 100
         df_grafico['Precio_Venta'] = (df_grafico['Div_Grafico'] / yield_sobrevalorado) * 100
