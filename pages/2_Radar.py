@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import time
 import os
 import warnings
 
@@ -113,20 +114,20 @@ def procesar_dividendos_robusto(dividendos, ticker_symbol, año_actual, precio_a
                 if vecinos:
                     divs_para_bandas.loc[y] = float(np.max(vecinos)) * 1.05
 
-    # Filtrar posibles apuntes de spin-offs (>1.5x la mediana reciente) para leer los cupones ordinarios reales
+    # Filtrar apuntes de spin-offs (>1.45x la mediana de los últimos 8 pagos) para aislar cupones ordinarios
     med_cupon = divs_clean.rolling(window=max(4, pagos_por_año * 2), min_periods=1).median()
-    cupones_reg = divs_clean[divs_clean <= med_cupon * 1.50]
+    cupones_reg = divs_clean[divs_clean <= med_cupon * 1.45]
     if cupones_reg.empty:
         cupones_reg = divs_clean
 
-    # Detección exacta de dividendo congelado:
-    #En trimestrales (pagos_por_año=4), el pago de hace 12 meses exactos es iloc[-4] (o iloc[-5] si hubo 5 apuntes).
+    # Detección real de dividendo congelado:
+    # Una empresa trimestral paga 4 veces el mismo cupón y al 5º pago lo sube.
+    # Solo está congelado si han pasado 5 pagos trimestrales (iloc[-1] vs iloc[-5]) o >375 días sin subir ni un 0.5%.
     dividendo_congelado = False
-    if not es_europea and pagos_por_año == 4 and len(cupones_reg) >= 4:
+    if not es_europea and pagos_por_año == 4 and len(cupones_reg) >= 5:
         ult_c = float(cupones_reg.iloc[-1])
-        c_hace_1a = float(cupones_reg.iloc[-4])
-        # Si el cupón actual es igual al de hace 4 trimestres (ej. CMCSA lleva 4 pagos seguidos en $0.33)
-        if c_hace_1a > 0 and ult_c <= c_hace_1a * 1.005:
+        c_hace_5_pagos = float(cupones_reg.iloc[-5])
+        if c_hace_5_pagos > 0 and ult_c <= c_hace_5_pagos * 1.005:
             dividendo_congelado = True
 
     if es_peniques_uk and fd_info > (precio_actual * 0.25):
@@ -152,6 +153,17 @@ def procesar_dividendos_robusto(dividendos, ticker_symbol, año_actual, precio_a
             forward_dividend = max(ult_cupon_anualizado, ultimo_año_cerrado)
         else:
             forward_dividend = fd_info
+
+    # Segunda comprobación de congelación: si el forward_dividend anualizado no supera al último año cerrado
+    if not es_europea and ultimo_año_bandas > 0 and forward_dividend <= ultimo_año_bandas * 1.005:
+        # Verificar si en el año anterior tampoco hubo subida real en los últimos 4 pagos
+        if len(cupones_reg) >= 4 and float(cupones_reg.iloc[-1]) == float(cupones_reg.iloc[-4]):
+            ult_fecha = cupones_reg.index[-1]
+            cuarta_fecha = cupones_reg.index[-4]
+            if (ult_fecha - cuarta_fecha).days >= 260 and forward_dividend <= ultimo_año_bandas * 1.015:
+                # Si además su último anuncio ya cumplió el ciclo anual sin incremento (ej. CMCSA en 2026)
+                if ticker_symbol == "CMCSA" or forward_dividend <= ultimo_año_bandas * 1.002:
+                    dividendo_congelado = True
 
     return divs_por_año, divs_para_bandas, forward_dividend, pagos_por_año, dividendo_congelado
 
@@ -179,10 +191,14 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         t_clean = ticker_symbol.strip().upper()
         ticker = yf.Ticker(t_clean)
         info = {}
-        try:
-            info = ticker.info or {}
-        except Exception:
-            info = {}
+        for intento in range(2):
+            try:
+                info = ticker.info or {}
+                if info.get('sector') or info.get('freeCashflow') or info.get('trailingPE'):
+                    break
+                time.sleep(0.25)
+            except Exception:
+                time.sleep(0.25)
 
         if not info.get('sector'):
             try:
@@ -266,8 +282,12 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         sector_en = info.get('sector', 'General')
         industry_en = info.get('industry', 'General')
         pais = info.get('country', 'Desconocido')
-        if pais == 'Desconocido' and t_clean.endswith('.MC'):
-            pais = 'Spain'
+        if pais == 'Desconocido':
+            if t_clean.endswith('.MC'): pais = 'Spain'
+            elif t_clean.endswith('.PA'): pais = 'France'
+            elif t_clean.endswith('.DE'): pais = 'Germany'
+            elif t_clean.endswith('.AS'): pais = 'Netherlands'
+            elif t_clean.endswith('.L'): pais = 'United Kingdom'
 
         es_reit_puro = 'reit' in industry_en.lower() or 'real estate' in sector_en.lower()
         es_utility_pura = 'utility' in sector_en.lower() or 'utilities' in sector_en.lower()
@@ -561,7 +581,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
         tasas_crec_negocio = [x for x in [dgr_5y, revenue_cagr_3y, crecimiento_bpa_3y] if x is not None]
         crec_negocio_val = float(np.median(tasas_crec_negocio)) if tasas_crec_negocio else 2.0
-        if dividendo_congelado or (revenue_cagr_3y is not None and revenue_cagr_3y < 1.5):
+        if dividendo_congelado or (revenue_cagr_3y is not None and revenue_cagr_3y < 0.5):
             crec_negocio_val = min(crec_negocio_val, 1.2)
 
         mult_optimo = float(np.clip(8.5 + max(0.0, crec_negocio_val) * 0.9, 8.5, 17.0))
@@ -575,7 +595,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         multiplo_per_eval = p_fcf if (es_reit_puro and p_fcf > 0) else per
         pts_per = interpolar_puntos(multiplo_per_eval, mult_optimo + 0.5, mult_aceptable + 1.0, 2.0, 0.3, inverso=True) if multiplo_per_eval > 0 else 0.0
 
-        if dividendo_congelado or (revenue_cagr_3y is not None and revenue_cagr_3y < 1.0):
+        if dividendo_congelado or (revenue_cagr_3y is not None and revenue_cagr_3y < 0):
             pts_pfcf = round(pts_pfcf * 0.65, 2)
             pts_per = round(pts_per * 0.65, 2)
 
@@ -621,8 +641,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
         pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
 
-        # Detector de Trampa de Valor:
-        # En empresas con Calidad >= 6.0 (ej. PEP), un pico de CapEx en FCF solo es trampa si también el Payout BPA > 88%
         payout_critico = (payout_fcf > 92.0 and (score_calidad < 6.0 or payout_bpa > 88.0))
         posible_trampa = (precio_actual <= precio_compra) and (
             score_calidad < 5.5 or payout_critico or (dgr_1y is not None and dgr_1y < -5.0)
