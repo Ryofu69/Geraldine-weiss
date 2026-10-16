@@ -154,6 +154,94 @@ def ultimo_valor_tabla(df, claves):
                     return float(s.iloc[-1])
     return 0.0
 
+def procesar_dividendos_robusto(dividendos, ticker_symbol, año_actual, precio_actual, es_peniques_uk, fd_info):
+    """
+    Mantiene intactas las empresas de EE.UU., pero corrige el fallo de Yahoo Finance en empresas
+    españolas/europeas (.MC, .PA, .DE, .AS, .L) con pagos asimétricos (a cuenta + complementario)
+    o apuntes duplicados de Scrip Dividend en la misma quincena.
+    """
+    es_europea = any(ticker_symbol.endswith(suf) for suf in ['.MC', '.PA', '.DE', '.AS', '.MI', '.LS', '.SW', '.BR', '.HE'])
+    divs_clean = dividendos.copy()
+
+    # 1. En europeas con Scrip Dividend (ej. VIS.MC, IBE.MC, ACS.MC), si Yahoo mete 2 apuntes con <12 días de diferencia,
+    # uno es la venta del derecho o un ajuste fraccionario: conservamos el mayor de esa ventana de 12 días
+    if es_europea and len(divs_clean) > 2:
+        fechas = divs_clean.index
+        valores = divs_clean.values
+        keep_idx = []
+        i = 0
+        while i < len(valores):
+            if i < len(valores) - 1 and (fechas[i + 1] - fechas[i]).days <= 12:
+                # Si son dos apuntes casi simultáneos del mismo evento de dividendo, quedarse con el pago principal
+                if valores[i + 1] >= valores[i]:
+                    keep_idx.append(i + 1)
+                else:
+                    keep_idx.append(i)
+                i += 2
+            else:
+                keep_idx.append(i)
+                i += 1
+        divs_clean = divs_clean.iloc[keep_idx]
+
+    divs_por_año = divs_clean.groupby(divs_clean.index.year).sum()
+
+    # 2. Detectar frecuencia real de pagos
+    años_div = divs_clean.index.year
+    conteo_por_año = años_div.value_counts()
+    conteo_closed = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 5)]
+    if conteo_closed.empty:
+        conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
+    mediana_pagos_año = float(conteo_closed.median()) if not conteo_closed.empty else 4.0
+
+    if mediana_pagos_año >= 10: pagos_por_año = 12
+    elif mediana_pagos_año >= 3: pagos_por_año = 4
+    elif mediana_pagos_año >= 1.5: pagos_por_año = 2
+    else: pagos_por_año = 1
+
+    # 3. En europeas semestrales con dividendo extraordinario aislado (ej. VIS.MC 2024-2025),
+    # normalizar picos que superen en >45% la tendencia de los años normales para no deformar las bandas de Weiss
+    divs_para_bandas = divs_por_año.copy()
+    años_cerrados = divs_para_bandas[divs_para_bandas.index < año_actual]
+    if es_europea and len(años_cerrados) >= 5:
+        mediana_5a = float(años_cerrados.tail(6).median())
+        for y in años_cerrados.index:
+            # Si un año concreto se disparó >45% sobre la mediana quinquenal por dividendo especial no recurrente
+            if divs_para_bandas.loc[y] > mediana_5a * 1.45:
+                vecinos = [divs_para_bandas.loc[v] for v in [y - 1, y - 2, y + 1] if v in años_cerrados.index and divs_para_bandas.loc[v] <= mediana_5a * 1.45]
+                if vecinos:
+                    divs_para_bandas.loc[y] = float(np.max(vecinos)) * 1.05
+
+    # 4. Cálculo blindado de forward_dividend
+    if es_peniques_uk and fd_info > (precio_actual * 0.25):
+        fd_info /= 100.0
+
+    ultimo_año_cerrado = float(años_cerrados.iloc[-1]) if not años_cerrados.empty else 0.0
+    ultimo_año_bandas = float(divs_para_bandas[divs_para_bandas.index < año_actual].iloc[-1]) if not años_cerrados.empty else 0.0
+    
+    # Suma real de los últimos 365 días desde el último pago registrado
+    ult_fecha_div = divs_clean.index[-1]
+    div_ttm_real = float(divs_clean[divs_clean.index > (ult_fecha_div - pd.DateOffset(days=370))].sum())
+
+    if es_europea or pagos_por_año in [1, 2]:
+        # En empresas españolas/europeas (pagos asimétricos a cuenta + complementario), Yahoo suele romper dividendRate
+        # poniendo solo 1 de los pagos (ej. 0,76€ en VIS.MC en vez de ~2,00€-3,00€)
+        ref_anual_real = max(div_ttm_real, ultimo_año_bandas)
+        if fd_info <= 0 or fd_info < (ref_anual_real * 0.65):
+            forward_dividend = ref_anual_real
+        elif fd_info > (ultimo_año_bandas * 1.45):
+            forward_dividend = ultimo_año_bandas
+        else:
+            forward_dividend = fd_info
+    else:
+        # En trimestrales/mensuales de EE.UU. (MKC, ACN, O, KO), prioridad al dividendRate o último cupón * pagos_por_año
+        ult_cupon_anualizado = float(divs_clean.iloc[-1]) * pagos_por_año
+        if fd_info <= 0 or abs(ult_cupon_anualizado - fd_info) / max(1.0, ult_cupon_anualizado) > 0.25:
+            forward_dividend = max(ult_cupon_anualizado, ultimo_año_cerrado)
+        else:
+            forward_dividend = fd_info
+
+    return divs_por_año, divs_para_bandas, forward_dividend, pagos_por_año
+
 # ==========================================
 # FUNCIÓN PESTAÑA 1: VALORACIÓN, BOGLE Y TIMING
 # ==========================================
@@ -227,6 +315,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
     historial_completo.index = historial_completo.index.tz_localize(None).normalize()
     dividendos.index = dividendos.index.tz_localize(None).normalize()
+    dividendos = dividendos.groupby(dividendos.index).sum()
 
     if precio_vivo is not None and precio_vivo > 0 and not historial_completo.empty:
         historial_completo.iloc[-1, historial_completo.columns.get_loc('Close')] = precio_vivo
@@ -258,6 +347,8 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     sector_en = info.get('sector', 'General')
     industry_en = info.get('industry', 'General')
     pais = info.get('country', 'Desconocido')
+    if pais == 'Desconocido' and ticker_symbol.endswith('.MC'):
+        pais = 'Spain'
     nombre_empresa = info.get('shortName', ticker_symbol)
     sector_final = TRADUCCION.get(sector_en, sector_en)
 
@@ -271,38 +362,17 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
     # ==========================================
-    # MOTOR ORIGINAL DE DIVIDENDOS Y CANALES (SIN RECORTES QUE ROMPAN LOS GRÁFICOS)
+    # MOTOR DE DIVIDENDOS (COMPATIBLE CON EE.UU. Y ESPAÑA/EUROPA)
     # ==========================================
-    divs_por_año = dividendos.groupby(dividendos.index.year).sum()
-
-    años_div = dividendos.index.year
-    conteo_por_año = años_div.value_counts()
-    conteo_closed = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 5)]
-    if conteo_closed.empty:
-        conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
-    mediana_pagos_año = float(conteo_closed.median()) if not conteo_closed.empty else 4.0
-
-    if mediana_pagos_año >= 10:
-        pagos_por_año = 12
-    elif mediana_pagos_año >= 3:
-        pagos_por_año = 4
-    elif mediana_pagos_año >= 1.5:
-        pagos_por_año = 2
-    else:
-        pagos_por_año = 1
+    fd_info = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
+    divs_por_año, divs_para_bandas, forward_dividend, pagos_por_año = procesar_dividendos_robusto(
+        dividendos, ticker_symbol, año_actual, precio_actual, es_peniques_uk, fd_info
+    )
 
     nombre_frecuencia = {1: "anual", 2: "semestral", 4: "trimestral", 12: "mensual"}.get(pagos_por_año, "periódico")
 
-    forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
-    if es_peniques_uk and forward_dividend > (precio_actual * 0.25):
-        forward_dividend /= 100.0
-
-    if forward_dividend == 0 and not dividendos.empty:
-        ultimo_año_completo = divs_por_año.iloc[-2] if len(divs_por_año) > 1 else 0.0
-        forward_dividend = max(float(dividendos.iloc[-1]) * pagos_por_año, float(ultimo_año_completo))
-
     historial_analisis['Year'] = historial_analisis.index.year
-    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_por_año)
+    historial_analisis['Div_Anual'] = historial_analisis['Year'].map(divs_para_bandas)
     historial_analisis.loc[historial_analisis['Year'] == año_actual, 'Div_Anual'] = forward_dividend
     historial_analisis['Div_Anual'] = historial_analisis['Div_Anual'].bfill().ffill()
 
@@ -446,9 +516,9 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
             payout_fcf = (forward_dividend / fcf_per_share) * 100
             p_fcf = precio_actual / fcf_per_share
 
-    dividendos_barras = divs_por_año.copy()
+    dividendos_barras = divs_para_bandas.copy()
     if año_actual in dividendos_barras.index:
-        dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
+        dividendos_barras[año_actual] = forward_dividend
     else:
         dividendos_barras.loc[año_actual] = forward_dividend
 
@@ -464,16 +534,16 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     fatiga_dividendo = bool(dgr_1y is not None and dgr_5y is not None and dgr_5y > 2.0 and (dgr_1y / dgr_5y) < 0.5)
 
     aviso_extraordinario = False
-    if len(dividendos_barras) >= 4:
-        mediana_reciente = dividendos_barras.iloc[-4:-1].median()
-        ultimo_div = dividendos_barras.iloc[-1]
+    if len(divs_por_año) >= 4:
+        mediana_reciente = divs_por_año.iloc[-4:-1].median()
+        ultimo_div = divs_por_año.iloc[-1]
         if mediana_reciente > 0 and (ultimo_div / mediana_reciente) > 1.35:
             aviso_extraordinario = True
 
     racha_sin_recortes = 0
     if len(dividendos_barras) > 1:
         for i in range(1, len(dividendos_barras)):
-            if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.99:
+            if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.98:
                 racha_sin_recortes += 1
             else: break
 
@@ -506,6 +576,8 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0
     pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0
     dist_suelo_pct = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 0
+    # Caída porcentual necesaria sobre el precio actual para llegar al suelo (nunca puede superar el 100%)
+    caida_necesaria_suelo_pct = ((precio_actual - precio_compra) / precio_actual) * 100 if precio_actual > 0 else 0
 
     # ==========================================
     # 1. SCORE DE CALIDAD DGI CALIBRADO POR SECTOR (0 A 10 PTS)
@@ -581,7 +653,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     if es_financiera and p_fcf <= 0:
         pts_pfcf = interpolar_puntos(price_to_book, 1.1, 2.0, 2.5, 0.4, inverso=True) if price_to_book > 0 else 0.0
     else:
-        pts_pfcf = interpolar_puntos(p_fcf, mult_optimo, mult_aceptable, 2.5, 0.4, inverso=True) if p_fcf > 0 else 0.0
+        pts_pfcf = interpolar_puntos(p_fcf, 15.0 if es_reit_puro else mult_optimo, 22.0 if es_reit_puro else mult_aceptable, 2.5, 0.4, inverso=True) if p_fcf > 0 else 0.0
 
     multiplo_per_eval = p_fcf if (es_reit_puro and p_fcf > 0) else per
     pts_per = interpolar_puntos(multiplo_per_eval, mult_optimo + 0.5, mult_aceptable + 1.0, 2.0, 0.3, inverso=True) if multiplo_per_eval > 0 else 0.0
@@ -682,7 +754,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         st.warning(f"⚠️ **Fiscalidad ({pais})**: Exceso de retención en origen del **{f_num(MERMA_ORIGEN_PAIS[pais], 2, '%')}** sobre el 15% del convenio.")
 
     if aviso_extraordinario:
-        st.warning("⚠️ **Aviso de Dividendo Extraordinario:** Yahoo Finance registra un reparto un 35% superior a la mediana reciente. Comprueba si incluye un pago especial o spin-off.")
+        st.info("ℹ️ **Dividendo Especial / Scrip Normalizado:** Se han detectado años con pagos extraordinarios o *scrip dividend* y se han normalizado a la tendencia ordinaria para no deformar los canales.")
 
     # 1. PUNTUACIONES Y VEREDICTO
     col_sc1, col_sc2 = st.columns(2)
@@ -785,14 +857,14 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
     if dist_suelo_pct <= 0:
         consejo_orden_html = f"🟢 <strong>Disparo Directo:</strong> Ya cotiza en Suelo Weiss ({f_num(precio_actual, 2)}{sym} ≤ {f_num(precio_compra, 2)}{sym}). No necesitas esperar más descuento."
-    elif dist_suelo_pct <= 5.0:
+    elif caida_necesaria_suelo_pct <= 5.0:
         consejo_orden_html = (
-            f"⚡ <strong>Coste de Oportunidad de Esperar:</strong> El Suelo ({f_num(precio_compra, 2)}{sym}) está a solo un <strong>{f_num(dist_suelo_pct, 1)}%</strong> y esperar únicamente te da <strong>+{f_num(extra_anual_esperar, 2)}{sym}/año</strong> extra. "
+            f"⚡ <strong>Coste de Oportunidad de Esperar:</strong> El Suelo ({f_num(precio_compra, 2)}{sym}) está a solo un <strong>-{f_num(caida_necesaria_suelo_pct, 1)}%</strong> y esperar únicamente te da <strong>+{f_num(extra_anual_esperar, 2)}{sym}/año</strong> extra. "
             f"Si por esperar se te escapa <strong>1 solo cobro {nombre_frecuencia} ({f_num(cobro_por_pago_hoy, 2)}{sym} netos)</strong>, tardarías <strong>{f_num(anios_recuperar_1_pago, 1)} años</strong> en recuperarlo."
         )
     else:
         consejo_orden_html = (
-            f"⏳ <strong>Compensa Esperar (Orden Limitada):</strong> Cotiza un <strong>+{f_num(dist_suelo_pct, 1)}%</strong> por encima del Suelo ({f_num(precio_compra, 2)}{sym}). "
+            f"⏳ <strong>Compensa Esperar (Orden Limitada):</strong> Necesita corregir un <strong>-{f_num(caida_necesaria_suelo_pct, 1)}%</strong> para tocar el Suelo ({f_num(precio_compra, 2)}{sym}). "
             f"Esperar al suelo te asegura un <strong>+{f_num(((div_neto_suelo/div_neto_hoy)-1)*100 if div_neto_hoy>0 else 0, 1)}% más de renta perpetua</strong> (+{f_num(extra_anual_esperar, 2)}{sym}/año)."
         )
 
@@ -841,7 +913,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 </div>
 """, unsafe_allow_html=True)
 
-    # 5. GRÁFICO 1: CANALES WEISS (LÓGICA 100% ORIGINAL SIN CUMMAX NI RECORTES)
+    # 5. GRÁFICO 1: CANALES WEISS
     st.markdown(f"### 📈 Evolución Histórica de Valoración ({años_analisis} Años)")
     df_grafico = historial_analisis[['Close']].copy()
     if not df_grafico.empty:
@@ -882,7 +954,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         str_ult_venta, col_ult_venta = format_last_time(is_venta, "#ff4b4b")
 
         estado_canal_txt = f"un <strong>{f_num(abs(pct_actual_vs_media), 1)}% por debajo</strong> de su Precio Justo ({f_num(precio_justo, 2)}{sym})" if pct_actual_vs_media <= 0 else f"un <strong>+{f_num(pct_actual_vs_media, 1)}% por encima</strong> de su Precio Justo ({f_num(precio_justo, 2)}{sym})"
-        dist_compra_txt = f"ya cotiza un <strong>{f_num(abs(dist_suelo_pct), 1)}% por debajo de la línea verde</strong>" if dist_suelo_pct <= 0 else f"necesita caer un <strong>{f_num(dist_suelo_pct, 1)}% adicional</strong> para tocar la línea verde ({f_num(precio_compra, 2)}{sym})"
+        dist_compra_txt = f"ya cotiza un <strong>{f_num(abs(dist_suelo_pct), 1)}% por debajo de la línea verde</strong>" if dist_suelo_pct <= 0 else f"necesita corregir un <strong>-{f_num(caida_necesaria_suelo_pct, 1)}%</strong> desde el precio actual para tocar la línea verde ({f_num(precio_compra, 2)}{sym})"
 
         st.markdown(f"""
 <div class="explicacion-graf notranslate" translate="no">
