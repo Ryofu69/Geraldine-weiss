@@ -72,6 +72,103 @@ def obtener_fx_rate(curr_fin, curr_base):
         pass
     return 1.0
 
+def procesar_dividendos_robusto(dividendos, ticker_symbol, año_actual, precio_actual, es_peniques_uk, fd_info):
+    """
+    Mantiene intactas las empresas de EE.UU., corrige pagos asimétricos y Scrip Dividends en Europa (.MC, .PA, .DE, .AS)
+    y detecta si el dividendo actual está congelado respecto a hace 1 año (ej. CMCSA en 2026).
+    """
+    es_europea = any(ticker_symbol.endswith(suf) for suf in ['.MC', '.PA', '.DE', '.AS', '.MI', '.LS', '.SW', '.BR', '.HE'])
+    divs_clean = dividendos.copy()
+
+    # 1. En europeas con Scrip Dividend (ej. VIS.MC, IBE.MC, ACS.MC), si Yahoo mete 2 apuntes con <12 días de diferencia,
+    # conservar solo el pago principal de esa quincena
+    if es_europea and len(divs_clean) > 2:
+        fechas = divs_clean.index
+        valores = divs_clean.values
+        keep_idx = []
+        i = 0
+        while i < len(valores):
+            if i < len(valores) - 1 and (fechas[i + 1] - fechas[i]).days <= 12:
+                if valores[i + 1] >= valores[i]:
+                    keep_idx.append(i + 1)
+                else:
+                    keep_idx.append(i)
+                i += 2
+            else:
+                keep_idx.append(i)
+                i += 1
+        divs_clean = divs_clean.iloc[keep_idx]
+
+    divs_por_año = divs_clean.groupby(divs_clean.index.year).sum()
+
+    # 2. Detectar frecuencia real de pagos
+    años_div = divs_clean.index.year
+    conteo_por_año = años_div.value_counts()
+    conteo_closed = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 5)]
+    if conteo_closed.empty:
+        conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
+    mediana_pagos_año = float(conteo_closed.median()) if not conteo_closed.empty else 4.0
+
+    if mediana_pagos_año >= 10: pagos_por_año = 12
+    elif mediana_pagos_año >= 3: pagos_por_año = 4
+    elif mediana_pagos_año >= 1.5: pagos_por_año = 2
+    else: pagos_por_año = 1
+
+    # 3. En europeas semestrales con dividendo extraordinario aislado (ej. VIS.MC 2024-2025),
+    # normalizar picos que superen en >45% la tendencia de los años normales para no deformar las bandas de Weiss
+    divs_para_bandas = divs_por_año.copy()
+    años_cerrados = divs_para_bandas[divs_para_bandas.index < año_actual]
+    if es_europea and len(años_cerrados) >= 5:
+        mediana_5a = float(años_cerrados.tail(6).median())
+        for y in años_cerrados.index:
+            if divs_para_bandas.loc[y] > mediana_5a * 1.45:
+                vecinos = [divs_para_bandas.loc[v] for v in [y - 1, y - 2, y + 1] if v in años_cerrados.index and divs_para_bandas.loc[v] <= mediana_5a * 1.45]
+                if vecinos:
+                    divs_para_bandas.loc[y] = float(np.max(vecinos)) * 1.05
+
+    # 4. Detectar si el cupón regular actual está CONGELADO (0% subida YoY, ej. CMCSA en 2026)
+    med_cupon = divs_clean.rolling(window=max(4, pagos_por_año * 2), min_periods=1).median()
+    cupones_reg = divs_clean[divs_clean <= med_cupon * 1.65]
+    if cupones_reg.empty:
+        cupones_reg = divs_clean
+
+    dividendo_congelado = False
+    if not es_europea and pagos_por_año in [4, 12] and len(cupones_reg) >= (pagos_por_año + 1):
+        ult_c = float(cupones_reg.iloc[-1])
+        ant_c = float(cupones_reg.iloc[-(pagos_por_año + 1)])
+        # Si ni el último cupón ni el penúltimo han subido respecto a hace 1 año
+        if ant_c > 0 and ult_c <= ant_c * 1.004:
+            penult_c = float(cupones_reg.iloc[-2]) if len(cupones_reg) >= 2 else ult_c
+            if penult_c <= ant_c * 1.004:
+                dividendo_congelado = True
+
+    # 5. Cálculo blindado de forward_dividend
+    if es_peniques_uk and fd_info > (precio_actual * 0.25):
+        fd_info /= 100.0
+
+    ultimo_año_cerrado = float(años_cerrados.iloc[-1]) if not años_cerrados.empty else 0.0
+    ultimo_año_bandas = float(divs_para_bandas[divs_para_bandas.index < año_actual].iloc[-1]) if not años_cerrados.empty else 0.0
+    
+    ult_fecha_div = divs_clean.index[-1]
+    div_ttm_real = float(divs_clean[divs_clean.index > (ult_fecha_div - pd.DateOffset(days=370))].sum())
+
+    if es_europea or pagos_por_año in [1, 2]:
+        ref_anual_real = max(div_ttm_real, ultimo_año_bandas)
+        if fd_info <= 0 or fd_info < (ref_anual_real * 0.65):
+            forward_dividend = ref_anual_real
+        elif fd_info > (ultimo_año_bandas * 1.45):
+            forward_dividend = ultimo_año_bandas
+        else:
+            forward_dividend = fd_info
+    else:
+        ult_cupon_anualizado = float(cupones_reg.iloc[-1]) * pagos_por_año
+        if fd_info <= 0 or abs(ult_cupon_anualizado - fd_info) / max(1.0, ult_cupon_anualizado) > 0.25:
+            forward_dividend = max(ult_cupon_anualizado, ultimo_año_cerrado)
+        else:
+            forward_dividend = fd_info
+
+    return divs_por_año, divs_para_bandas, forward_dividend, pagos_por_año, dividendo_congelado
+
 # ==========================================
 # GESTIÓN DEL ARCHIVO PERSISTENTE
 # ==========================================
@@ -160,6 +257,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         dividendos = dividendos_raw.copy()
         historial.index = historial.index.tz_localize(None).normalize()
         dividendos.index = dividendos.index.tz_localize(None).normalize()
+        dividendos = dividendos.groupby(dividendos.index).sum()
 
         # Actualizar con último tick en vivo si está disponible
         try:
@@ -191,6 +289,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         sector_en = info.get('sector', 'General')
         industry_en = info.get('industry', 'General')
         pais = info.get('country', 'Desconocido')
+        if pais == 'Desconocido' and t_clean.endswith('.MC'):
+            pais = 'Spain'
 
         es_reit_puro = 'reit' in industry_en.lower() or 'real estate' in sector_en.lower()
         es_utility_pura = 'utility' in sector_en.lower() or 'utilities' in sector_en.lower()
@@ -201,30 +301,14 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
         net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
-        # Motor de dividendos y canales (idéntico a Pestaña 1)
-        divs_por_año = dividendos.groupby(dividendos.index.year).sum()
-
-        años_div = dividendos.index.year
-        conteo_por_año = años_div.value_counts()
-        conteo_closed = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 5)]
-        if conteo_closed.empty:
-            conteo_closed = conteo_por_año[conteo_por_año.index < año_actual]
-        mediana_pagos_año = float(conteo_closed.median()) if not conteo_closed.empty else 4.0
-
-        if mediana_pagos_año >= 10: pagos_por_año = 12
-        elif mediana_pagos_año >= 3: pagos_por_año = 4
-        elif mediana_pagos_año >= 1.5: pagos_por_año = 2
-        else: pagos_por_año = 1
-
-        forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
-        if es_peniques_uk and forward_dividend > (precio_actual * 0.25):
-            forward_dividend /= 100.0
-        if forward_dividend == 0 and not dividendos.empty:
-            ultimo_año_completo = divs_por_año.iloc[-2] if len(divs_por_año) > 1 else 0.0
-            forward_dividend = max(float(dividendos.iloc[-1]) * pagos_por_año, float(ultimo_año_completo))
+        # Motor de dividendos y canales
+        fd_info = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
+        divs_por_año, divs_para_bandas, forward_dividend, pagos_por_año, dividendo_congelado = procesar_dividendos_robusto(
+            dividendos, t_clean, año_actual, precio_actual, es_peniques_uk, fd_info
+        )
 
         ha['Year'] = ha.index.year
-        ha['Div_Anual'] = ha['Year'].map(divs_por_año)
+        ha['Div_Anual'] = ha['Year'].map(divs_para_bandas)
         ha.loc[ha['Year'] == año_actual, 'Div_Anual'] = forward_dividend
         ha['Div_Anual'] = ha['Div_Anual'].bfill().ffill()
 
@@ -388,27 +472,30 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
                     cobertura_intereses = ebit_cov / int_exp
             except Exception: pass
 
-        dividendos_barras = divs_por_año.copy()
+        dividendos_barras = divs_para_bandas.copy()
         if año_actual in dividendos_barras.index:
-            dividendos_barras[año_actual] = max(dividendos_barras[año_actual], forward_dividend)
+            dividendos_barras[año_actual] = forward_dividend
         else:
             dividendos_barras.loc[año_actual] = forward_dividend
 
         años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
         dgr_5y, dgr_periodo, dgr_1y = None, None, None
-        if len(dividendos_barras) >= 2 and dividendos_barras.iloc[-2] > 0:
+        if dividendo_congelado:
+            dgr_1y = 0.0
+        elif len(dividendos_barras) >= 2 and dividendos_barras.iloc[-2] > 0:
             dgr_1y = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-2]) - 1) * 100
+
         if len(dividendos_barras) >= 6 and dividendos_barras.iloc[-6] > 0:
             dgr_5y = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-6]) ** (1/5) - 1) * 100
         if len(dividendos_barras) >= (años_analisis + 1) and dividendos_barras.iloc[-(años_analisis + 1)] > 0:
             dgr_periodo = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-(años_analisis + 1)]) ** (1/años_analisis) - 1) * 100
 
-        fatiga_dividendo = bool(dgr_1y is not None and dgr_5y is not None and dgr_5y > 2.0 and (dgr_1y / dgr_5y) < 0.5)
+        fatiga_dividendo = bool(dividendo_congelado or (dgr_1y is not None and dgr_5y is not None and dgr_5y > 2.0 and (dgr_1y / dgr_5y) < 0.5))
 
         racha_sin_recortes = 0
         if len(dividendos_barras) > 1:
             for i in range(1, len(dividendos_barras)):
-                if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.99:
+                if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.98:
                     racha_sin_recortes += 1
                 else: break
 
@@ -458,7 +545,9 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
         racha_efectiva = racha_sin_recortes + (3 if años_pagando >= 25 else 0)
         pts_hist = interpolar_puntos(racha_efectiva, 20.0, 6.0, 2.0, 0.5, inverso=False)
-        if fatiga_dividendo:
+        if dividendo_congelado:
+            pts_hist = max(0.0, round(pts_hist - 0.8, 2))
+        elif fatiga_dividendo:
             pts_hist = max(0.0, round(pts_hist - 0.5, 2))
 
         metrica_rentabilidad = roe if (es_financiera or (roic is None and roe > 0)) else roic
@@ -470,6 +559,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         pts_foso = round(pts_roic_sub + pts_rev_sub, 2)
 
         pts_dgr = interpolar_puntos(dgr_5y, 7.5, 2.5, 1.0, 0.25, inverso=False) if dgr_5y is not None else 0.0
+        if dividendo_congelado:
+            pts_dgr = round(pts_dgr * 0.25, 2)
 
         if es_reit_puro:
             crec_reit_ref = crecimiento_ffo_sh_3y if crecimiento_ffo_sh_3y is not None else (dgr_5y or 0.0)
@@ -482,7 +573,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         score_calidad = min(10.0, round(pts_deuda + pts_cob + pts_fcf + pts_hist + pts_foso + pts_dgr + pts_cap, 1))
 
         # ==========================================
-        # 2. SCORE DE VALORACIÓN DGI (SINCRONIZADO CON PESTAÑA 1)
+        # 2. SCORE DE VALORACIÓN DGI (CON FILTRO DE CONGELACIÓN)
         # ==========================================
         if yield_actual >= yield_infravalorado:
             pts_yield = 4.0
@@ -495,8 +586,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
         tasas_crec_negocio = [x for x in [dgr_5y, revenue_cagr_3y, crecimiento_bpa_3y] if x is not None]
         crec_negocio_val = float(np.median(tasas_crec_negocio)) if tasas_crec_negocio else 2.0
-        if revenue_cagr_3y is not None and revenue_cagr_3y < 0.5:
-            crec_negocio_val = min(crec_negocio_val, 1.5)
+        if dividendo_congelado or (revenue_cagr_3y is not None and revenue_cagr_3y < 0.5):
+            crec_negocio_val = min(crec_negocio_val, 1.2)
 
         mult_optimo = float(np.clip(8.5 + max(0.0, crec_negocio_val) * 0.9, 8.5, 17.0))
         mult_aceptable = mult_optimo + 7.0
@@ -509,10 +600,14 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         multiplo_per_eval = p_fcf if (es_reit_puro and p_fcf > 0) else per
         pts_per = interpolar_puntos(multiplo_per_eval, mult_optimo + 0.5, mult_aceptable + 1.0, 2.0, 0.3, inverso=True) if multiplo_per_eval > 0 else 0.0
 
+        if dividendo_congelado or (revenue_cagr_3y is not None and revenue_cagr_3y < 0):
+            pts_pfcf = round(pts_pfcf * 0.65, 2)
+            pts_per = round(pts_per * 0.65, 2)
+
         chowder_target = 8.0 if ((es_utility_pura or es_telecom or es_reit_puro) and yield_actual > 4.0) else (12.0 if yield_actual >= 3.0 else 15.0)
         chowder_number = (yield_actual + dgr_5y) if dgr_5y is not None else -999.0
         if dgr_5y is not None:
-            if dgr_5y < 2.0 or (dgr_1y is not None and dgr_1y <= 0):
+            if dividendo_congelado or dgr_5y < 2.0 or (dgr_1y is not None and dgr_1y <= 0):
                 pts_chowder = 0.0
             else:
                 chowder_efectivo = min(yield_actual, 6.5) + dgr_5y
@@ -529,6 +624,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         horizonte_bogle = 5
         candidatos_crec = [x for x in [dgr_5y, dgr_periodo, crecimiento_bpa_3y] if x is not None]
         crec_bogle = float(np.median(candidatos_crec)) if candidatos_crec else 3.0
+        if dividendo_congelado:
+            crec_bogle = min(crec_bogle, 3.0)
         crec_bogle = max(-5.0, min(14.0, crec_bogle))
 
         if precio_actual > 0 and precio_justo > 0:
@@ -539,19 +636,24 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
         retorno_bogle_neto = yield_neto + crec_bogle + reversion_weiss_anual_acotada
 
-        # Simulación sobre la orden de 500 €/$
         acc_compradas = (capital_simulado / precio_actual) if precio_actual > 0 else 0.0
         renta_neta_orden_anual = acc_compradas * forward_dividend * net_mult
         divs_netos_5a = sum([renta_neta_orden_anual * ((1 + max(0.0, crec_bogle)/100.0) ** a) for a in range(1, 6)])
         precio_est_5a = precio_justo * ((1 + (crec_bogle / 100.0)) ** 5)
         valor_total_5a_weiss = (acc_compradas * precio_est_5a) + divs_netos_5a
 
-        # Estado y detección de Trampa de Valor
         dist_real_suelo = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 999.0
         pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
         pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
 
-        posible_trampa = (precio_actual <= precio_compra) and (score_calidad < 5.5 or (payout_fcf > 92.0) or (dgr_1y is not None and dgr_1y < -2.0))
+        # Detector calibrado de Trampa de Valor:
+        # 1) Cualquier acción en suelo con Calidad < 5.5
+        # 2) O recorte severo de dividendo (< -5%)
+        # 3) O Payout FCF desbordado (> 98% en empresas normales, o > 92% si además el Payout BPA > 88% o la Calidad < 6.0)
+        payout_critico = (payout_fcf > 98.0) or (payout_fcf > 92.0 and (score_calidad < 6.0 or payout_bpa > 88.0))
+        posible_trampa = (precio_actual <= precio_compra) and (
+            score_calidad < 5.5 or payout_critico or (dgr_1y is not None and dgr_1y < -5.0)
+        )
 
         if posible_trampa:
             estado = "⚠️ TRAMPA VALOR"
@@ -567,6 +669,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             orden_estado = 3
 
         col_renta_nombre = f"Renta {int(capital_simulado)} (/Año)"
+        txt_chowder = f"{f_num(chowder_number, 1)} ❄️" if (chowder_number != -999.0 and dividendo_congelado) else (f"{f_num(chowder_number, 1)} (Obj: {f_num(chowder_target, 0)})" if chowder_number != -999.0 else "N/D")
 
         return {
             "Ticker": t_clean,
@@ -574,7 +677,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             "Calidad": f"{f_num(score_calidad, 1)}/10",
             "Valoración": f"{f_num(score_val, 1)}/10",
             "Score Total": f"{f_num(score_total, 1)}/20",
-            "Chowder": f"{f_num(chowder_number, 1)} (Obj: {f_num(chowder_target, 0)})" if chowder_number != -999.0 else "N/D",
+            "Chowder": txt_chowder,
             "Bogle-Weiss 5A": f"{f_num(retorno_bogle_neto, 1, '%', signo_pos=True)}/año (➔ {f_num(valor_total_5a_weiss, 0, sym_m)})",
             col_renta_nombre: f"{f_num(renta_neta_orden_anual, 2, sym_m)}/año ({f_num(acc_compradas, 1)} tít.)",
             "Cotización Actual": f"{f_num(precio_actual, 2, sym_m)} ({f_num(dist_real_suelo, 1, '%', signo_pos=True)})",
@@ -617,6 +720,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             "_cbpa3": crecimiento_bpa_3y if crecimiento_bpa_3y is not None else -999,
             "_chowder": chowder_number,
             "_chowder_target": chowder_target,
+            "_congelado": dividendo_congelado,
             "_col_renta": col_renta_nombre
         }
     except Exception:
@@ -793,8 +897,10 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
                 c_num = row['_chowder']
                 c_tar = row['_chowder_target']
                 if c_num != -999.0:
-                    if c_num >= c_tar and row['_dgr'] >= 2.0: styles[idx] = 'color: #21c354; font-weight: bold;'
-                    else: styles[idx] = 'color: #ff4b4b;'
+                    if not row['_congelado'] and c_num >= c_tar and row['_dgr'] >= 2.0:
+                        styles[idx] = 'color: #21c354; font-weight: bold;'
+                    else:
+                        styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Estado':
                 if "COMPRA" in est: styles[idx] = 'background-color: #004d00; color: white;'
                 elif "TRAMPA" in est: styles[idx] = 'background-color: #663300; color: #ffcc80;'
