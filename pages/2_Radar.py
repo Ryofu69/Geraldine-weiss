@@ -8,6 +8,7 @@ import time
 import os
 import warnings
 
+# Ignorar advertencias menores
 warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="Radar Watchlist - Weiss DGI", page_icon="📡", layout="wide")
@@ -18,6 +19,9 @@ MERMA_ORIGEN_PAIS = {
     'Switzerland': 20.0, 'Denmark': 12.0, 'Germany': 11.375, 'France': 10.0, 'Ireland': 10.0
 }
 
+# ==========================================
+# FORMATEO A LA ESPAÑOLA (PUNTOS Y COMAS)
+# ==========================================
 def f_num(val, dec=2, sufijo="", signo_pos=False):
     if pd.isna(val) or val is None:
         return "N/D"
@@ -70,9 +74,15 @@ def obtener_fx_rate(curr_fin, curr_base):
     return 1.0
 
 def procesar_dividendos_robusto(dividendos, ticker_symbol, año_actual, precio_actual, es_peniques_uk, fd_info):
+    """
+    Mantiene intactas las empresas de EE.UU., corrige pagos asimétricos y Scrip Dividends en Europa (.MC, .PA, .DE, .AS)
+    y detecta con precisión si el dividendo actual está congelado sin penalizar por error a empresas en su 4º trimestre (ej. MKC).
+    """
     es_europea = any(ticker_symbol.endswith(suf) for suf in ['.MC', '.PA', '.DE', '.AS', '.MI', '.LS', '.SW', '.BR', '.HE'])
     divs_clean = dividendos.copy()
 
+    # 1. En europeas con Scrip Dividend (ej. VIS.MC, IBE.MC, ACS.MC), si Yahoo mete 2 apuntes con <12 días de diferencia,
+    # conservar solo el pago principal de esa quincena
     if es_europea and len(divs_clean) > 2:
         fechas = divs_clean.index
         valores = divs_clean.values
@@ -92,6 +102,7 @@ def procesar_dividendos_robusto(dividendos, ticker_symbol, año_actual, precio_a
 
     divs_por_año = divs_clean.groupby(divs_clean.index.year).sum()
 
+    # 2. Detectar frecuencia real de pagos
     años_div = divs_clean.index.year
     conteo_por_año = años_div.value_counts()
     conteo_closed = conteo_por_año[(conteo_por_año.index < año_actual) & (conteo_por_año.index >= año_actual - 5)]
@@ -104,6 +115,8 @@ def procesar_dividendos_robusto(dividendos, ticker_symbol, año_actual, precio_a
     elif mediana_pagos_año >= 1.5: pagos_por_año = 2
     else: pagos_por_año = 1
 
+    # 3. En europeas semestrales con dividendo extraordinario aislado (ej. VIS.MC 2024-2025),
+    # normalizar picos que superen en >45% la tendencia de los años normales para no deformar las bandas de Weiss
     divs_para_bandas = divs_por_año.copy()
     años_cerrados = divs_para_bandas[divs_para_bandas.index < año_actual]
     if es_europea and len(años_cerrados) >= 5:
@@ -114,21 +127,28 @@ def procesar_dividendos_robusto(dividendos, ticker_symbol, año_actual, precio_a
                 if vecinos:
                     divs_para_bandas.loc[y] = float(np.max(vecinos)) * 1.05
 
-    # Filtrar apuntes de spin-offs (>1.45x la mediana de los últimos 8 pagos) para aislar cupones ordinarios
+    # 4. Filtrar apuntes de spin-offs (>1.45x la mediana de los últimos 8 pagos) para aislar cupones ordinarios
     med_cupon = divs_clean.rolling(window=max(4, pagos_por_año * 2), min_periods=1).median()
     cupones_reg = divs_clean[divs_clean <= med_cupon * 1.45]
     if cupones_reg.empty:
         cupones_reg = divs_clean
 
-    # Detección real de dividendo congelado:
-    # Una empresa trimestral paga 4 veces el mismo cupón y al 5º pago lo sube.
-    # Solo está congelado si han pasado 5 pagos trimestrales (iloc[-1] vs iloc[-5]) o >375 días sin subir ni un 0.5%.
+    # 5. Detección real de dividendo congelado (sin falsos positivos en Q4 como MKC):
     dividendo_congelado = False
     if not es_europea and pagos_por_año == 4 and len(cupones_reg) >= 5:
         ult_c = float(cupones_reg.iloc[-1])
-        c_hace_5_pagos = float(cupones_reg.iloc[-5])
-        if c_hace_5_pagos > 0 and ult_c <= c_hace_5_pagos * 1.005:
+        c_hace_5 = float(cupones_reg.iloc[-5])
+        c_hace_4 = float(cupones_reg.iloc[-4])
+        # Caso A: Lleva 5 trimestres seguidos con el mismo cupón
+        if c_hace_5 > 0 and ult_c <= c_hace_5 * 1.005:
             dividendo_congelado = True
+        # Caso B: Lleva 4 trimestres iguales Y en el año en curso (Con >=2 pagos ya realizados) no ha superado el cupón máximo del año anterior
+        elif c_hace_4 > 0 and ult_c <= c_hace_4 * 1.005:
+            pagos_este_año = cupones_reg[cupones_reg.index.year == año_actual]
+            pagos_año_ant = cupones_reg[cupones_reg.index.year == (año_actual - 1)]
+            if len(pagos_este_año) >= 2 and not pagos_año_ant.empty:
+                if float(pagos_este_año.max()) <= float(pagos_año_ant.max()) * 1.005:
+                    dividendo_congelado = True
 
     if es_peniques_uk and fd_info > (precio_actual * 0.25):
         fd_info /= 100.0
@@ -154,19 +174,11 @@ def procesar_dividendos_robusto(dividendos, ticker_symbol, año_actual, precio_a
         else:
             forward_dividend = fd_info
 
-    # Segunda comprobación de congelación: si el forward_dividend anualizado no supera al último año cerrado
-    if not es_europea and ultimo_año_bandas > 0 and forward_dividend <= ultimo_año_bandas * 1.005:
-        # Verificar si en el año anterior tampoco hubo subida real en los últimos 4 pagos
-        if len(cupones_reg) >= 4 and float(cupones_reg.iloc[-1]) == float(cupones_reg.iloc[-4]):
-            ult_fecha = cupones_reg.index[-1]
-            cuarta_fecha = cupones_reg.index[-4]
-            if (ult_fecha - cuarta_fecha).days >= 260 and forward_dividend <= ultimo_año_bandas * 1.015:
-                # Si además su último anuncio ya cumplió el ciclo anual sin incremento (ej. CMCSA en 2026)
-                if ticker_symbol == "CMCSA" or forward_dividend <= ultimo_año_bandas * 1.002:
-                    dividendo_congelado = True
-
     return divs_por_año, divs_para_bandas, forward_dividend, pagos_por_año, dividendo_congelado
 
+# ==========================================
+# GESTIÓN DEL ARCHIVO PERSISTENTE
+# ==========================================
 def cargar_watchlist():
     if os.path.exists(ARCHIVO_WATCHLIST):
         try:
@@ -186,6 +198,9 @@ def guardar_watchlist(texto):
     except Exception:
         return False
 
+# ==========================================
+# FUNCIÓN DE ANÁLISIS PARA RADAR
+# ==========================================
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar_merma_origen, capital_simulado):
     try:
         t_clean = ticker_symbol.strip().upper()
@@ -481,7 +496,11 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             dgr_1y = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-2]) - 1) * 100
 
         if len(dividendos_barras) >= 6 and dividendos_barras.iloc[-6] > 0:
-            dgr_5y = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-6]) ** (1/5) - 1) * 100
+            # Anti-Efecto Rebote (ej. TAP): si hace 5 años estaba en un bache por recorte previo, medir contra el máximo previo al bache
+            base_5y = float(dividendos_barras.iloc[:-5].max()) if len(dividendos_barras) > 6 else float(dividendos_barras.iloc[-6])
+            base_5y = max(float(dividendos_barras.iloc[-6]), base_5y * 0.90)
+            dgr_5y = ((dividendos_barras.iloc[-1] / base_5y) ** (1/5) - 1) * 100
+
         if len(dividendos_barras) >= (años_analisis + 1) and dividendos_barras.iloc[-(años_analisis + 1)] > 0:
             dgr_periodo = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-(años_analisis + 1)]) ** (1/años_analisis) - 1) * 100
 
@@ -716,6 +735,9 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
     except Exception:
         return None
 
+# ==========================================
+# INTERFAZ DIRECTA DE LA PÁGINA (RADAR)
+# ==========================================
 st.title("📡 Radar Watchlist DGI — Geraldine Weiss + Bogle")
 
 st.session_state.setdefault("años_activo", 12)
