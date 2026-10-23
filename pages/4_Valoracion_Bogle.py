@@ -1072,8 +1072,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 </div>
 """
 
-        # Evaluación con colores dinámicos según cumplimiento de criterios
-        # Pilar 1
         c_deuda = "#21c354" if deuda_ebitda <= lim_deuda_optima else ("#faca2b" if deuda_ebitda <= lim_deuda_aceptable else "#ff4b4b")
         c_cob = "#21c354" if (cobertura_intereses is None and deuda_neta == 0) or ((cobertura_intereses or 0) >= (3.2 if es_reit_puro else 6.0)) else ("#faca2b" if (cobertura_intereses or 0) >= (1.8 if es_reit_puro else 2.8) else "#ff4b4b")
         c_cr = "#21c354" if current_ratio >= 1.3 else ("#faca2b" if current_ratio >= 1.0 else "#ff4b4b")
@@ -1082,7 +1080,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         txt_p1_izq = f"Deuda Neta/EBITDA: <strong style='color:{c_deuda};'>{f_num(deuda_ebitda, 2, 'x') if deuda_ebitda < 900 else 'N/D'}</strong> <em>(Lím: {f_num(lim_deuda_optima, 1)}x)</em>" if not es_financiera else f"ROE Financiero: <strong style='color:{c_roe};'>{f_num(roe, 1, '%')}</strong>"
         txt_p1_der = f"Cob. Intereses: <strong style='color:{c_cob};'>{f_num(cobertura_intereses, 1, 'x') if cobertura_intereses else ('Sin Deuda' if deuda_neta == 0 else 'N/D')}</strong> · Liquidez: <strong style='color:{c_cr};'>{f_num(current_ratio, 2, 'x') if current_ratio > 0 else 'N/D'}</strong>"
 
-        # Pilar 2
         c_pfcf_col = "#21c354" if (0 < payout_fcf <= payout_limite_fcf) else ("#faca2b" if (0 < payout_fcf <= payout_amarillo_fcf) else "#ff4b4b")
         c_pbpa = "#21c354" if (0 < payout_ratio <= (55.0 if not es_utility_pura else 72.0)) else ("#faca2b" if (0 < payout_ratio <= (80.0 if not es_utility_pura else 88.0)) else "#ff4b4b")
         c_conv = "#21c354" if (cash_conversion_pct or 0) >= 95.0 else ("#faca2b" if (cash_conversion_pct or 0) >= 80.0 else "#ff4b4b")
@@ -1090,7 +1087,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         txt_p2_izq = f"Payout FCF/AFFO: <strong style='color:{c_pfcf_col};'>{f_num(payout_fcf, 1, '%') if 0 < payout_fcf < 500 else 'N/D'}</strong> <em>(Óptimo <{f_num(payout_limite_fcf, 0)}%)</em>"
         txt_p2_der = f"Payout BPA: <strong style='color:{c_pbpa};'>{f_num(payout_ratio, 1, '%') if payout_ratio > 0 else 'N/D'}</strong> · Conv. Caja: <strong style='color:{c_conv};'>{f_num(cash_conversion_pct, 0, '%') if cash_conversion_pct else 'N/D'}</strong>"
 
-        # Pilar 3
         c_moat = "#21c354" if (metrica_rentabilidad or 0) >= (30.0 if es_reit_puro else 14.5) else ("#faca2b" if (metrica_rentabilidad or 0) >= (18.0 if es_reit_puro else 8.0) else "#ff4b4b")
         c_mop = "#21c354" if operating_margins >= 18.0 else ("#faca2b" if operating_margins >= 10.0 else "#ff4b4b")
         c_fcfm = "#21c354" if (fcf_margin_pct or 0) >= 14.0 else ("#faca2b" if (fcf_margin_pct or 0) >= 7.0 else "#ff4b4b")
@@ -1099,7 +1095,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         txt_p3_izq = f"ROIC/ROE: <strong style='color:{c_moat};'>{f_num(metrica_rentabilidad, 1, '%') if metrica_rentabilidad else 'N/D'}</strong> · Margen EBIT: <strong style='color:{c_mop};'>{f_num(operating_margins, 1, '%')}</strong>"
         txt_p3_der = f"Margen FCF/Vtas: <strong style='color:{c_fcfm};'>{f_num(fcf_margin_pct, 1, '%') if fcf_margin_pct is not None else 'N/D'}</strong> · Ventas 3A: <strong style='color:{c_v3a};'>{f_num(revenue_cagr_3y, 1, '%', True) if revenue_cagr_3y is not None else 'N/D'}</strong>"
 
-        # Pilar 4
         c_racha = "#21c354" if racha_sin_recortes >= 20 else ("#00d4ff" if racha_sin_recortes >= 10 else ("#faca2b" if racha_sin_recortes >= 5 else "#ff4b4b"))
         c_dg5 = "#21c354" if (dgr_5y or 0) >= 6.0 else ("#faca2b" if (dgr_5y or 0) >= 2.5 else "#ff4b4b")
         c_dg1 = "#21c354" if (dgr_1y or 0) >= 5.0 else ("#faca2b" if (dgr_1y or 0) >= 0.0 else "#ff4b4b")
@@ -1108,7 +1103,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         txt_p4_izq = f"Sin recortes: <strong style='color:{c_racha};'>{racha_sin_recortes} años</strong> <em>(Subidas: {racha_incrementos_puros}A)</em>"
         txt_p4_der = f"DGR 5A: <strong style='color:{c_dg5};'>{f_num(dgr_5y, 1, '%', True) if dgr_5y is not None else 'N/D'}</strong> · DGR 1A: <strong style='color:{c_dg1};'>{f_num(dgr_1y, 1, '%', True) if dgr_1y is not None else 'N/D'}</strong> · R²: <strong style='color:{c_r2};'>{f_num(regularidad_div_r2, 0, '%')}</strong>"
 
-        # Pilar 5
         c_rec = "#21c354" if recompras_anualizadas >= 0.5 else ("#faca2b" if recompras_anualizadas >= -0.5 else "#ff4b4b")
         c_bpa = "#21c354" if (crecimiento_bpa_3y or 0) >= 6.5 else ("#faca2b" if (crecimiento_bpa_3y or 0) >= 2.0 else "#ff4b4b")
         c_cajash = "#21c354" if (crecimiento_fcf_sh_3y or 0) >= 6.0 else ("#faca2b" if (crecimiento_fcf_sh_3y or 0) >= 1.5 else "#ff4b4b")
@@ -1129,7 +1123,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         acel_txt = "🔥 Acelerando" if ratio_aceleracion_div >= 1.05 else ("✅ Ritmo Estable" if ratio_aceleracion_div >= 0.70 else ("⚠️ Desacelerando" if ratio_aceleracion_div >= 0.48 else "🚨 En Fatiga"))
         acel_col = "#21c354" if ratio_aceleracion_div >= 0.75 else ("#faca2b" if ratio_aceleracion_div >= 0.48 else "#ff4b4b")
 
-        # Colores condicionales en el diagnóstico
         chow_ok = (chowder_number is not None and chowder_number >= chowder_target)
         col_chow = "#21c354" if chow_ok else ("#faca2b" if (chowder_number or 0) >= (chowder_target - 3.0) else "#ff4b4b")
         chow_val_txt = f"{f_num(chowder_number, 1)}% bruto" if chowder_number is not None else "N/D"
@@ -1322,7 +1315,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     st.markdown(f"""
 <div class="explicacion-graf notranslate" translate="no" style="margin-top: 2px;">
 🎯 <strong>Plan de Francotirador en 3 Tramos para tus {f_num(capital_simulado, 0)}{sym} (Estrategia Anti-FOMO):</strong><br>
-• <strong>Tramo 1 (35% ➔ {f_num(capital_simulado * 0.35, 0)}{sym}):</strong> Entrada en <strong>{f_num(p_tramo1, 2)}{sym}</strong> (Yield: <strong>{f_num(y_t1, 2, '%')} bruto</strong> · <em>{f_num(y_t1 * net_mult, 2, '%')} neto</em> — {"Ejecutable HOY" if precio_actual <= precio_objetivo_calidad else "Orden Limitada"}).<br>
+• <strong>Tramo 1 (35% ➔ {f_num(capital_simulado * 0.35, 0)}{sym}):</strong> Entrada en <strong>{f_num(p_tramo1, 2)}{sym}</strong> (Yield: <strong>{f_num(y_t1, 2, '%')} bruto</strong> · <em>{f_num(y_t1 * net_mult, 2, '%')} neto</em> — {'Ejecutable HOY' if precio_actual <= precio_objetivo_calidad else 'Orden Limitada'}).<br>
 • <strong>Tramo 2 (35% ➔ {f_num(capital_simulado * 0.35, 0)}{sym}):</strong> Refuerzo en Zona Acumulación Weiss (P90) a <strong>{f_num(p_tramo2, 2)}{sym}</strong> (Yield: <strong>{f_num(y_t2, 2, '%')} bruto</strong> · <em>{f_num(y_t2 * net_mult, 2, '%')} neto</em>).<br>
 • <strong>Tramo 3 (30% ➔ {f_num(capital_simulado * 0.30, 0)}{sym}):</strong> Caza en Suelo Estricto P95 / Capitulación a <strong>{f_num(p_tramo3, 2)}{sym}</strong> (Yield: <strong>{f_num(y_t3, 2, '%')} bruto</strong> · <em>{f_num(y_t3 * net_mult, 2, '%')} neto</em>).
 </div>
@@ -1420,7 +1413,6 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
                     signo = "+" if inc_pct > 0 else ""
                     txt_pct = f"{signo}{f_num(inc_pct, 1)}%"
 
-                    # Color dinámico: verde si sube, rojo si es negativo, amarillo si es 0
                     if inc_pct > 0.05:
                         col_pct = "#21c354"
                     elif inc_pct < -0.05:
@@ -1434,6 +1426,8 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
                     x_labels.append(f"{y_str}<br><span style='color:#aaa;'>Base</span>")
                     custom_hover_info.append([y_str, "Base", "#aaa"])
 
+            hover_template_clean = "<b>Año:</b> %{customdata[0]}<br><b>Dividendo:</b> %{y:.2f}" + sym + "<br><b>Crecimiento:</b> %{customdata[1]}<extra></extra>"
+
             fig_div = go.Figure()
             fig_div.add_trace(go.Bar(
                 x=x_labels,
@@ -1443,7 +1437,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
                 text=[f_num(v, 2) for v in divs_hist_plot.values],
                 textposition='outside',
                 customdata=custom_hover_info,
-                hovertemplate=f"<b>Año:</b> %{{customdata[0]}}<br><b>Dividendo:</b> %{{y:.2f}}{sym}<br><b>Crecimiento:</b> <b style='color:%{{customdata[2]}}'>%{{customdata[1]}}</b><extra></extra>"
+                hovertemplate=hover_template_clean
             ))
             fig_div.update_layout(
                 title=dict(text=f"Escalera de Dividendos ({años_analisis} Años · R²={f_num(regularidad_div_r2, 0)}%)", font=dict(size=14)),
@@ -1565,7 +1559,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
             txt_s200 = f"a un <strong>{f_num(((precio_actual - ult_sma200) / ult_sma200) * 100, 1, signo_pos=True)}%</strong> de su SMA 200 ({f_num(ult_sma200, 2)}{sym})" if ult_sma200 else ""
             txt_s1000 = f"y a un <strong>{f_num(((precio_actual - ult_sma1000) / ult_sma1000) * 100, 1, signo_pos=True)}%</strong> de su SMA 1000 ({f_num(ult_sma1000, 2)}{sym})" if ult_sma1000 else ""
-            
+
             c_rsi = "#21c354" if ult_rsi <= 35 else ("#ff4b4b" if ult_rsi >= 70 else "#faca2b")
             c_macd = "#21c354" if ult_macd > ult_signal else ("#faca2b" if ult_hist > penult_hist else "#ff4b4b")
             c_vol = "#21c354" if ratio_vol >= 1.25 else "#bbb"
@@ -1630,4 +1624,3 @@ if st.session_state.analizar_activo:
             render_valoracion_bogle(ticker_input, años_analisis, impuesto, aplicar_merma, capital_simulado)
         except Exception as e:
             st.error(f"Se ha producido un error al procesar los datos: {e}")
-```
