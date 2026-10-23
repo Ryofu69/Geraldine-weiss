@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -1421,7 +1420,7 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
                     signo = "+" if inc_pct > 0 else ""
                     txt_pct = f"{signo}{f_num(inc_pct, 1)}%"
 
-                    # Color dinámico solicitado: verde si sube, rojo si es negativo, amarillo si es 0
+                    # Color dinámico: verde si sube, rojo si es negativo, amarillo si es 0
                     if inc_pct > 0.05:
                         col_pct = "#21c354"
                     elif inc_pct < -0.05:
