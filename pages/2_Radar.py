@@ -17,6 +17,14 @@ MERMA_ORIGEN_PAIS = {
     'Switzerland': 20.0, 'Denmark': 12.0, 'Germany': 11.375, 'France': 10.0, 'Ireland': 10.0
 }
 
+ARISTOCRATAS_Y_KINGS = {
+    'JNJ', 'PG', 'KO', 'PEP', 'MMM', 'LOW', 'CL', 'WMT', 'EMR', 'GPC', 'SYY', 'APD',
+    'BDX', 'HRL', 'ITW', 'SWK', 'FRT', 'O', 'ABBV', 'ABT', 'MCD', 'ADP', 'TGT',
+    'MKC', 'GD', 'CAT', 'CVX', 'XOM', 'IBM', 'ED', 'AWR', 'CINF', 'DOV', 'PH',
+    'PPG', 'LEG', 'SJW', 'ADM', 'CB', 'AFL', 'ROP', 'SHW', 'SPGI', 'ECL', 'CTAS',
+    'WPC', 'NNN', 'ESS', 'MAA', 'KMB', 'GIS'
+}
+
 # ==========================================
 # FORMATEO A LA ESPAÑOLA (PUNTOS Y COMAS)
 # ==========================================
@@ -36,18 +44,18 @@ def interpolar_puntos(valor, umbral_max, umbral_med, pts_max, pts_med, inverso=F
     if valor is None or pd.isna(valor):
         return 0.0
     if not inverso:
-        if valor >= umbral_max: return pts_max
+        if valor >= umbral_max: return float(pts_max)
         if valor < umbral_med: return 0.0
-        if umbral_max == umbral_med: return pts_max
+        if umbral_max == umbral_med: return float(pts_max)
         ratio = (valor - umbral_med) / (umbral_max - umbral_med)
-        return round(pts_med + ratio * (pts_max - pts_med), 2)
+        return round(float(pts_med + ratio * (pts_max - pts_med)), 2)
     else:
         if valor < 0: return 0.0
-        if valor <= umbral_max: return pts_max
+        if valor <= umbral_max: return float(pts_max)
         if valor > umbral_med: return 0.0
-        if umbral_med == umbral_max: return pts_max
+        if umbral_med == umbral_max: return float(pts_max)
         ratio = (umbral_med - valor) / (umbral_med - umbral_max)
-        return round(pts_med + ratio * (pts_max - pts_med), 2)
+        return round(float(pts_med + ratio * (pts_max - pts_med)), 2)
 
 def ultimo_valor_tabla(df, claves):
     if df is not None and not df.empty:
@@ -94,14 +102,10 @@ def guardar_watchlist(texto):
         return False
 
 # ==========================================
-# DESCARGA CON RESPALDO CONTABLE COMPLETO
+# DESCARGA CON RESPALDO CONTABLE TOTAL
 # ==========================================
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def descargar_datos_radar_ticker(t_clean):
-    """
-    Descarga robusta con respaldo contable. Descarga precios, dividendos y los 3 estados contables
-    (income_stmt, balance_sheet y cashflow) para no depender exclusivamente de 'ticker.info'.
-    """
     ticker = yf.Ticker(t_clean)
     info = {}
     try:
@@ -219,12 +223,13 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         es_telecom = 'telecom' in industry_en.lower() or 'communication' in sector_en.lower()
         es_financiera = 'financial' in sector_en.lower() or 'bank' in industry_en.lower() or 'insurance' in industry_en.lower()
         es_defensivo = 'consumer defensive' in sector_en.lower() or 'consumer staples' in sector_en.lower() or 'healthcare' in sector_en.lower()
+        es_aristocrata_reconocida = t_clean in ARISTOCRATAS_Y_KINGS
 
         merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
         net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
         # ==========================================
-        # MOTOR DE DIVIDENDOS BLINDADO (CORRECCIÓN STAG Y MENSUALES/TRIMESTRALES)
+        # MOTOR DE DIVIDENDOS BLINDADO
         # ==========================================
         divs_por_año = dividendos.groupby(dividendos.index.year).sum()
 
@@ -249,11 +254,11 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         if es_peniques_uk and forward_dividend > (precio_actual * 0.25):
             forward_dividend /= 100.0
 
-        # Corrección de frecuencia: si una empresa mensual pasa a trimestral (o viceversa)
         ult_cupon = float(dividendos.iloc[-1])
         candidato_fwd = ult_cupon * pagos_por_año
+
+        # Corrección de frecuencia para STAG u otras que alternen mensual/trimestral
         if div_ttm > 0 and candidato_fwd > (div_ttm * 1.5):
-            # Comprobación de sanity check: si 4 pagos coinciden mucho mejor con div_ttm que 12 pagos
             if abs(ult_cupon * 4 - div_ttm) < abs(candidato_fwd - div_ttm):
                 pagos_por_año = 4
                 candidato_fwd = ult_cupon * 4
@@ -276,10 +281,12 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         yields_validos = yields_validos[yields_validos > 0]
 
         yield_infravalorado = float(yields_validos.quantile(0.95))
+        yield_acumulacion = float(yields_validos.quantile(0.90))
         yield_sobrevalorado = float(yields_validos.quantile(0.05))
         yield_medio = float(yields_validos.mean())
 
         precio_compra = (forward_dividend / yield_infravalorado) * 100 if yield_infravalorado > 0 else 0.0
+        precio_acumulacion = (forward_dividend / yield_acumulacion) * 100 if yield_acumulacion > 0 else 0.0
         precio_justo = (forward_dividend / yield_medio) * 100 if yield_medio > 0 else 0.0
         precio_venta = (forward_dividend / yield_sobrevalorado) * 100 if yield_sobrevalorado > 0 else 0.0
 
@@ -288,7 +295,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         div_neto_absoluto = forward_dividend * net_mult
 
         # ==========================================
-        # FUNDAMENTALES CON RESPALDO CONTABLE TOTAL (INCOME, BALANCE Y CASHFLOW)
+        # FUNDAMENTALES CON RESPALDO CONTABLE TOTAL
         # ==========================================
         # 1. Acciones
         shares = get_safe('sharesOutstanding', 0.0)
@@ -332,7 +339,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         if ebitda <= 0 and ebit_val > 0:
             ebitda = ebit_val * 1.15
 
-        # 6. Flujo de Caja (FCF y OCF)
+        # 6. Flujo de Caja
         fcf_raw = get_safe('freeCashflow', 0.0) * fx_rate
         if fcf_raw == 0:
             fcf_raw = ultimo_valor_tabla(cf_stmt, ['Free Cash Flow']) * fx_rate
@@ -345,9 +352,10 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             capex_val = abs(ultimo_valor_tabla(cf_stmt, ['Capital Expenditure', 'Capital Expenditures'])) * fx_rate
             fcf_raw = ocf_raw - capex_val
 
-        flujo_caja_referencia = ocf_raw if (es_reit_puro and ocf_raw > fcf_raw) else fcf_raw
+        # Para REITs el flujo de referencia siempre es OCF/FFO
+        flujo_caja_referencia = ocf_raw if es_reit_puro else fcf_raw
 
-        # 7. Fondos Propios (Equity) y ROE
+        # 7. Fondos Propios y ROE
         total_equity_raw = get_safe('totalStockholderEquity', 0.0) * fx_rate
         if total_equity_raw <= 0:
             total_equity_raw = ultimo_valor_tabla(bs_stmt, ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity']) * fx_rate
@@ -357,7 +365,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         if roe == 0 and total_equity_raw > 0 and net_inc_val > 0:
             roe = (net_inc_val / total_equity_raw) * 100
 
-        # 8. Márgenes Operativos
+        # 8. Márgenes
         operating_margins = get_safe('operatingMargins', 0.0) * 100
         rev_tabla = ultimo_valor_tabla(inc_stmt, ['Total Revenue', 'Operating Revenue']) * fx_rate
         if operating_margins == 0 and rev_tabla > 0 and ebit_val > 0:
@@ -375,7 +383,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
         payout_lim_bpa = 85.0 if es_regulada_o_reit else 60.0
         payout_ama_bpa = 92.0 if es_regulada_o_reit else 75.0
-        payout_limite_fcf = 75.0 if es_regulada_o_reit else 55.0
+        payout_limite_fcf = 78.0 if es_reit_puro else (72.0 if es_utility_pura else 58.0)
         payout_amarillo_fcf = 90.0 if es_regulada_o_reit else 80.0
 
         # 9. Deuda Neta / EBITDA
@@ -416,7 +424,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
         metrica_rentabilidad = roe if es_financiera else (roic if roic is not None else (roe if roe > 0 else (operating_margins if es_reit_puro else None)))
 
-        # 12. Crecimiento Ventas y BPA 3A
+        # 12. Crecimientos 3A
         crecimiento_bpa_3y = None
         if not inc_stmt.empty:
             for key in ['Diluted EPS', 'Basic EPS']:
@@ -468,6 +476,9 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             dividendos_barras.loc[año_actual] = forward_dividend
 
         años_pagando = año_actual - dividendos_barras.index[0] if not dividendos_barras.empty else 0
+        if es_aristocrata_reconocida:
+            años_pagando = max(años_pagando, 25)
+
         dgr_5y, dgr_periodo, dgr_1y = None, None, None
         if len(dividendos_barras) >= 2 and dividendos_barras.iloc[-2] > 0:
             dgr_1y = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-2]) - 1) * 100
@@ -476,14 +487,16 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         if len(dividendos_barras) >= (años_analisis + 1) and dividendos_barras.iloc[-(años_analisis + 1)] > 0:
             dgr_periodo = ((dividendos_barras.iloc[-1] / dividendos_barras.iloc[-(años_analisis + 1)]) ** (1/años_analisis) - 1) * 100
 
-        fatiga_dividendo = bool(dgr_1y is not None and dgr_5y is not None and dgr_5y > 2.0 and (dgr_1y / dgr_5y) < 0.5)
+        fatiga_dividendo = bool(dgr_1y is not None and dgr_5y is not None and dgr_5y > 2.0 and (dgr_1y / dgr_5y) < 0.45)
 
         racha_sin_recortes = 0
         if len(dividendos_barras) > 1:
             for i in range(1, len(dividendos_barras)):
-                if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.99:
+                if dividendos_barras.iloc[-(i)] >= dividendos_barras.iloc[-(i+1)] * 0.98:
                     racha_sin_recortes += 1
                 else: break
+        if es_aristocrata_reconocida and (dgr_1y is None or dgr_1y >= 0.0):
+            racha_sin_recortes = max(racha_sin_recortes, 25)
 
         variacion_acciones, recompras_anualizadas = None, 0.0
         try:
@@ -504,63 +517,82 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         recompras_anualizadas = max(-5.0, min(8.0, recompras_anualizadas))
 
         # ==========================================
-        # 1. SCORE DE CALIDAD DGI
+        # 1. SCORE DE CALIDAD FORENSE (0 a 10 PTS)
         # ==========================================
+        # PILAR 1: BALANCE Y SOLVENCIA (Máx 2.0 pts)
         if es_reit_puro:
-            lim_deuda_optima, lim_deuda_aceptable = 5.2, 6.8
+            lim_deuda_optima, lim_deuda_aceptable = 5.5, 7.0
         elif es_utility_pura or es_quasi_reit_o_recompras:
-            lim_deuda_optima, lim_deuda_aceptable = 3.5, 5.0
+            lim_deuda_optima, lim_deuda_aceptable = 3.8, 5.2
         elif es_defensivo or es_telecom:
-            lim_deuda_optima, lim_deuda_aceptable = 2.5, 3.8
+            lim_deuda_optima, lim_deuda_aceptable = 2.8, 4.0
         else:
-            lim_deuda_optima, lim_deuda_aceptable = 1.8, 3.2
+            lim_deuda_optima, lim_deuda_aceptable = 2.0, 3.4
 
         if es_financiera:
-            pts_deuda = interpolar_puntos(roe, 15.0, 8.0, 2.0, 0.4, inverso=False)
-            pts_cob = 0.5 if (current_ratio >= 1.0 or roe >= 11.0) else 0.0
+            pts_deuda = interpolar_puntos(roe, 14.0, 7.5, 1.5, 0.3, inverso=False)
+            pts_cob = 0.5 if (current_ratio >= 1.0 or roe >= 10.0) else 0.1
         else:
             deuda_eval = deuda_ebitda if deuda_ebitda >= 0 else 2.5
-            pts_deuda = interpolar_puntos(deuda_eval, lim_deuda_optima, lim_deuda_aceptable, 2.0, 0.3, inverso=True)
-            umbral_cob_max = 3.2 if es_reit_puro else 7.0
-            umbral_cob_min = 1.8 if es_reit_puro else 3.0
-            pts_cob = interpolar_puntos(cobertura_intereses, umbral_cob_max, umbral_cob_min, 0.5, 0.1, inverso=False) if cobertura_intereses is not None else (0.5 if deuda_neta == 0 else 0.1)
+            pts_deuda = interpolar_puntos(deuda_eval, lim_deuda_optima, lim_deuda_aceptable, 1.5, 0.25, inverso=True)
+            u_cob_max = 3.0 if es_reit_puro else 6.0
+            u_cob_min = 1.7 if es_reit_puro else 2.5
+            pts_cob = interpolar_puntos(cobertura_intereses, u_cob_max, u_cob_min, 0.5, 0.1, inverso=False) if cobertura_intereses is not None else (0.5 if deuda_neta == 0 else 0.15)
+        pilar1 = min(2.0, pts_deuda + pts_cob)
 
-        if es_financiera and payout_fcf == -1:
-            pts_fcf = interpolar_puntos(payout_bpa, 45.0, 75.0, 2.0, 0.4, inverso=True) if payout_bpa > 0 else 0.0
+        # PILAR 2: COBERTURA Y CALIDAD DE CAJA (Máx 2.5 pts)
+        if es_financiera:
+            pilar2 = interpolar_puntos(payout_bpa, 45.0, 75.0, 2.5, 0.5, inverso=True) if payout_bpa > 0 else 1.2
+        elif es_reit_puro:
+            # En REITs evaluamos sobre FFO/OCF
+            pilar2 = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 2.5, 0.5, inverso=True) if 0 < payout_fcf < 200 else 1.0
         else:
-            pts_fcf = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 2.0, 0.4, inverso=True) if 0 < payout_fcf < 500 else 0.0
+            pts_fcf_sub = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 1.8, 0.3, inverso=True) if 0 < payout_fcf < 200 else 0.2
+            pts_bpa_sub = interpolar_puntos(payout_bpa, 55.0, 82.0, 0.7, 0.1, inverso=True) if payout_bpa > 0 else 0.2
+            pilar2 = min(2.5, pts_fcf_sub + pts_bpa_sub)
 
-        racha_efectiva = racha_sin_recortes + (3 if años_pagando >= 25 else 0)
-        pts_hist = interpolar_puntos(racha_efectiva, 20.0, 6.0, 2.0, 0.5, inverso=False)
+        # PILAR 3: FOSO ECONÓMICO (MOAT) Y MÁRGENES (Máx 2.0 pts)
+        if es_reit_puro:
+            pts_rent_sub = interpolar_puntos(operating_margins, 35.0, 20.0, 1.2, 0.3, inverso=False)
+        else:
+            pts_rent_sub = interpolar_puntos(metrica_rentabilidad, 15.0, 7.5, 1.2, 0.25, inverso=False) if metrica_rentabilidad is not None else 0.5
+        pts_rev_sub = interpolar_puntos(revenue_cagr_3y, 4.0, 0.5, 0.8, 0.15, inverso=False) if revenue_cagr_3y is not None else 0.3
+        pilar3 = min(2.0, pts_rent_sub + pts_rev_sub)
+
+        # PILAR 4: HISTORIAL WEISS Y CONSISTENCIA (Máx 2.0 pts)
+        racha_efectiva = racha_sin_recortes + (5 if años_pagando >= 25 else (2 if años_pagando >= 15 else 0))
+        pts_racha = interpolar_puntos(racha_efectiva, 20.0, 5.0, 1.2, 0.3, inverso=False)
+        pts_dgr_sub = interpolar_puntos(dgr_5y, 7.0, 2.5, 0.8, 0.2, inverso=False) if dgr_5y is not None else 0.2
         if fatiga_dividendo:
-            pts_hist = max(0.0, round(pts_hist - 0.5, 2))
+            pts_dgr_sub = max(0.0, pts_dgr_sub - 0.3)
+        pilar4 = min(2.0, pts_racha + pts_dgr_sub)
 
+        # PILAR 5: ASIGNACIÓN DE CAPITAL Y CRECIMIENTO (Máx 1.5 pts)
         if es_reit_puro:
-            pts_roic_sub = interpolar_puntos(operating_margins, 35.0, 20.0, 0.9, 0.3, inverso=False)
+            pilar5 = interpolar_puntos(dgr_5y if dgr_5y is not None else 2.0, 4.5, 1.0, 1.5, 0.3, inverso=False)
         else:
-            pts_roic_sub = interpolar_puntos(metrica_rentabilidad, 16.0, 7.0, 0.9, 0.2, inverso=False) if metrica_rentabilidad is not None else 0.0
-        pts_rev_sub = interpolar_puntos(revenue_cagr_3y, 5.0, 1.0, 0.6, 0.1, inverso=False) if revenue_cagr_3y is not None else 0.0
-        pts_foso = round(pts_roic_sub + pts_rev_sub, 2)
+            pts_rec_sub = interpolar_puntos(recompras_anualizadas, 2.0, 0.1, 0.6, 0.15, inverso=False)
+            pts_crec_sub = interpolar_puntos(crecimiento_bpa_3y, 6.5, 1.5, 0.9, 0.2, inverso=False) if crecimiento_bpa_3y is not None else 0.3
+            pilar5 = min(1.5, pts_rec_sub + pts_crec_sub)
 
-        pts_dgr = interpolar_puntos(dgr_5y, 7.5, 2.5, 1.0, 0.25, inverso=False) if dgr_5y is not None else 0.0
+        # Penalizaciones estrictas
+        penalizacion = 0.0
+        if dgr_1y is not None and dgr_1y < -3.0:
+            penalizacion += 1.5  # Recorte directo del cupón
+        if not es_reit_puro and not es_financiera and payout_fcf > 105.0:
+            penalizacion += 0.8  # Dividendo no cubierto con caja libre
 
-        if es_reit_puro:
-            crec_reit_ref = dgr_5y if dgr_5y is not None else 0.0
-            pts_cap = interpolar_puntos(crec_reit_ref, 4.5, 1.0, 1.0, 0.3, inverso=False)
-        else:
-            pts_recompra_sub = interpolar_puntos(recompras_anualizadas, 2.5, 0.4, 0.6, 0.2, inverso=False)
-            pts_bpa_sub = interpolar_puntos(crecimiento_bpa_3y, 7.0, 2.0, 0.6, 0.2, inverso=False) if crecimiento_bpa_3y is not None else 0.0
-            pts_cap = min(1.0, round(pts_recompra_sub + pts_bpa_sub, 2))
-
-        score_calidad = min(10.0, round(pts_deuda + pts_cob + pts_fcf + pts_hist + pts_foso + pts_dgr + pts_cap, 1))
+        score_calidad = max(1.0, min(10.0, round((pilar1 + pilar2 + pilar3 + pilar4 + pilar5) - penalizacion, 1)))
 
         # ==========================================
-        # 2. SCORE DE VALORACIÓN DGI
+        # 2. SCORE DE VALORACIÓN AJUSTADO POR CRECIMIENTO
         # ==========================================
         if yield_actual >= yield_infravalorado:
             pts_yield = 4.0
+        elif yield_actual >= yield_acumulacion:
+            pts_yield = interpolar_puntos(yield_actual, yield_infravalorado, yield_acumulacion, 4.0, 3.2, inverso=False)
         elif yield_actual >= yield_medio:
-            pts_yield = interpolar_puntos(yield_actual, yield_infravalorado, yield_medio, 4.0, 1.8, inverso=False)
+            pts_yield = interpolar_puntos(yield_actual, yield_acumulacion, yield_medio, 3.2, 1.8, inverso=False)
         elif yield_actual >= yield_sobrevalorado:
             pts_yield = interpolar_puntos(yield_actual, yield_medio, yield_sobrevalorado, 1.8, 0.0, inverso=False)
         else:
@@ -571,7 +603,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         if revenue_cagr_3y is not None and revenue_cagr_3y < 0.5:
             crec_negocio_val = min(crec_negocio_val, 1.5)
 
-        mult_optimo = float(np.clip(8.5 + max(0.0, crec_negocio_val) * 0.9, 8.5, 17.0))
+        mult_optimo = float(np.clip(8.5 + max(0.0, crec_negocio_val) * 0.9, 8.5, 17.5))
         mult_aceptable = mult_optimo + 7.0
 
         if es_financiera and p_fcf <= 0:
@@ -585,7 +617,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         chowder_target = 8.0 if ((es_utility_pura or es_telecom or es_reit_puro) and yield_actual > 4.0) else (12.0 if yield_actual >= 3.0 else 15.0)
         chowder_number = (yield_actual + dgr_5y) if dgr_5y is not None else -999.0
         if dgr_5y is not None:
-            if dgr_5y < 2.0 or (dgr_1y is not None and dgr_1y <= 0):
+            if dgr_5y < 1.5 or (dgr_1y is not None and dgr_1y < 0):
                 pts_chowder = 0.0
             else:
                 chowder_efectivo = min(yield_actual, 6.5) + dgr_5y
@@ -597,7 +629,45 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         score_total = round(score_calidad + score_val, 1)
 
         # ==========================================
-        # 3. FÓRMULA BOGLE-WEISS 5A Y RENTA ANUAL
+        # 3. VEREDICTO COHERENTE (FILTRO WEISS + DYT)
+        # ==========================================
+        deterioro_grave = (
+            (score_calidad < 5.2) or
+            (not es_reit_puro and not es_financiera and payout_fcf > 105.0) or
+            (dgr_1y is not None and dgr_1y < -3.5)
+        )
+
+        # Si es Dividend King o Champion con racha intachable y cobertura > 4x,
+        # una variación puntual de circulante NO es trampa de valor
+        if es_aristocrata_reconocida and (dgr_1y is None or dgr_1y >= 0.0) and (cobertura_intereses is None or cobertura_intereses >= 3.5):
+            deterioro_grave = False
+
+        es_trampa_valor = (precio_actual <= precio_acumulacion) and deterioro_grave
+
+        if es_trampa_valor:
+            estado = "⚠️ TRAMPA VALOR"
+            orden_estado = 5
+        elif score_calidad >= 7.5 and precio_actual <= precio_compra:
+            estado = "💎 COMPRA FUERTE"
+            orden_estado = 1
+        elif score_calidad >= 7.5 and precio_actual <= precio_acumulacion:
+            estado = "🟢 ACUMULAR (P90)"
+            orden_estado = 2
+        elif score_calidad >= 6.3 and precio_actual <= precio_compra:
+            estado = "🎯 COMPRA (P95)"
+            orden_estado = 3
+        elif score_calidad < 6.0 and precio_actual <= precio_compra:
+            estado = "⚪ RIESGO / BAJA CALIDAD"
+            orden_estado = 6
+        elif precio_actual >= precio_venta:
+            estado = "🔴 SOBREVALORADA"
+            orden_estado = 7
+        else:
+            estado = "🟡 MANTENER"
+            orden_estado = 4
+
+        # ==========================================
+        # 4. BOGLE-WEISS 5A Y SIMULACIÓN DE RENTA
         # ==========================================
         horizonte_bogle = 5
         candidatos_crec = [x for x in [dgr_5y, dgr_periodo, crecimiento_bpa_3y] if x is not None]
@@ -620,25 +690,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
         dist_real_suelo = ((precio_actual - precio_compra) / precio_compra) * 100 if precio_compra > 0 else 999.0
         pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
+        pct_acum_vs_media = ((precio_acumulacion - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
         pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
-
-        payout_critico = (payout_fcf > 95.0 and (score_calidad < 6.0 or payout_bpa > 88.0))
-        posible_trampa = (precio_actual <= precio_compra) and (
-            score_calidad < 5.5 or payout_critico or (dgr_1y is not None and dgr_1y < -5.0)
-        )
-
-        if posible_trampa:
-            estado = "⚠️ TRAMPA VALOR"
-            orden_estado = 2
-        elif precio_actual <= precio_compra:
-            estado = "🎯 COMPRA"
-            orden_estado = 1
-        elif precio_actual >= precio_venta:
-            estado = "🔴 SOBREVALORADA"
-            orden_estado = 4
-        else:
-            estado = "🟡 MANTENER"
-            orden_estado = 3
 
         col_renta_nombre = f"Renta {int(capital_simulado)} (/Año)"
 
@@ -652,17 +705,18 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             "Bogle-Weiss 5A": f"{f_num(retorno_bogle_neto, 1, '%', signo_pos=True)}/año (➔ {f_num(valor_total_5a_weiss, 0, sym_m)})",
             col_renta_nombre: f"{f_num(renta_neta_orden_anual, 2, sym_m)}/año ({f_num(acc_compradas, 1)} tít.)",
             "Cotización Actual": f"{f_num(precio_actual, 2, sym_m)} ({f_num(dist_real_suelo, 1, '%', signo_pos=True)})",
-            "Suelo (Infra)": f"{f_num(precio_compra, 2, sym_m)} ({f_num(pct_infra_vs_media, 1, '%', signo_pos=True)})" if precio_compra > 0 else "N/D",
+            "Suelo P95": f"{f_num(precio_compra, 2, sym_m)} ({f_num(pct_infra_vs_media, 1, '%', signo_pos=True)})" if precio_compra > 0 else "N/D",
+            "Zona Acum. P90": f"{f_num(precio_acumulacion, 2, sym_m)} ({f_num(pct_acum_vs_media, 1, '%', signo_pos=True)})" if precio_acumulacion > 0 else "N/D",
             "Precio Justo": f_num(precio_justo, 2, sym_m),
-            "Techo (Sobre)": f"{f_num(precio_venta, 2, sym_m)} ({f_num(pct_sobre_vs_media, 1, '%', signo_pos=True)})" if precio_venta > 0 else "N/D",
+            "Techo P05": f"{f_num(precio_venta, 2, sym_m)} ({f_num(pct_sobre_vs_media, 1, '%', signo_pos=True)})" if precio_venta > 0 else "N/D",
             "Div. Neto": f_num(div_neto_absoluto, 2, sym_m),
             "Yield Bruto": f_num(yield_actual, 2, "%"),
             "Yield Neto": f_num(yield_neto, 2, "%"),
             "PER": f_num(per, 1, "x") if per > 0 else "N/D",
-            "P/FCF": f_num(p_fcf, 1, "x") if p_fcf > 0 else "N/D",
-            "Deuda/EBITDA": ("N/A (Banca)" if es_financiera else (f_num(deuda_ebitda, 2, "x") if deuda_ebitda >= 0 and deuda_ebitda < 900 else "N/D")),
-            "Payout FCF": f_num(payout_fcf, 1, "%") if 0 < payout_fcf < 500 else ("Déficit" if payout_fcf >= 500 else "N/D"),
-            "Payout BPA": f_num(payout_bpa, 1, "%") if payout_bpa > 0 else "N/D",
+            "P/FCF": ("N/A (REIT)" if (es_reit_puro and p_fcf > 0) else (f_num(p_fcf, 1, "x") if p_fcf > 0 else "N/D")),
+            "Deuda/EBITDA": ("N/A (Banca)" if es_financiera else (f_num(deuda_ebitda, 2, "x") if 0 <= deuda_ebitda < 900 else "N/D")),
+            "Payout FCF": ("N/A (REIT)" if es_reit_puro else (f_num(payout_fcf, 1, "%") if 0 < payout_fcf < 500 else ("Déficit" if payout_fcf >= 500 else "N/D"))),
+            "Payout BPA": ("N/A (REIT)" if es_reit_puro else (f_num(payout_bpa, 1, "%") if payout_bpa > 0 else "N/D")),
             "ROIC/ROE": f_num(metrica_rentabilidad, 1, "%") if metrica_rentabilidad is not None else "N/D",
             "Ventas 3A": f_num(revenue_cagr_3y, 1, "%", signo_pos=True) if revenue_cagr_3y is not None else "N/D",
             "Acciones": f_num(variacion_acciones, 1, "%", signo_pos=True) if variacion_acciones is not None else "N/D",
@@ -745,19 +799,19 @@ st.session_state.merma_activa = aplicar_merma_masivo
 if st.button("🚀 Escanear Watchlist", use_container_width=True):
     raw_tickers = tickers_masivos.replace("\n", ",").split(",")
     lista_tickers = [t.strip().upper() for t in raw_tickers if t.strip()]
-    
+
     if len(lista_tickers) > 0:
         barra_progreso = st.progress(0)
         texto_estado = st.empty()
         resultados = []
-        
+
         for idx, ticker in enumerate(lista_tickers):
             texto_estado.text(f"Escaneando {ticker} ({idx+1}/{len(lista_tickers)})...")
             datos = analizar_empresa_rapido(ticker, años_masivos, impuesto_masivo, aplicar_merma_masivo, capital_masivo)
             if datos:
                 resultados.append(datos)
             barra_progreso.progress((idx + 1) / len(lista_tickers))
-        
+
         texto_estado.text("¡Escaneo completado!")
         st.session_state["resultados_radar_cache"] = resultados
 
@@ -775,11 +829,11 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
 
     def color_row(row):
         styles = [''] * len(row)
-        est = row['Estado']
+        est = str(row['Estado'])
         for idx, col_name in enumerate(row.index):
             if col_name == 'Calidad':
                 if row['_score_calidad'] >= 8.0: styles[idx] = 'color: #21c354; font-weight: bold;'
-                elif row['_score_calidad'] >= 6.0: styles[idx] = 'color: #faca2b; font-weight: bold;'
+                elif row['_score_calidad'] >= 6.3: styles[idx] = 'color: #faca2b; font-weight: bold;'
                 else: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
             elif col_name == 'Valoración':
                 if row['_score_val'] >= 7.0: styles[idx] = 'color: #21c354; font-weight: bold;'
@@ -798,13 +852,16 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
                 elif row['_y_act'] >= row['_y_med']: styles[idx] = 'color: #00d4ff; font-weight: bold;'
                 else: styles[idx] = 'color: #ccc;'
             elif col_name == 'Cotización Actual':
-                if "COMPRA" in est: styles[idx] = 'color: #21c354; font-weight: bold;'
+                if "COMPRA FUERTE" in est: styles[idx] = 'color: #7cfc00; font-weight: bold;'
+                elif "ACUMULAR" in est: styles[idx] = 'color: #00d4ff; font-weight: bold;'
+                elif "COMPRA" in est: styles[idx] = 'color: #21c354; font-weight: bold;'
                 elif "TRAMPA" in est: styles[idx] = 'color: #ff9800; font-weight: bold;'
                 elif "SOBREVALORADA" in est: styles[idx] = 'color: #ff4b4b; font-weight: bold;'
                 else: styles[idx] = 'color: #faca2b; font-weight: bold;'
-            elif col_name == 'Suelo (Infra)': styles[idx] = 'color: #21c354;'
+            elif col_name in ['Suelo P95', 'Zona Acum. P90']:
+                styles[idx] = 'color: #21c354;' if col_name == 'Suelo P95' else 'color: #00d4ff;'
             elif col_name == 'Precio Justo': styles[idx] = 'color: #faca2b;'
-            elif col_name == 'Techo (Sobre)': styles[idx] = 'color: #ff4b4b;'
+            elif col_name == 'Techo P05': styles[idx] = 'color: #ff4b4b;'
             elif col_name in ['Yield Bruto', 'Yield Neto', 'Div. Neto']:
                 if row['_y_act'] >= row['_y_inf']: styles[idx] = 'color: #21c354;'
                 elif row['_y_act'] >= row['_y_med']: styles[idx] = 'color: #faca2b;'
@@ -840,8 +897,8 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
             elif col_name == 'ROIC/ROE':
                 r = row['_roic']
                 if r == -999: styles[idx] = 'color: #888;'
-                elif r >= 15.0: styles[idx] = 'color: #21c354;'
-                elif r >= 8.0: styles[idx] = 'color: #faca2b;'
+                elif r >= 14.0: styles[idx] = 'color: #21c354;'
+                elif r >= 7.5: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Ventas 3A':
                 v = row['_rev3']
@@ -863,30 +920,33 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
             elif col_name in ['DGR 5A', f'DGR {años_masivos}A']:
                 val_col = row['_dgr'] if col_name == 'DGR 5A' else row['_dgr_per']
                 if val_col == -999: styles[idx] = 'color: #888;'
-                elif val_col >= 8.0: styles[idx] = 'color: #21c354;'
-                elif val_col >= 4.5: styles[idx] = 'color: #faca2b;'
-                elif val_col >= 2.5: styles[idx] = 'color: #ff9800;'
+                elif val_col >= 7.0: styles[idx] = 'color: #21c354;'
+                elif val_col >= 4.0: styles[idx] = 'color: #faca2b;'
+                elif val_col >= 2.0: styles[idx] = 'color: #ff9800;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Chowder':
                 c_num = row['_chowder']
                 c_tar = row['_chowder_target']
                 if c_num != -999.0:
-                    if c_num >= c_tar and row['_dgr'] >= 2.0:
+                    if c_num >= c_tar and row['_dgr'] >= 1.5:
                         styles[idx] = 'color: #21c354; font-weight: bold;'
                     else:
                         styles[idx] = 'color: #ff4b4b;'
                 else:
                     styles[idx] = 'color: #888;'
             elif col_name == 'Estado':
-                if "COMPRA" in est: styles[idx] = 'background-color: #004d00; color: white;'
+                if "COMPRA FUERTE" in est: styles[idx] = 'background-color: #004d00; color: #7cfc00; font-weight: bold;'
+                elif "ACUMULAR" in est: styles[idx] = 'background-color: #003344; color: #00d4ff; font-weight: bold;'
+                elif "COMPRA" in est: styles[idx] = 'background-color: #004d00; color: white;'
                 elif "TRAMPA" in est: styles[idx] = 'background-color: #663300; color: #ffcc80;'
+                elif "RIESGO" in est: styles[idx] = 'background-color: #333333; color: #cccccc;'
                 elif "SOBREVALORADA" in est: styles[idx] = 'background-color: #4d0000; color: white;'
-                else: styles[idx] = 'background-color: #4d4d00; color: white;'
+                else: styles[idx] = 'background-color: #3d3d00; color: #faca2b;'
         return styles
 
     columnas_visibles = [c for c in df_res.columns if not c.startswith('_')]
     styled_df = df_res.style.apply(color_row, axis=1)
-    st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True, height=620)
+    st.dataframe(styled_df, column_order=columnas_visibles, use_container_width=True, height=640)
 
     df_export = df_res[columnas_visibles]
     csv = df_export.to_csv(index=True, sep=';', decimal=',').encode('utf-8')
