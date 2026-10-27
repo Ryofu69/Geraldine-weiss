@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
+import time
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -66,7 +67,7 @@ def ultimo_valor_tabla(df, claves):
                     return float(s.iloc[-1])
     return 0.0
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=86400, show_spinner=False)
 def obtener_fx_rate(curr_fin, curr_base):
     if not curr_fin or not curr_base or curr_fin == curr_base:
         return 1.0
@@ -80,7 +81,7 @@ def obtener_fx_rate(curr_fin, curr_base):
     return 1.0
 
 # ==========================================
-# GESTIÓN DEL ARCHIVO PERSISTENTE
+# GESTIÓN DEL ARCHIVO PERSISTENTE DE WATCHLIST
 # ==========================================
 def cargar_watchlist():
     if os.path.exists(ARCHIVO_WATCHLIST):
@@ -102,10 +103,15 @@ def guardar_watchlist(texto):
         return False
 
 # ==========================================
-# DESCARGA CON RESPALDO CONTABLE TOTAL
+# MOTOR DE DESCARGA CON CACHÉ EN DISCO PERSISTENTE
+# Evita baneos de Yahoo al guardar balances en disco durante 7 días
 # ==========================================
-@st.cache_data(ttl=1800, show_spinner=False)
-def descargar_datos_radar_ticker(t_clean):
+@st.cache_data(persist="disk", ttl=604800, show_spinner=False)
+def descargar_fundamentales_persistentes_disco(t_clean):
+    """
+    Descarga estados contables e info pesada y los guarda en DISCO duro por 7 días.
+    Nunca vuelve a pedir los balances a Yahoo si ya están en disco.
+    """
     ticker = yf.Ticker(t_clean)
     info = {}
     try:
@@ -142,28 +148,32 @@ def descargar_datos_radar_ticker(t_clean):
     except Exception:
         pass
 
-    fast_price, fast_shares, fast_mcap, fast_curr = None, None, None, None
+    return info, dividendos, historial, inc_stmt, bs_stmt, cf_stmt
+
+@st.cache_data(ttl=60, show_spinner=False)
+def obtener_cotizacion_viva_radar(t_clean):
+    """Cotización ultra-rápida y ligera (renovada cada 60s), inmune a rate limits."""
     try:
-        if ticker.fast_info is not None:
-            fast_price = float(ticker.fast_info.last_price) if ticker.fast_info.last_price is not None else None
-            fast_shares = float(ticker.fast_info.shares) if ticker.fast_info.shares is not None else None
-            fast_mcap = float(ticker.fast_info.market_cap) if ticker.fast_info.market_cap is not None else None
-            fast_curr = ticker.fast_info.currency
+        t = yf.Ticker(t_clean)
+        fast = t.fast_info
+        if fast is not None and fast.last_price is not None:
+            return float(fast.last_price), getattr(fast, 'currency', None), getattr(fast, 'shares', None)
     except Exception:
         pass
-
-    return info, dividendos, historial, inc_stmt, bs_stmt, cf_stmt, fast_price, fast_shares, fast_mcap, fast_curr
+    return None, None, None
 
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar_merma_origen, capital_simulado):
     try:
         t_clean = ticker_symbol.strip().upper()
-        (
-            info, dividendos_raw, historial_raw, inc_stmt, bs_stmt, cf_stmt,
-            fast_price, fast_shares, fast_mcap, fast_curr
-        ) = descargar_datos_radar_ticker(t_clean)
+        
+        # 1. Recuperar balances y dividendos (desde disco duro si ya se consultó)
+        info, dividendos_raw, historial_raw, inc_stmt, bs_stmt, cf_stmt = descargar_fundamentales_persistentes_disco(t_clean)
 
         if dividendos_raw.empty or len(historial_raw) < 200:
             return None
+
+        # 2. Cotización en tiempo real
+        precio_vivo, curr_vivo, shares_vivo = obtener_cotizacion_viva_radar(t_clean)
 
         def get_safe(key, default=0.0):
             val = info.get(key)
@@ -171,7 +181,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             try: return float(val)
             except (ValueError, TypeError): return default
 
-        currency_raw = info.get('currency', fast_curr or 'USD')
+        currency_raw = curr_vivo or info.get('currency', 'USD')
         es_peniques_uk = (currency_raw == 'GBp')
         currency = 'GBP' if es_peniques_uk else currency_raw
         curr_fin = info.get('financialCurrency', currency) or currency
@@ -186,8 +196,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         dividendos.index = dividendos.index.tz_localize(None).normalize()
         dividendos = dividendos.groupby(dividendos.index).sum()
 
-        if fast_price is not None and fast_price > 0 and not historial.empty:
-            historial.iloc[-1, historial.columns.get_loc('Close')] = fast_price
+        if precio_vivo is not None and precio_vivo > 0 and not historial.empty:
+            historial.iloc[-1, historial.columns.get_loc('Close')] = precio_vivo
 
         if es_peniques_uk:
             for col in ['Open', 'High', 'Low', 'Close']:
@@ -229,7 +239,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
         # ==========================================
-        # MOTOR DE DIVIDENDOS BLINDADO
+        # MOTOR DE DIVIDENDOS BLINDADO (CALIBRACIÓN ROBUSTA)
         # ==========================================
         divs_por_año = dividendos.groupby(dividendos.index.year).sum()
 
@@ -299,9 +309,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         # ==========================================
         # 1. Acciones
         shares = get_safe('sharesOutstanding', 0.0)
-        if shares <= 0 and fast_shares: shares = fast_shares
+        if shares <= 0 and shares_vivo: shares = shares_vivo
         if shares <= 0: shares = ultimo_valor_tabla(inc_stmt, ['Diluted Average Shares', 'Basic Average Shares'])
-        if shares <= 0 and fast_mcap and precio_actual > 0: shares = fast_mcap / precio_actual
 
         # 2. BPA y PER
         bpa_trailing = get_safe('trailingEps', 0.0)
@@ -519,7 +528,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         # ==========================================
         # 1. SCORE DE CALIDAD FORENSE (0 a 10 PTS)
         # ==========================================
-        # PILAR 1: BALANCE Y SOLVENCIA (Máx 2.0 pts)
         if es_reit_puro:
             lim_deuda_optima, lim_deuda_aceptable = 5.5, 7.0
         elif es_utility_pura or es_quasi_reit_o_recompras:
@@ -544,7 +552,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         if es_financiera:
             pilar2 = interpolar_puntos(payout_bpa, 45.0, 75.0, 2.5, 0.5, inverso=True) if payout_bpa > 0 else 1.2
         elif es_reit_puro:
-            # En REITs evaluamos sobre FFO/OCF
             pilar2 = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 2.5, 0.5, inverso=True) if 0 < payout_fcf < 200 else 1.0
         else:
             pts_fcf_sub = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 1.8, 0.3, inverso=True) if 0 < payout_fcf < 200 else 0.2
@@ -578,9 +585,9 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         # Penalizaciones estrictas
         penalizacion = 0.0
         if dgr_1y is not None and dgr_1y < -3.0:
-            penalizacion += 1.5  # Recorte directo del cupón
+            penalizacion += 1.5
         if not es_reit_puro and not es_financiera and payout_fcf > 105.0:
-            penalizacion += 0.8  # Dividendo no cubierto con caja libre
+            penalizacion += 0.8
 
         score_calidad = max(1.0, min(10.0, round((pilar1 + pilar2 + pilar3 + pilar4 + pilar5) - penalizacion, 1)))
 
@@ -637,8 +644,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             (dgr_1y is not None and dgr_1y < -3.5)
         )
 
-        # Si es Dividend King o Champion con racha intachable y cobertura > 4x,
-        # una variación puntual de circulante NO es trampa de valor
         if es_aristocrata_reconocida and (dgr_1y is None or dgr_1y >= 0.0) and (cobertura_intereses is None or cobertura_intereses >= 3.5):
             deterioro_grave = False
 
@@ -759,20 +764,26 @@ st.session_state.setdefault("impuesto_activo", 19.0)
 st.session_state.setdefault("capital_activo", 500.0)
 st.session_state.setdefault("merma_activa", True)
 
-with st.expander("📁 Lista Persistente (`watchlist.txt`)", expanded=True):
+with st.expander("📁 Lista Persistente (`watchlist.txt`)", expanded=False):
     lista_almacenada = cargar_watchlist()
     tickers_masivos = st.text_area(
         "Edita o consulta los tickers guardados (separados por comas o saltos de línea):",
         value=lista_almacenada,
         height=90
     )
-    col_btn_guardar, _ = st.columns([1, 4])
+    col_btn_guardar, col_btn_limpiar = st.columns([1, 2])
     with col_btn_guardar:
-        if st.button("💾 Guardar Lista en Archivo"):
+        if st.button("💾 Guardar Lista"):
             if guardar_watchlist(tickers_masivos):
                 st.success("¡Lista guardada correctamente en `watchlist.txt`!")
             else:
                 st.error("Error al escribir el archivo.")
+    with col_btn_limpiar:
+        if st.button("🧹 Limpiar Caché de Disco (Forzar descarga fresca)"):
+            descargar_fundamentales_persistentes_disco.clear()
+            obtener_cotizacion_viva_radar.clear()
+            st.session_state.pop("resultados_radar_cache", None)
+            st.success("¡Caché de disco borrada! El próximo escaneo descargará datos frescos.")
 
 lista_años = [5, 10, 12, 15, 20]
 idx_años = lista_años.index(st.session_state.años_activo) if st.session_state.años_activo in lista_años else 2
@@ -806,13 +817,17 @@ if st.button("🚀 Escanear Watchlist", use_container_width=True):
         resultados = []
 
         for idx, ticker in enumerate(lista_tickers):
-            texto_estado.text(f"Escaneando {ticker} ({idx+1}/{len(lista_tickers)})...")
+            texto_estado.text(f"Auditando {ticker} ({idx+1}/{len(lista_tickers)})...")
+            
             datos = analizar_empresa_rapido(ticker, años_masivos, impuesto_masivo, aplicar_merma_masivo, capital_masivo)
             if datos:
                 resultados.append(datos)
+                
+            # Micropausa de cortesía de 0.20s para no saturar los sockets de red
+            time.sleep(0.20)
             barra_progreso.progress((idx + 1) / len(lista_tickers))
 
-        texto_estado.text("¡Escaneo completado!")
+        texto_estado.text(f"¡Escaneo completado con éxito! ({len(resultados)}/{len(lista_tickers)} empresas procesadas)")
         st.session_state["resultados_radar_cache"] = resultados
 
 if "resultados_radar_cache" in st.session_state and st.session_state["resultados_radar_cache"]:
