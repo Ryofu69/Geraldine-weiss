@@ -1324,7 +1324,19 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
     # ==========================================
     # 6. GRÁFICO 1: CANALES DE VALORACIÓN GERALDINE WEISS
     # ==========================================
-    st.markdown(f"### 📈 Evolución Histórica de Valoración Weiss ({años_analisis} Años)")
+    col_tit_weiss, col_sel_weiss = st.columns([2.5, 1.2])
+    with col_tit_weiss:
+        st.markdown(f"### 📈 Evolución Histórica de Valoración Weiss ({años_analisis} Años)")
+    with col_sel_weiss:
+        modo_grafico_weiss = st.radio(
+            "Tipo de gráfico Weiss:",
+            options=["📈 Línea continua", "🕯️ Velas japonesas"],
+            index=0,
+            horizontal=True,
+            key=f"modo_weiss_{ticker_symbol}",
+            label_visibility="collapsed"
+        )
+
     df_grafico = historial_analisis[['Close']].copy()
     if not df_grafico.empty:
         df_grafico['Div_Grafico'] = historial_analisis['Div_Anual']
@@ -1338,12 +1350,26 @@ def render_valoracion_bogle(ticker_symbol, años_analisis, impuesto_pct, aplicar
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Justo'], name='Precio Justo (Media)', line=dict(color='rgba(255, 255, 255, 0.45)', width=1.2, dash='dash')))
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Acumulacion'], name='Zona Acumulación (P90)', line=dict(color='#00d4ff', width=1.3, dash='dot')))
         fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Precio_Compra'], name='Suelo Estricto (P95)', line=dict(color='#21c354', width=2.2)))
-        fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Close'], name='Cotización Real', line=dict(color='#faca2b', width=2.8)))
+
+        if "Velas" in modo_grafico_weiss and {'Open', 'High', 'Low', 'Close'}.issubset(historial_analisis.columns):
+            fig.add_trace(go.Candlestick(
+                x=historial_analisis.index,
+                open=historial_analisis['Open'],
+                high=historial_analisis['High'],
+                low=historial_analisis['Low'],
+                close=historial_analisis['Close'],
+                name='Cotización (Velas)',
+                increasing_line_color='#21c354',
+                decreasing_line_color='#ff4b4b'
+            ))
+        else:
+            fig.add_trace(go.Scatter(x=df_grafico.index, y=df_grafico['Close'], name='Cotización Real', line=dict(color='#faca2b', width=2.8)))
 
         fig.update_layout(
             template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=430,
             legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),
-            hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+            hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            xaxis_rangeslider_visible=False
         )
         fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         st.plotly_chart(fig, use_container_width=True)
