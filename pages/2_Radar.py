@@ -49,6 +49,15 @@ def interpolar_puntos(valor, umbral_max, umbral_med, pts_max, pts_med, inverso=F
         ratio = (umbral_med - valor) / (umbral_med - umbral_max)
         return round(pts_med + ratio * (pts_max - pts_med), 2)
 
+def ultimo_valor_tabla(df, claves):
+    if df is not None and not df.empty:
+        for k in claves:
+            if k in df.index:
+                s = df.loc[k].dropna()
+                if not s.empty:
+                    return float(s.iloc[-1])
+    return 0.0
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def obtener_fx_rate(curr_fin, curr_base):
     if not curr_fin or not curr_base or curr_fin == curr_base:
@@ -85,29 +94,71 @@ def guardar_watchlist(texto):
         return False
 
 # ==========================================
-# FUNCIÓN DE ANÁLISIS RÁPIDO Y ESTABLE PARA RADAR
+# DESCARGA CON RESPALDO CONTABLE COMPLETO
 # ==========================================
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def descargar_datos_radar_ticker(t_clean):
-    """Descarga ligera cacheada por ticker para evitar bloqueos de Yahoo al escanear 68 empresas."""
+    """
+    Descarga robusta con respaldo contable. Descarga precios, dividendos y los 3 estados contables
+    (income_stmt, balance_sheet y cashflow) para no depender exclusivamente de 'ticker.info'.
+    """
     ticker = yf.Ticker(t_clean)
-    info = ticker.info or {}
-    dividendos = ticker.dividends
-    historial = ticker.history(period="20y", auto_adjust=False)
-    inc_stmt = pd.DataFrame()
+    info = {}
+    try:
+        info = ticker.info or {}
+    except Exception:
+        info = {}
+
+    dividendos = pd.Series(dtype=float)
+    try:
+        dividendos = ticker.dividends
+    except Exception:
+        pass
+
+    historial = pd.DataFrame()
+    try:
+        historial = ticker.history(period="20y", auto_adjust=False)
+    except Exception:
+        pass
+
+    inc_stmt, bs_stmt, cf_stmt = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     try:
         if ticker.income_stmt is not None and not ticker.income_stmt.empty:
             inc_stmt = ticker.income_stmt.T.sort_index().T
     except Exception:
         pass
-    return info, dividendos, historial, inc_stmt
+    try:
+        if ticker.balance_sheet is not None and not ticker.balance_sheet.empty:
+            bs_stmt = ticker.balance_sheet.T.sort_index().T
+    except Exception:
+        pass
+    try:
+        if ticker.cashflow is not None and not ticker.cashflow.empty:
+            cf_stmt = ticker.cashflow.T.sort_index().T
+    except Exception:
+        pass
+
+    fast_price, fast_shares, fast_mcap, fast_curr = None, None, None, None
+    try:
+        if ticker.fast_info is not None:
+            fast_price = float(ticker.fast_info.last_price) if ticker.fast_info.last_price is not None else None
+            fast_shares = float(ticker.fast_info.shares) if ticker.fast_info.shares is not None else None
+            fast_mcap = float(ticker.fast_info.market_cap) if ticker.fast_info.market_cap is not None else None
+            fast_curr = ticker.fast_info.currency
+    except Exception:
+        pass
+
+    return info, dividendos, historial, inc_stmt, bs_stmt, cf_stmt, fast_price, fast_shares, fast_mcap, fast_curr
 
 def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar_merma_origen, capital_simulado):
     try:
         t_clean = ticker_symbol.strip().upper()
-        info, dividendos_raw, historial_raw, inc_stmt = descargar_datos_radar_ticker(t_clean)
+        (
+            info, dividendos_raw, historial_raw, inc_stmt, bs_stmt, cf_stmt,
+            fast_price, fast_shares, fast_mcap, fast_curr
+        ) = descargar_datos_radar_ticker(t_clean)
 
-        if dividendos_raw.empty or len(historial_raw) < 252:
+        if dividendos_raw.empty or len(historial_raw) < 200:
             return None
 
         def get_safe(key, default=0.0):
@@ -116,7 +167,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             try: return float(val)
             except (ValueError, TypeError): return default
 
-        currency_raw = info.get('currency', 'USD')
+        currency_raw = info.get('currency', fast_curr or 'USD')
         es_peniques_uk = (currency_raw == 'GBp')
         currency = 'GBP' if es_peniques_uk else currency_raw
         curr_fin = info.get('financialCurrency', currency) or currency
@@ -130,6 +181,9 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         historial.index = historial.index.tz_localize(None).normalize()
         dividendos.index = dividendos.index.tz_localize(None).normalize()
         dividendos = dividendos.groupby(dividendos.index).sum()
+
+        if fast_price is not None and fast_price > 0 and not historial.empty:
+            historial.iloc[-1, historial.columns.get_loc('Close')] = fast_price
 
         if es_peniques_uk:
             for col in ['Open', 'High', 'Low', 'Close']:
@@ -169,7 +223,9 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         merma_origen_pct = MERMA_ORIGEN_PAIS.get(pais, 0.0) if aplicar_merma_origen else 0.0
         net_mult = (1.0 - (impuesto_pct / 100.0)) * (1.0 - (merma_origen_pct / 100.0))
 
-        # --- MOTOR DE DIVIDENDOS LIMPIO Y DIRECTO ---
+        # ==========================================
+        # MOTOR DE DIVIDENDOS BLINDADO (CORRECCIÓN STAG Y MENSUALES/TRIMESTRALES)
+        # ==========================================
         divs_por_año = dividendos.groupby(dividendos.index.year).sum()
 
         años_div = dividendos.index.year
@@ -184,17 +240,28 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         elif mediana_pagos_año >= 1.5: pagos_por_año = 2
         else: pagos_por_año = 1
 
-        forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate'))
+        ult_fecha_div = dividendos.index[-1]
+        div_ttm = float(dividendos[dividendos.index > (ult_fecha_div - pd.DateOffset(days=370))].sum())
+        años_cerrados = divs_por_año[divs_por_año.index < año_actual]
+        ultimo_año_completo = float(años_cerrados.iloc[-1]) if not años_cerrados.empty else 0.0
+
+        forward_dividend = get_safe('dividendRate', get_safe('trailingAnnualDividendRate', 0.0))
         if es_peniques_uk and forward_dividend > (precio_actual * 0.25):
             forward_dividend /= 100.0
 
-        # Única corrección aislada para españolas/europeas de 1 o 2 pagos (ej. VIS.MC) cuando Yahoo solo toma medio año
-        ult_fecha_div = dividendos.index[-1]
-        div_ttm = float(dividendos[dividendos.index > (ult_fecha_div - pd.DateOffset(days=370))].sum())
-        ultimo_año_completo = float(divs_por_año.loc[divs_por_año.index < año_actual].iloc[-1]) if any(divs_por_año.index < año_actual) else 0.0
+        # Corrección de frecuencia: si una empresa mensual pasa a trimestral (o viceversa)
+        ult_cupon = float(dividendos.iloc[-1])
+        candidato_fwd = ult_cupon * pagos_por_año
+        if div_ttm > 0 and candidato_fwd > (div_ttm * 1.5):
+            # Comprobación de sanity check: si 4 pagos coinciden mucho mejor con div_ttm que 12 pagos
+            if abs(ult_cupon * 4 - div_ttm) < abs(candidato_fwd - div_ttm):
+                pagos_por_año = 4
+                candidato_fwd = ult_cupon * 4
+            else:
+                candidato_fwd = div_ttm
 
-        if forward_dividend <= 0:
-            forward_dividend = max(float(dividendos.iloc[-1]) * pagos_por_año, ultimo_año_completo)
+        if forward_dividend <= 0 or forward_dividend > (max(div_ttm, ultimo_año_completo) * 1.7):
+            forward_dividend = candidato_fwd if candidato_fwd > 0 else (div_ttm if div_ttm > 0 else ultimo_año_completo)
         elif pagos_por_año <= 2 and forward_dividend < (div_ttm * 0.65):
             forward_dividend = max(div_ttm, ultimo_año_completo)
 
@@ -220,27 +287,88 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         yield_neto = yield_actual * net_mult
         div_neto_absoluto = forward_dividend * net_mult
 
-        # --- FUNDAMENTALES CON RESPALDO DIRECTO EN INFO (INMUNE A BLOQUEOS EN BUCLE) ---
+        # ==========================================
+        # FUNDAMENTALES CON RESPALDO CONTABLE TOTAL (INCOME, BALANCE Y CASHFLOW)
+        # ==========================================
+        # 1. Acciones
         shares = get_safe('sharesOutstanding', 0.0)
+        if shares <= 0 and fast_shares: shares = fast_shares
+        if shares <= 0: shares = ultimo_valor_tabla(inc_stmt, ['Diluted Average Shares', 'Basic Average Shares'])
+        if shares <= 0 and fast_mcap and precio_actual > 0: shares = fast_mcap / precio_actual
+
+        # 2. BPA y PER
         bpa_trailing = get_safe('trailingEps', 0.0)
-        per = get_safe('trailingPE', get_safe('forwardPE', 0.0))
+        if bpa_trailing == 0:
+            bpa_trailing = ultimo_valor_tabla(inc_stmt, ['Diluted EPS', 'Basic EPS']) * fx_rate
+
+        per = get_safe('trailingPE', 0.0)
+        if per <= 0 and bpa_trailing > 0 and precio_actual > 0:
+            per = precio_actual / bpa_trailing
+        if per <= 0:
+            per = get_safe('forwardPE', 0.0)
+
+        # 3. Payout BPA
         payout_bpa = get_safe('payoutRatio', 0.0) * 100
-        if payout_bpa <= 0 and bpa_trailing > 0:
+        if (payout_bpa <= 0 or payout_bpa > 300) and bpa_trailing > 0:
             payout_bpa = (forward_dividend / bpa_trailing) * 100
 
+        # 4. Deuda y Caja
         total_debt = get_safe('totalDebt', 0.0) * fx_rate
+        if total_debt <= 0:
+            total_debt = ultimo_valor_tabla(bs_stmt, ['Total Debt', 'Long Term Debt And Capital Lease Obligation', 'Long Term Debt']) * fx_rate
+
         total_cash = get_safe('totalCash', 0.0) * fx_rate
+        if total_cash <= 0:
+            total_cash = ultimo_valor_tabla(bs_stmt, ['Cash Cash Equivalents And Short Term Investments', 'Cash And Cash Equivalents', 'Cash']) * fx_rate
+
+        # 5. EBITDA y EBIT
         ebitda = get_safe('ebitda', 0.0) * fx_rate
+        if ebitda <= 0:
+            ebitda = ultimo_valor_tabla(inc_stmt, ['EBITDA', 'Normalized EBITDA', 'Operating Income']) * fx_rate
+
+        ebit_val = get_safe('operatingIncome', 0.0) * fx_rate
+        if ebit_val <= 0:
+            ebit_val = ultimo_valor_tabla(inc_stmt, ['Operating Income', 'EBIT']) * fx_rate
+        if ebitda <= 0 and ebit_val > 0:
+            ebitda = ebit_val * 1.15
+
+        # 6. Flujo de Caja (FCF y OCF)
         fcf_raw = get_safe('freeCashflow', 0.0) * fx_rate
+        if fcf_raw == 0:
+            fcf_raw = ultimo_valor_tabla(cf_stmt, ['Free Cash Flow']) * fx_rate
+
         ocf_raw = get_safe('operatingCashflow', 0.0) * fx_rate
+        if ocf_raw == 0:
+            ocf_raw = ultimo_valor_tabla(cf_stmt, ['Operating Cash Flow', 'Cash Flow From Continuing Operating Activities']) * fx_rate
+
+        if fcf_raw == 0 and ocf_raw != 0:
+            capex_val = abs(ultimo_valor_tabla(cf_stmt, ['Capital Expenditure', 'Capital Expenditures'])) * fx_rate
+            fcf_raw = ocf_raw - capex_val
+
         flujo_caja_referencia = ocf_raw if (es_reit_puro and ocf_raw > fcf_raw) else fcf_raw
 
+        # 7. Fondos Propios (Equity) y ROE
+        total_equity_raw = get_safe('totalStockholderEquity', 0.0) * fx_rate
+        if total_equity_raw <= 0:
+            total_equity_raw = ultimo_valor_tabla(bs_stmt, ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity']) * fx_rate
+
+        net_inc_val = ultimo_valor_tabla(inc_stmt, ['Net Income', 'Net Income Common Stockholders']) * fx_rate
         roe = get_safe('returnOnEquity', 0.0) * 100
-        roa = get_safe('returnOnAssets', 0.0) * 100
+        if roe == 0 and total_equity_raw > 0 and net_inc_val > 0:
+            roe = (net_inc_val / total_equity_raw) * 100
+
+        # 8. Márgenes Operativos
         operating_margins = get_safe('operatingMargins', 0.0) * 100
+        rev_tabla = ultimo_valor_tabla(inc_stmt, ['Total Revenue', 'Operating Revenue']) * fx_rate
+        if operating_margins == 0 and rev_tabla > 0 and ebit_val > 0:
+            operating_margins = (ebit_val / rev_tabla) * 100
+
         pb = get_safe('priceToBook', -1.0)
         current_ratio = get_safe('currentRatio', 0.0)
-        total_equity_raw = get_safe('totalStockholderEquity', 0.0) * fx_rate
+        if current_ratio <= 0 and not bs_stmt.empty:
+            ca_v = ultimo_valor_tabla(bs_stmt, ['Current Assets', 'Total Current Assets'])
+            cl_v = ultimo_valor_tabla(bs_stmt, ['Current Liabilities', 'Total Current Liabilities'])
+            if cl_v > 0: current_ratio = ca_v / cl_v
 
         es_quasi_reit_o_recompras = (not es_reit_puro) and (not es_financiera) and (operating_margins >= 24.0) and (total_equity_raw <= 0 or pb < 0)
         es_regulada_o_reit = es_reit_puro or es_utility_pura or es_quasi_reit_o_recompras
@@ -250,17 +378,45 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         payout_limite_fcf = 75.0 if es_regulada_o_reit else 55.0
         payout_amarillo_fcf = 90.0 if es_regulada_o_reit else 80.0
 
+        # 9. Deuda Neta / EBITDA
         deuda_neta = max(0.0, total_debt - total_cash)
-        deuda_ebitda = (deuda_neta / ebitda) if ebitda > 0 else (999.0 if (total_debt > 0 and not es_financiera) else 0.0)
+        if es_financiera:
+            deuda_ebitda = -1.0
+        elif ebitda > 0:
+            deuda_ebitda = deuda_neta / ebitda
+        elif total_debt > 0:
+            deuda_ebitda = 999.0
+        elif not bs_stmt.empty and 'Total Debt' in bs_stmt.index:
+            deuda_ebitda = 0.0
+        else:
+            deuda_ebitda = -1.0
 
+        # 10. Payout FCF y P/FCF
         payout_fcf, p_fcf = -1.0, -1.0
-        if flujo_caja_referencia > 0 and shares > 0 and forward_dividend > 0:
+        if flujo_caja_referencia != 0 and shares > 0 and forward_dividend > 0:
             fcf_per_share = flujo_caja_referencia / shares
             if fcf_per_share > 0:
                 payout_fcf = (forward_dividend / fcf_per_share) * 100
                 p_fcf = precio_actual / fcf_per_share
+            elif fcf_per_share < 0:
+                payout_fcf = 999.0
 
-        # Crecimiento BPA 3Y (con respaldo en earningsGrowth de info si inc_stmt es bloqueado)
+        # 11. ROIC
+        roic = None
+        try:
+            inv_cap = (total_debt + max(0.0, total_equity_raw)) - total_cash
+            if inv_cap <= 0 and not bs_stmt.empty and 'Total Assets' in bs_stmt.index:
+                tot_assets = float(bs_stmt.loc['Total Assets'].dropna().iloc[-1]) * fx_rate
+                curr_liab = float(bs_stmt.loc['Current Liabilities'].dropna().iloc[-1]) * fx_rate if 'Current Liabilities' in bs_stmt.index else 0.0
+                inv_cap = tot_assets - curr_liab - total_cash
+            if inv_cap > 0 and ebit_val > 0:
+                roic = ((ebit_val * 0.79) / inv_cap) * 100
+        except Exception:
+            pass
+
+        metrica_rentabilidad = roe if es_financiera else (roic if roic is not None else (roe if roe > 0 else (operating_margins if es_reit_puro else None)))
+
+        # 12. Crecimiento Ventas y BPA 3A
         crecimiento_bpa_3y = None
         if not inc_stmt.empty:
             for key in ['Diluted EPS', 'Basic EPS']:
@@ -272,7 +428,6 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         if crecimiento_bpa_3y is None and info.get('earningsGrowth') is not None:
             crecimiento_bpa_3y = float(info.get('earningsGrowth')) * 100
 
-        # Crecimiento Ventas 3A (con respaldo en revenueGrowth de info si inc_stmt es bloqueado)
         revenue_cagr_3y = None
         if not inc_stmt.empty:
             for k in ['Total Revenue', 'Operating Revenue']:
@@ -284,26 +439,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         if revenue_cagr_3y is None and info.get('revenueGrowth') is not None:
             revenue_cagr_3y = float(info.get('revenueGrowth')) * 100
 
-        # ROIC (con respaldo directo desde info sin depender de balance_sheet)
-        roic = None
-        ebit_val = get_safe('operatingIncome') * fx_rate
-        if ebit_val <= 0 and get_safe('totalRevenue') > 0 and operating_margins > 0:
-            ebit_val = (get_safe('totalRevenue') * fx_rate) * (operating_margins / 100.0)
-        if ebit_val <= 0 and ebitda > 0:
-            ebit_val = ebitda * 0.78
-
-        if total_equity_raw <= 0 and pb > 0 and shares > 0:
-            total_equity_raw = (precio_actual / pb) * shares
-
-        inv_cap = (total_debt + max(0.0, total_equity_raw)) - total_cash
-        if inv_cap > 0 and ebit_val > 0:
-            roic = ((ebit_val * 0.79) / inv_cap) * 100
-        elif roe > 0:
-            roic = roe * 0.75 if deuda_ebitda > 2.0 else roe
-        elif roa > 0:
-            roic = roa * 1.6
-
-        # Cobertura de intereses (con respaldo en deuda_ebitda si inc_stmt es bloqueado)
+        # Cobertura de intereses
         cobertura_intereses = None
         if not inc_stmt.empty:
             try:
@@ -320,9 +456,10 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
                 if ebit_cov is not None and int_exp is not None and int_exp > 0:
                     cobertura_intereses = ebit_cov / int_exp
             except Exception: pass
-        if cobertura_intereses is None and ebitda > 0:
-            # Estimación conservadora si Yahoo omitió Interest Expense: asumiendo coste medio de deuda del 4,5%
-            cobertura_intereses = (ebit_val / (total_debt * 0.045)) if total_debt > 0 else 20.0
+        if cobertura_intereses is None and ebit_val > 0 and total_debt > 0:
+            cobertura_intereses = ebit_val / (total_debt * 0.045)
+        elif cobertura_intereses is None and deuda_neta == 0:
+            cobertura_intereses = 25.0
 
         dividendos_barras = divs_por_año.copy()
         if año_actual in dividendos_barras.index:
@@ -367,7 +504,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         recompras_anualizadas = max(-5.0, min(8.0, recompras_anualizadas))
 
         # ==========================================
-        # 1. SCORE DE CALIDAD DGI (IDÉNTICO A LA PRIMERA CAPTURA 1000044715.png)
+        # 1. SCORE DE CALIDAD DGI
         # ==========================================
         if es_reit_puro:
             lim_deuda_optima, lim_deuda_aceptable = 5.2, 6.8
@@ -382,22 +519,22 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             pts_deuda = interpolar_puntos(roe, 15.0, 8.0, 2.0, 0.4, inverso=False)
             pts_cob = 0.5 if (current_ratio >= 1.0 or roe >= 11.0) else 0.0
         else:
-            pts_deuda = interpolar_puntos(deuda_ebitda, lim_deuda_optima, lim_deuda_aceptable, 2.0, 0.3, inverso=True)
+            deuda_eval = deuda_ebitda if deuda_ebitda >= 0 else 2.5
+            pts_deuda = interpolar_puntos(deuda_eval, lim_deuda_optima, lim_deuda_aceptable, 2.0, 0.3, inverso=True)
             umbral_cob_max = 3.2 if es_reit_puro else 7.0
             umbral_cob_min = 1.8 if es_reit_puro else 3.0
-            pts_cob = interpolar_puntos(cobertura_intereses, umbral_cob_max, umbral_cob_min, 0.5, 0.1, inverso=False) if cobertura_intereses is not None else (0.5 if deuda_neta == 0 else 0.0)
+            pts_cob = interpolar_puntos(cobertura_intereses, umbral_cob_max, umbral_cob_min, 0.5, 0.1, inverso=False) if cobertura_intereses is not None else (0.5 if deuda_neta == 0 else 0.1)
 
         if es_financiera and payout_fcf == -1:
             pts_fcf = interpolar_puntos(payout_bpa, 45.0, 75.0, 2.0, 0.4, inverso=True) if payout_bpa > 0 else 0.0
         else:
-            pts_fcf = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 2.0, 0.4, inverso=True) if payout_fcf > 0 else 0.0
+            pts_fcf = interpolar_puntos(payout_fcf, payout_limite_fcf, payout_amarillo_fcf, 2.0, 0.4, inverso=True) if 0 < payout_fcf < 500 else 0.0
 
         racha_efectiva = racha_sin_recortes + (3 if años_pagando >= 25 else 0)
         pts_hist = interpolar_puntos(racha_efectiva, 20.0, 6.0, 2.0, 0.5, inverso=False)
         if fatiga_dividendo:
             pts_hist = max(0.0, round(pts_hist - 0.5, 2))
 
-        metrica_rentabilidad = roe if (es_financiera or (roic is None and roe > 0)) else roic
         if es_reit_puro:
             pts_roic_sub = interpolar_puntos(operating_margins, 35.0, 20.0, 0.9, 0.3, inverso=False)
         else:
@@ -460,7 +597,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         score_total = round(score_calidad + score_val, 1)
 
         # ==========================================
-        # 3. FÓRMULA BOGLE-WEISS 5A Y RENTA ANUAL POR 500 €/$
+        # 3. FÓRMULA BOGLE-WEISS 5A Y RENTA ANUAL
         # ==========================================
         horizonte_bogle = 5
         candidatos_crec = [x for x in [dgr_5y, dgr_periodo, crecimiento_bpa_3y] if x is not None]
@@ -485,7 +622,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         pct_infra_vs_media = ((precio_compra - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
         pct_sobre_vs_media = ((precio_venta - precio_justo) / precio_justo) * 100 if precio_justo > 0 else 0.0
 
-        payout_critico = (payout_fcf > 92.0 and (score_calidad < 6.0 or payout_bpa > 88.0))
+        payout_critico = (payout_fcf > 95.0 and (score_calidad < 6.0 or payout_bpa > 88.0))
         posible_trampa = (precio_actual <= precio_compra) and (
             score_calidad < 5.5 or payout_critico or (dgr_1y is not None and dgr_1y < -5.0)
         )
@@ -522,10 +659,10 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             "Yield Bruto": f_num(yield_actual, 2, "%"),
             "Yield Neto": f_num(yield_neto, 2, "%"),
             "PER": f_num(per, 1, "x") if per > 0 else "N/D",
-            "P/FCF": f_num(p_fcf, 1, "x") if p_fcf != -1 else "N/D",
-            "Deuda/EBITDA": f_num(deuda_ebitda, 2, "x") if deuda_ebitda < 900 else "N/D",
-            "Payout FCF": f_num(payout_fcf, 1, "%") if payout_fcf != -1 else "N/D",
-            "Payout BPA": f_num(payout_bpa, 1, "%"),
+            "P/FCF": f_num(p_fcf, 1, "x") if p_fcf > 0 else "N/D",
+            "Deuda/EBITDA": ("N/A (Banca)" if es_financiera else (f_num(deuda_ebitda, 2, "x") if deuda_ebitda >= 0 and deuda_ebitda < 900 else "N/D")),
+            "Payout FCF": f_num(payout_fcf, 1, "%") if 0 < payout_fcf < 500 else ("Déficit" if payout_fcf >= 500 else "N/D"),
+            "Payout BPA": f_num(payout_bpa, 1, "%") if payout_bpa > 0 else "N/D",
             "ROIC/ROE": f_num(metrica_rentabilidad, 1, "%") if metrica_rentabilidad is not None else "N/D",
             "Ventas 3A": f_num(revenue_cagr_3y, 1, "%", signo_pos=True) if revenue_cagr_3y is not None else "N/D",
             "Acciones": f_num(variacion_acciones, 1, "%", signo_pos=True) if variacion_acciones is not None else "N/D",
@@ -673,50 +810,60 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
                 elif row['_y_act'] >= row['_y_med']: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'PER':
-                if 0 < row['_per'] <= row['_mult_opt'] + 0.5: styles[idx] = 'color: #21c354;'
-                elif 0 < row['_per'] <= row['_mult_acep'] + 1.0: styles[idx] = 'color: #faca2b;'
+                if row['_per'] <= 0: styles[idx] = 'color: #888;'
+                elif row['_per'] <= row['_mult_opt'] + 0.5: styles[idx] = 'color: #21c354;'
+                elif row['_per'] <= row['_mult_acep'] + 1.0: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'P/FCF':
-                if 0 < row['_p_fcf'] <= row['_mult_opt']: styles[idx] = 'color: #21c354;'
-                elif 0 < row['_p_fcf'] <= row['_mult_acep']: styles[idx] = 'color: #faca2b;'
+                if row['_p_fcf'] <= 0: styles[idx] = 'color: #888;'
+                elif row['_p_fcf'] <= row['_mult_opt']: styles[idx] = 'color: #21c354;'
+                elif row['_p_fcf'] <= row['_mult_acep']: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Deuda/EBITDA':
                 d = row['_deuda_ebitda']
-                if d <= row['_lim_deuda_opt']: styles[idx] = 'color: #21c354;'
+                if d < 0 or d >= 900: styles[idx] = 'color: #888;'
+                elif d <= row['_lim_deuda_opt']: styles[idx] = 'color: #21c354;'
                 elif d <= row['_lim_deuda_acep']: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Payout FCF':
                 p = row['_pay_fcf']
-                if 0 <= p <= row['_l_fcf']: styles[idx] = 'color: #21c354;'
+                if p <= 0 or p >= 500: styles[idx] = 'color: #ff4b4b;'
+                elif p <= row['_l_fcf']: styles[idx] = 'color: #21c354;'
                 elif p <= row['_a_fcf']: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Payout BPA':
                 p = row['_pay_bpa']
-                if 0 < p <= row['_l_bpa']: styles[idx] = 'color: #21c354;'
+                if p <= 0: styles[idx] = 'color: #888;'
+                elif p <= row['_l_bpa']: styles[idx] = 'color: #21c354;'
                 elif p <= row['_a_bpa']: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'ROIC/ROE':
                 r = row['_roic']
-                if r >= 15.0: styles[idx] = 'color: #21c354;'
+                if r == -999: styles[idx] = 'color: #888;'
+                elif r >= 15.0: styles[idx] = 'color: #21c354;'
                 elif r >= 8.0: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Ventas 3A':
                 v = row['_rev3']
-                if v >= 3.0: styles[idx] = 'color: #21c354;'
+                if v == -999: styles[idx] = 'color: #888;'
+                elif v >= 3.0: styles[idx] = 'color: #21c354;'
                 elif v > 0: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Acciones':
                 a = row['_acc']
-                if a < -0.5: styles[idx] = 'color: #21c354;'
+                if a == 999: styles[idx] = 'color: #888;'
+                elif a < -0.5: styles[idx] = 'color: #21c354;'
                 elif a <= 1.0: styles[idx] = 'color: #faca2b;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Crec. BPA 3Y':
                 c = row['_cbpa3']
-                if c != -999 and c > 0: styles[idx] = 'color: #21c354;'
+                if c == -999: styles[idx] = 'color: #888;'
+                elif c > 0: styles[idx] = 'color: #21c354;'
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name in ['DGR 5A', f'DGR {años_masivos}A']:
                 val_col = row['_dgr'] if col_name == 'DGR 5A' else row['_dgr_per']
-                if val_col >= 8.0: styles[idx] = 'color: #21c354;'
+                if val_col == -999: styles[idx] = 'color: #888;'
+                elif val_col >= 8.0: styles[idx] = 'color: #21c354;'
                 elif val_col >= 4.5: styles[idx] = 'color: #faca2b;'
                 elif val_col >= 2.5: styles[idx] = 'color: #ff9800;'
                 else: styles[idx] = 'color: #ff4b4b;'
@@ -728,6 +875,8 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
                         styles[idx] = 'color: #21c354; font-weight: bold;'
                     else:
                         styles[idx] = 'color: #ff4b4b;'
+                else:
+                    styles[idx] = 'color: #888;'
             elif col_name == 'Estado':
                 if "COMPRA" in est: styles[idx] = 'background-color: #004d00; color: white;'
                 elif "TRAMPA" in est: styles[idx] = 'background-color: #663300; color: #ffcc80;'
