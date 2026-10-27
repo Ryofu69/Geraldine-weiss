@@ -189,6 +189,7 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 .badge-verde { background: rgba(33, 195, 84, 0.2); color: #21c354; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
 .badge-rojo { background: rgba(255, 75, 75, 0.2); color: #ff4b4b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
 .badge-ambar { background: rgba(250, 202, 43, 0.2); color: #faca2b; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
+.badge-azul { background: rgba(0, 212, 255, 0.2); color: #00d4ff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.82rem; white-space: nowrap; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -282,6 +283,7 @@ def render_salud_financiera(ticker_symbol, años_analisis):
     per_actual = get_safe('trailingPE', 0.0)
     if per_actual <= 0 and bpa_trailing > 0: per_actual = precio_actual / bpa_trailing
     per_forward = get_safe('forwardPE', 0.0)
+    if per_forward <= 0 and bpa_forward > 0: per_forward = precio_actual / bpa_forward
 
     total_debt = get_safe('totalDebt', 0.0) * fx_rate
     if total_debt <= 0: total_debt = ultimo_valor_tabla(bs_stmt, ['Total Debt', 'Long Term Debt And Capital Lease Obligation', 'Long Term Debt']) * fx_rate
@@ -315,8 +317,6 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 
     price_to_book = get_safe('priceToBook', -1)
     if price_to_book <= 0 and total_equity_raw > 0 and shares > 0: price_to_book = precio_actual / (total_equity_raw / shares)
-
-    deuda_equity = get_safe('debtToEquity', 0.0)
 
     es_quasi_reit_o_recompras = (not es_reit_puro) and (not es_financiera) and (operating_margins >= 24.0) and (total_equity_raw <= 0 or price_to_book < 0)
     es_regulada_o_reit = es_reit_puro or es_utility_pura or es_quasi_reit_o_recompras
@@ -408,7 +408,7 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         inercia_ratio = dgr_1y / dgr_5y
         if inercia_ratio < 0.5: fatiga_dividendo = True
 
-    # Acciones en circulación (Prioriza Diluted Average Shares auditadas)
+    # Acciones en circulación
     shares_yearly = pd.Series(dtype=float)
     variacion_acciones = None
     try:
@@ -439,56 +439,90 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         except Exception: pass
 
     # ==========================================
-    # CABECERA Y 10 TARJETAS EJECUTIVAS DGI
+    # CABECERA Y TARJETAS EJECUTIVAS DGI (BPA Y PER ACTUAL VS FUTURO)
     # ==========================================
     st.header(f"📊 Radiografía Financiera y Gráficos — {nombre_empresa} ({ticker_symbol})")
     st.caption(f"Sector: {sector_final} | Divisa de análisis: {currency} ({sym}) | Ventana histórica: {años_analisis} Años")
 
     col_bpa1, col_bpa2 = st.columns(2)
     with col_bpa1:
+        col_bpa_act = "#21c354" if bpa_trailing > 0 else "#ff4b4b"
+        col_bpa_fwd = "#21c354" if bpa_forward > bpa_trailing else ("#faca2b" if bpa_forward == bpa_trailing else "#ff4b4b")
+        
         if bpa_trailing != 0 and bpa_forward != 0:
             var_bpa = ((bpa_forward - bpa_trailing) / abs(bpa_trailing)) * 100
-            b_class = "badge-verde" if var_bpa >= 0 else "badge-rojo"
+            b_class = "badge-verde" if var_bpa >= 4.0 else ("badge-ambar" if var_bpa >= 0 else "badge-rojo")
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
-<span style="color: #aaa; font-size: 0.85rem;">💵 Beneficio por Acción (BPA)</span>
-<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(bpa_trailing, 2, sym)} <span style="font-size: 1rem; color: #888;">➔</span> {f_num(bpa_forward, 2, sym)}</span>
-<span class="{b_class}">{f_num(var_bpa, 1, '%', signo_pos=True)}</span>
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+<span style="color: #aaa; font-size: 0.85rem;">💵 Beneficio por Acción (BPA Actual ➔ Futuro)</span>
+<span class="{b_class}">Crec. Previsto: {f_num(var_bpa, 1, '%', signo_pos=True)}</span>
 </div>
-<span style="font-size: 0.75rem; color: #888;">Actual ➔ Estimado a 12 meses por consenso</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<div>
+<span style="font-size:0.75rem; color:#aaa;">Actual: </span>
+<strong style="font-size: 1.45rem; color: {col_bpa_act};">{f_num(bpa_trailing, 2, sym)}</strong>
+&nbsp;<span style="font-size: 1.1rem; color: #888;">➔</span>&nbsp;
+<span style="font-size:0.75rem; color:#aaa;">Estimado 12M: </span>
+<strong style="font-size: 1.45rem; color: {col_bpa_fwd};">{f_num(bpa_forward, 2, sym)}</strong>
+</div>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Consenso de analistas para los próximos 4 trimestres (apoyo de subidas del cupón)</span>
 </div>
 """, unsafe_allow_html=True)
         else:
-            st.metric("BPA Actual", f_num(bpa_trailing, 2, sym) if bpa_trailing != 0 else "N/D")
+            txt_fwd = f_num(bpa_forward, 2, sym) if bpa_forward != 0 else "N/D"
+            st.markdown(f"""
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">💵 Beneficio por Acción (BPA Actual ➔ Futuro)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.35rem; font-weight: bold; color:{col_bpa_act};">Actual: {f_num(bpa_trailing, 2, sym)}</span>
+<span style="font-size: 1.1rem; color:{col_bpa_fwd};">Futuro: {txt_fwd}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Datos de previsión a futuro limitados en Yahoo Finance</span>
+</div>
+""", unsafe_allow_html=True)
 
     with col_bpa2:
-        if es_reit_puro and p_fcf > 0:
-            st.markdown(f"""
-<div class="card-dgi notranslate" translate="no">
-<span style="color: #aaa; font-size: 0.85rem;">🏢 Múltiplo Inmobiliario (Precio / FFO)</span>
-<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(p_fcf, 1, 'x')}</span>
-<span class="{'badge-verde' if p_fcf <= 18 else ('badge-ambar' if p_fcf <= 24 else 'badge-rojo')}">FFO Yield: {f_num(fcf_yield, 2, '%')}</span>
-</div>
-<span style="font-size: 0.75rem; color: #888;">Múltiplo real REIT sin distorsión por depreciación</span>
-</div>
-""", unsafe_allow_html=True)
-        elif per_actual > 0 and per_forward > 0:
+        c_per_act = "#21c354" if (0 < per_actual <= 16.0) else ("#faca2b" if (16.0 < per_actual <= 22.0) else "#ff4b4b")
+        c_per_fwd = "#21c354" if (0 < per_forward <= 15.0) else ("#faca2b" if (15.0 < per_forward <= 20.0) else "#ff4b4b")
+
+        if per_actual > 0 and per_forward > 0:
             var_per = ((per_forward - per_actual) / per_actual) * 100
-            p_class = "badge-verde" if var_per <= 0 else "badge-rojo"
+            p_class = "badge-verde" if var_per < -1.0 else ("badge-ambar" if var_per <= 2.0 else "badge-rojo")
+            p_txt = "Se abarata por BPA" if var_per < -1.0 else ("Estable" if var_per <= 2.0 else "Encariñamiento")
+            
+            reit_extra = f" <span style='font-size:0.75rem; color:#00d4ff;'>· P/FFO: {f_num(p_fcf, 1, 'x')}</span>" if (es_reit_puro and p_fcf > 0) else ""
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
-<span style="color: #aaa; font-size: 0.85rem;">🏷️ Múltiplo de Valoración (PER)</span>
-<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(per_actual, 1, 'x')} <span style="font-size: 1rem; color: #888;">➔</span> {f_num(per_forward, 1, 'x')}</span>
-<span class="{p_class}">{f_num(var_per, 1, '%', signo_pos=True)}</span>
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+<span style="color: #aaa; font-size: 0.85rem;">🏷️ Múltiplo de Valoración (PER Actual ➔ Futuro){reit_extra}</span>
+<span class="{p_class}">{f_num(var_per, 1, '%', signo_pos=True)} ({p_txt})</span>
 </div>
-<span style="font-size: 0.75rem; color: #888;">PER Actual ➔ PER Futuro estimado</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<div>
+<span style="font-size:0.75rem; color:#aaa;">Actual: </span>
+<strong style="font-size: 1.45rem; color: {c_per_act};">{f_num(per_actual, 1, 'x')}</strong>
+&nbsp;<span style="font-size: 1.1rem; color: #888;">➔</span>&nbsp;
+<span style="font-size:0.75rem; color:#aaa;">Futuro: </span>
+<strong style="font-size: 1.45rem; color: {c_per_fwd};">{f_num(per_forward, 1, 'x')}</strong>
+</div>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Objetivo DGI: ≤16,0x (Verde) · 16x-22x (Neutro) · &gt;22x (Exigente)</span>
 </div>
 """, unsafe_allow_html=True)
         else:
-            st.metric("PER Actual", f_num(per_actual, 1, 'x') if per_actual > 0 else "N/D")
+            txt_pfwd = f_num(per_forward, 1, 'x') if per_forward > 0 else "N/D"
+            st.markdown(f"""
+<div class="card-dgi notranslate" translate="no">
+<span style="color: #aaa; font-size: 0.85rem;">🏷️ Múltiplo de Valoración (PER Actual ➔ Futuro)</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
+<span style="font-size: 1.35rem; font-weight: bold; color:{c_per_act};">Actual: {f_num(per_actual, 1, 'x')}</span>
+<span style="font-size: 1.1rem; color:{c_per_fwd};">Futuro: {txt_pfwd}</span>
+</div>
+<span style="font-size: 0.75rem; color: #888;">Objetivo DGI: ≤16,0x óptimo de entrada</span>
+</div>
+""", unsafe_allow_html=True)
 
     col_foso1, col_foso2 = st.columns(2)
     with col_foso1:
@@ -663,7 +697,7 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 """, unsafe_allow_html=True)
 
     # ==========================================
-    # GRÁFICOS DE ACCIONES Y DIVIDENDOS CON EXPLICACIONES
+    # GRÁFICOS DE ACCIONES Y DIVIDENDOS
     # ==========================================
     st.divider()
     col_sh_div1, col_sh_div2 = st.columns(2)
@@ -720,7 +754,7 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 """, unsafe_allow_html=True)
 
     # ==========================================
-    # LOS 9 GRÁFICOS FUNDAMENTALES Y DE SOLVENCIA CON EXPLICACIONES
+    # LOS 9 GRÁFICOS FUNDAMENTALES (CRITERIOS RECOMENDADOS DGI / WEISS)
     # ==========================================
     st.divider()
     st.markdown("### 📉 Gráficos de Valoración, Caja y Estructura de Deuda")
@@ -820,10 +854,14 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 </div>
 """, unsafe_allow_html=True)
 
-    # 4. SOSTENIBILIDAD FCF VS DIVIDENDOS Y 5. INGRESOS VS BENEFICIO NETO
+    # ==========================================
+    # 4. SOSTENIBILIDAD FCF VS DIVIDENDOS (CRITERIO DGI: PAYOUT FCF)
+    # ==========================================
     st.markdown("---")
     col_graf3, col_graf4 = st.columns(2)
     with col_graf3:
+        payout_recom = 75.0 if es_regulada_o_reit else 55.0
+        payout_max = 88.0 if es_regulada_o_reit else 75.0
         st.markdown(f"#### 💵 4. Sostenibilidad: {etiqueta_fcf} vs Dividendos")
         years_sost = sorted(list(set(fcf_s.index) & set(div_s.index)))
         if years_sost:
@@ -836,26 +874,41 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             fig_sost.add_trace(go.Bar(x=x_years, y=fcf_vals, name=etiqueta_fcf, marker_color='#00d4ff'), secondary_y=False)
             fig_sost.add_trace(go.Bar(x=x_years, y=div_vals, name='Dividendos Pagados', marker_color='#ff9800'), secondary_y=False)
             fig_sost.add_trace(go.Scatter(x=x_years, y=payout_vals, name='Payout Caja %', mode='lines+markers+text', text=[f_num(val, 1, '%') for val in payout_vals], textposition="top center", line=dict(color='#ff4b4b', width=2.2)), secondary_y=True)
-            fig_sost.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=310, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            
+            # Línea de referencia recomendada por DGI Weiss
+            fig_sost.add_hline(y=payout_recom, line_dash="dash", line_color="#21c354", annotation_text=f"Recomendable DGI (≤{payout_recom:.0f}%)", annotation_position="bottom right", secondary_y=True)
+
+            fig_sost.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=320, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
             fig_sost.update_yaxes(title_text=f"Importe ({sym})", secondary_y=False)
-            fig_sost.update_yaxes(title_text="Payout %", secondary_y=True, showgrid=False, range=[0, max(payout_vals)*1.25 if payout_vals else 100])
+            fig_sost.update_yaxes(title_text="Payout %", secondary_y=True, showgrid=False, range=[0, max(max(payout_vals)*1.25, payout_recom*1.35) if payout_vals else 100])
             st.plotly_chart(fig_sost, use_container_width=True)
 
             ult_fcf_v = fcf_vals[-1]
             ult_div_v = div_vals[-1]
             ult_pay_v = payout_vals[-1]
             sobrante_caja = ult_fcf_v - ult_div_v
-            txt_sobrante = f"le sobran <strong>{f_millones(sobrante_caja, sym)} libres</strong> tras pagar a los accionistas para amortizar deuda o recomprar acciones" if sobrante_caja >= 0 else f"presenta un <strong>déficit de {f_millones(abs(sobrante_caja), sym)}</strong> (el dividendo superó al flujo libre ese ejercicio)"
+            txt_sobrante = f"le sobran <strong>{f_millones(sobrante_caja, sym)} libres</strong> tras pagar dividendos" if sobrante_caja >= 0 else f"presenta un <strong>déficit de {f_millones(abs(sobrante_caja), sym)}</strong>"
+            eval_payout = "✅ CUMPLE con holgura" if ult_pay_v <= payout_recom else ("⚠️ EN EL LÍMITE" if ult_pay_v <= payout_max else "🚨 SUPERA EL MÁXIMO RECOMENDADO")
 
             st.markdown(f"""
 <div class="explicacion-graf notranslate" translate="no">
-💡 <strong>Qué vemos en el último cierre ({x_years[-1]}):</strong> Generó <strong>{f_millones(ult_fcf_v, sym)}</strong> de {etiqueta_fcf} (barra azul) y desembolsó <strong>{f_millones(ult_div_v, sym)}</strong> en dividendos (barra naranja), lo que supone un <strong>Payout sobre caja del {f_num(ult_pay_v, 1, '%')}</strong>. Con ello, {txt_sobrante}.
+🎯 <strong>Criterio DGI Moderno & Geraldine Weiss:</strong> Para blindar el dividendo y permitir incrementos anuales sostenibles sin endeudar a la empresa, el <strong>Payout sobre Flujo de Caja Libre debe situarse en ≤{payout_recom:.0f}%</strong> ({'≤75% en REITs y reguladas' if es_regulada_o_reit else '≤55% en industriales y consumo'}).<br>
+💡 <strong>Diagnóstico {ticker_symbol} ({x_years[-1]}):</strong> Generó <strong>{f_millones(ult_fcf_v, sym)}</strong> de caja libre y pagó <strong>{f_millones(ult_div_v, sym)}</strong> en dividendos (Payout Caja: <strong style="color:{'#21c354' if ult_pay_v <= payout_recom else '#ff4b4b'};">{f_num(ult_pay_v, 1, '%')}</strong> ➔ <strong>{eval_payout}</strong>). Con ello, {txt_sobrante}.
 </div>
 """, unsafe_allow_html=True)
         else:
             st.info("Datos anuales insuficientes para el gráfico de Sostenibilidad.")
 
+    # ==========================================
+    # 5. INGRESOS VS BENEFICIO NETO Y MARGEN (CRITERIO DGI: FOSO ECONÓMICO)
+    # ==========================================
     with col_graf4:
+        if es_reit_puro: margen_recom = 25.0
+        elif es_financiera: margen_recom = 18.0
+        elif 'technology' in sector_en.lower() or 'healthcare' in sector_en.lower(): margen_recom = 15.0
+        elif 'consumer defensive' in sector_en.lower() or 'staples' in sector_en.lower(): margen_recom = 6.0
+        else: margen_recom = 10.0
+
         st.markdown("#### 📊 5. Ingresos vs Beneficio Neto y Margen")
         years_rev = sorted(list(set(rev_s.index) & set(net_s.index)))
         if years_rev:
@@ -868,27 +921,35 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             fig_ing.add_trace(go.Bar(x=x_years_rev, y=rev_vals, name='Ingresos (Ventas)', marker_color='#21c354'), secondary_y=False)
             fig_ing.add_trace(go.Bar(x=x_years_rev, y=net_vals, name='Beneficio Neto', marker_color='#faca2b'), secondary_y=False)
             fig_ing.add_trace(go.Scatter(x=x_years_rev, y=margin_vals, name='Margen Neto %', mode='lines+markers+text', text=[f_num(val, 1, '%') for val in margin_vals], textposition="top center", line=dict(color='#00d4ff', width=2.2)), secondary_y=True)
-            fig_ing.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=310, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            
+            # Línea de referencia de Margen Neto Recomendable
+            fig_ing.add_hline(y=margen_recom, line_dash="dash", line_color="#21c354", annotation_text=f"Margen Mín. DGI (≥{margen_recom:.0f}%)", annotation_position="top right", secondary_y=True)
+
+            fig_ing.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=320, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
             fig_ing.update_yaxes(title_text=f"Importe ({sym})", secondary_y=False)
-            fig_ing.update_yaxes(title_text="Margen %", secondary_y=True, showgrid=False, range=[min(0, min(margin_vals)*1.1), max(margin_vals)*1.25 if margin_vals else 100])
+            fig_ing.update_yaxes(title_text="Margen %", secondary_y=True, showgrid=False, range=[min(0, min(margin_vals)*1.1), max(max(margin_vals)*1.25, margen_recom*1.4) if margin_vals else 100])
             st.plotly_chart(fig_ing, use_container_width=True)
 
             ult_rev_v, ult_net_v, ult_mar_v = rev_vals[-1], net_vals[-1], margin_vals[-1]
             ini_mar_v = margin_vals[0]
-            tend_margen = "expandiendo márgenes" if ult_mar_v >= ini_mar_v else "comprimiendo márgenes respecto a hace unos años"
+            eval_margen = "✅ FOSO SÓLIDO (Margen Saludable)" if ult_mar_v >= margen_recom else "⚠️ MARGEN ESTRECHO (Mayor vulnerabilidad)"
 
             st.markdown(f"""
 <div class="explicacion-graf notranslate" translate="no">
-💡 <strong>Qué vemos en el último cierre ({x_years_rev[-1]}):</strong> Facturó <strong>{f_millones(ult_rev_v, sym)}</strong> y obtuvo un beneficio neto limpio de <strong>{f_millones(ult_net_v, sym)}</strong>. Su <strong>Margen Neto es del {f_num(ult_mar_v, 1, '%')}</strong> (en {x_years_rev[0]} era del {f_num(ini_mar_v, 1, '%')}), por lo que de cada 100{sym} vendidos gana <strong>{f_num(ult_mar_v, 2, sym)} limpios</strong>, {tend_margen}.
+🎯 <strong>Criterio DGI Moderno & Geraldine Weiss:</strong> El dividendo debe estar protegido por un foso económico (*moat*) evidenciado en un <strong>Margen Neto ≥ {margen_recom:.0f}%</strong> y un crecimiento del negocio que supere la inflación anual.<br>
+💡 <strong>Diagnóstico {ticker_symbol} ({x_years_rev[-1]}):</strong> Facturación de <strong>{f_millones(ult_rev_v, sym)}</strong> con beneficio limpio de <strong>{f_millones(ult_net_v, sym)}</strong>. Su <strong>Margen Neto actual es del {f_num(ult_mar_v, 1, '%')}</strong> (en {x_years_rev[0]} era del {f_num(ini_mar_v, 1, '%')}) ➔ <strong>{eval_margen}</strong>.
 </div>
 """, unsafe_allow_html=True)
         else:
             st.info("Datos anuales insuficientes para el gráfico de Ingresos.")
 
-    # 6. EV / FCF Y 7. EV / EBITDA
+    # ==========================================
+    # 6. EV / FCF (CRITERIO DGI: VALORACIÓN COMPLETA CON DEUDA)
+    # ==========================================
     st.markdown("---")
     col_graf5, col_graf6 = st.columns(2)
     with col_graf5:
+        umbral_ev_fcf_recom = 15.0 if es_reit_puro else 16.0
         st.markdown(f"#### ⚖️ 6. Valoración Empresarial: EV / {etiqueta_fcf.split()[0]}")
         years_ev = sorted(list(set(fcf_s.index) & set(shares_s.index) & set(yearly_closes.index)))
         if years_ev:
@@ -902,20 +963,32 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             fig_ev.add_trace(go.Bar(x=x_years_ev, y=ev_vals, name='Enterprise Value (EV)', marker_color='#9c27b0'), secondary_y=False)
             fig_ev.add_trace(go.Bar(x=x_years_ev, y=fcf_ev_vals, name=etiqueta_fcf.split()[0], marker_color='#00d4ff'), secondary_y=False)
             fig_ev.add_trace(go.Scatter(x=x_years_ev, y=ratio_vals, name='Ratio EV/Caja', mode='lines+markers+text', text=[f_num(val, 1, 'x') for val in ratio_vals], textposition="top center", line=dict(color='#21c354', width=2.2)), secondary_y=True)
-            fig_ev.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=310, barmode='group', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            
+            # Línea de umbral objetivo DGI
+            fig_ev.add_hline(y=umbral_ev_fcf_recom, line_dash="dash", line_color="#21c354", annotation_text=f"Objetivo DGI (≤{umbral_ev_fcf_recom:.0f}x)", annotation_position="bottom right", secondary_y=True)
+
+            fig_ev.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=320, barmode='group', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            fig_ev.update_yaxes(title_text=f"Importe ({sym})", secondary_y=False)
+            fig_ev.update_yaxes(title_text="EV/Caja (x)", secondary_y=True, showgrid=False, range=[0, max(max(ratio_vals)*1.25, umbral_ev_fcf_recom*1.4) if ratio_vals else 25])
             st.plotly_chart(fig_ev, use_container_width=True)
 
             ult_ev_fcf = ratio_vals[-1]
-            comp_ev_txt = "más barata que su media reciente" if ult_ev_fcf <= media_ev_fcf else "por encima de su media reciente"
+            eval_ev_fcf = "✅ ENTRADA EN VALORACIÓN ATRACTIVA" if ult_ev_fcf <= umbral_ev_fcf_recom else ("🟡 DENTRO DE SU MEDIA HISTÓRICA" if ult_ev_fcf <= media_ev_fcf else "⚠️ MÚLTIPLO EXIGENTE / SOBREVALORADO")
+
             st.markdown(f"""
 <div class="explicacion-graf notranslate" translate="no">
-💡 <strong>Qué vemos hoy:</strong> Incluyendo su capitalización más su deuda neta (Enterprise Value de <strong>{f_millones(ev_vals[-1], sym)}</strong>), cerró en un múltiplo de <strong>{f_num(ult_ev_fcf, 1, 'x')} EV/{etiqueta_fcf.split()[0]}</strong> frente a su media histórica reciente de <strong>{f_num(media_ev_fcf, 1, 'x')}</strong> ({comp_ev_txt}).
+🎯 <strong>Criterio DGI Moderno & Geraldine Weiss:</strong> Para comprar con margen de seguridad real considerando la deuda neta, lo recomendable es un múltiplo <strong>EV/FCF ≤ {umbral_ev_fcf_recom:.0f}x</strong> o cotizar por debajo de su media histórica ({f_num(media_ev_fcf, 1, 'x')}).<br>
+💡 <strong>Diagnóstico {ticker_symbol}:</strong> Con un Enterprise Value de <strong>{f_millones(ev_vals[-1], sym)}</strong>, cotiza a un múltiplo de <strong style="color:{'#21c354' if ult_ev_fcf <= umbral_ev_fcf_recom else '#ff4b4b'};">{f_num(ult_ev_fcf, 1, 'x')} EV/{etiqueta_fcf.split()[0]}</strong> ➔ <strong>{eval_ev_fcf}</strong>.
 </div>
 """, unsafe_allow_html=True)
         else:
             st.info("Datos insuficientes para el gráfico EV/FCF.")
 
+    # ==========================================
+    # 7. EV / EBITDA (CRITERIO DGI: MÚLTIPLO OPERATIVO)
+    # ==========================================
     with col_graf6:
+        umbral_ev_ebitda_recom = 13.0 if (es_reit_puro or es_utility_pura) else 11.0
         st.markdown("#### 🏢 7. Múltiplo Operativo: EV / EBITDA")
         years_ebitda = sorted(list(set(ebitda_s.index) & set(shares_s.index) & set(yearly_closes.index)))
         if years_ebitda:
@@ -929,22 +1002,35 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             fig_ebitda.add_trace(go.Bar(x=x_years_eb, y=ebitda_vals, name='EBITDA', marker_color='#0288d1'), secondary_y=False)
             fig_ebitda.add_trace(go.Bar(x=x_years_eb, y=ev_eb_vals, name='Enterprise Value (EV)', marker_color='#ff9800'), secondary_y=False)
             fig_ebitda.add_trace(go.Scatter(x=x_years_eb, y=ratio_eb_vals, name='Ratio EV/EBITDA', mode='lines+markers+text', text=[f_num(val, 1, 'x') for val in ratio_eb_vals], textposition="top center", line=dict(color='#ff1744', width=2.2)), secondary_y=True)
-            fig_ebitda.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=310, barmode='group', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            
+            # Línea de umbral operativo recomendado
+            fig_ebitda.add_hline(y=umbral_ev_ebitda_recom, line_dash="dash", line_color="#21c354", annotation_text=f"Techo Razonable DGI (≤{umbral_ev_ebitda_recom:.0f}x)", annotation_position="bottom right", secondary_y=True)
+
+            fig_ebitda.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=320, barmode='group', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            fig_ebitda.update_yaxes(title_text=f"Importe ({sym})", secondary_y=False)
+            fig_ebitda.update_yaxes(title_text="EV/EBITDA (x)", secondary_y=True, showgrid=False, range=[0, max(max(ratio_eb_vals)*1.25, umbral_ev_ebitda_recom*1.4) if ratio_eb_vals else 20])
             st.plotly_chart(fig_ebitda, use_container_width=True)
 
             ult_ev_eb = ratio_eb_vals[-1]
+            eval_ev_eb = "✅ MÚLTIPLO OPERATIVO ATRACTIVO" if ult_ev_eb <= umbral_ev_ebitda_recom else ("🟡 EN LÍNEA CON SU MEDIA" if ult_ev_eb <= media_ev_eb else "⚠️ PRIMA OPERATIVA EXCESIVA")
+
             st.markdown(f"""
 <div class="explicacion-graf notranslate" translate="no">
-💡 <strong>Qué vemos hoy:</strong> Con un EBITDA anual de <strong>{f_millones(ebitda_vals[-1], sym)}</strong>, el múltiplo operativo EV/EBITDA se sitúa en <strong>{f_num(ult_ev_eb, 1, 'x')}</strong> (siendo su media de los últimos años de <strong>{f_num(media_ev_eb, 1, 'x')}</strong>).
+🎯 <strong>Criterio DGI Moderno & Geraldine Weiss:</strong> Evitar pagar sobreprecio por la capacidad de generar negocio bruto. Lo aconsejable es un <strong>EV/EBITDA ≤ {umbral_ev_ebitda_recom:.0f}x</strong> (o no superar su media histórica de {f_num(media_ev_eb, 1, 'x')}).<br>
+💡 <strong>Diagnóstico {ticker_symbol}:</strong> Con un EBITDA de <strong>{f_millones(ebitda_vals[-1], sym)}</strong>, cotiza a <strong style="color:{'#21c354' if ult_ev_eb <= umbral_ev_ebitda_recom else '#ff4b4b'};">{f_num(ult_ev_eb, 1, 'x')} EV/EBITDA</strong> ➔ <strong>{eval_ev_eb}</strong>.
 </div>
 """, unsafe_allow_html=True)
         else:
             st.info("Datos insuficientes para el gráfico EV/EBITDA.")
 
-    # 8. DEUDA NETA VS FCF Y 9. VENCIMIENTOS DE DEUDA (CORTO VS LARGO PLAZO)
+    # ==========================================
+    # 8. DEUDA NETA VS FCF (CRITERIO DGI: AÑOS DE DESAPALANCAMIENTO)
+    # ==========================================
     st.markdown("---")
     col_graf7, col_graf8 = st.columns(2)
     with col_graf7:
+        umbral_anios_deuda_recom = 5.0 if es_regulada_o_reit else 3.0
+        umbral_anios_deuda_max = 6.5 if es_regulada_o_reit else 4.2
         st.markdown(f"#### 🛡️ 8. Solvencia Real: Deuda Neta vs {etiqueta_fcf.split()[0]}")
         years_debt = sorted(list(set(fcf_s.index) & set(debt_s.index)))
         if years_debt:
@@ -957,21 +1043,31 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             fig_deuda.add_trace(go.Bar(x=x_years_d, y=fcf_d_vals, name=etiqueta_fcf.split()[0], marker_color='#0288d1'), secondary_y=False)
             fig_deuda.add_trace(go.Bar(x=x_years_d, y=net_debt_vals, name='Deuda Neta', marker_color='#ff9800'), secondary_y=False)
             fig_deuda.add_trace(go.Scatter(x=x_years_d, y=ratio_d_vals, name='Años para pagar (Deuda/Caja)', mode='lines+markers+text', text=[f_num(val, 2, 'x') for val in ratio_d_vals], textposition="top center", line=dict(color='#ff1744', width=2.2)), secondary_y=True)
-            fig_deuda.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=310, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            
+            # Línea de referencia recomendada
+            fig_deuda.add_hline(y=umbral_anios_deuda_recom, line_dash="dash", line_color="#21c354", annotation_text=f"Máximo Recomendable DGI (≤{umbral_anios_deuda_recom:.1f}A)", annotation_position="bottom right", secondary_y=True)
+
+            fig_deuda.update_layout(template='plotly_dark', margin=dict(l=0, r=0, t=10, b=50), height=320, barmode='group', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
             fig_deuda.update_yaxes(title_text=f"Importe ({sym})", secondary_y=False)
-            fig_deuda.update_yaxes(title_text="Años de Caja", secondary_y=True, showgrid=False, range=[0, max(ratio_d_vals)*1.25 if ratio_d_vals else 5])
+            fig_deuda.update_yaxes(title_text="Años de Caja", secondary_y=True, showgrid=False, range=[0, max(max(ratio_d_vals)*1.25, umbral_anios_deuda_recom*1.4) if ratio_d_vals else 6])
             st.plotly_chart(fig_deuda, use_container_width=True)
 
             ult_nd_v = net_debt_vals[-1]
             ult_rat_d = ratio_d_vals[-1]
+            eval_deuda = "✅ BALANCE BLINDADO (Deuda muy baja)" if ult_rat_d <= umbral_anios_deuda_recom else ("🟡 APALANCAMIENTO MANEJABLE" if ult_rat_d <= umbral_anios_deuda_max else "🚨 EXCESO DE DEUDA: RIESGO DE RECORTE")
+
             st.markdown(f"""
 <div class="explicacion-graf notranslate" translate="no">
-💡 <strong>Qué vemos hoy:</strong> La Deuda Neta es de <strong>{f_millones(ult_nd_v, sym)}</strong> frente a <strong>{f_millones(fcf_d_vals[-1], sym)}</strong> de caja anual generada. Tardaría exactamente <strong>{f_num(ult_rat_d, 2)} años</strong> de su flujo libre en dejar su deuda neta a cero.
+🎯 <strong>Criterio DGI Moderno & Geraldine Weiss:</strong> La deuda excesiva es el mayor riesgo para un dividendo. Lo óptimo es que la compañía pueda <strong>extinguir el 100% de su Deuda Neta en ≤ {umbral_anios_deuda_recom:.1f} años de Flujo de Caja Libre</strong> ({'≤5,0A en negocios de activos intensivos' if es_regulada_o_reit else '≤3,0A en consumo e industria'}).<br>
+💡 <strong>Diagnóstico {ticker_symbol}:</strong> Deuda Neta de <strong>{f_millones(ult_nd_v, sym)}</strong> frente a <strong>{f_millones(fcf_d_vals[-1], sym)}</strong> de flujo anual. Tardaría <strong style="color:{'#21c354' if ult_rat_d <= umbral_anios_deuda_recom else '#ff4b4b'};">{f_num(ult_rat_d, 2)} años</strong> de caja en cancelarla ➔ <strong>{eval_deuda}</strong>.
 </div>
 """, unsafe_allow_html=True)
         else:
             st.info("Datos insuficientes para el gráfico de Deuda Neta / FCF.")
 
+    # ==========================================
+    # 9. LIQUIDEZ VS VENCIMIENTOS (CRITERIO DGI: VENCIMIENTOS A CORTO PLAZO)
+    # ==========================================
     with col_graf8:
         st.markdown("#### ⏳ 9. Liquidez vs Vencimientos de Deuda (Corto y Largo Plazo)")
         if not bs_stmt.empty:
@@ -993,15 +1089,19 @@ def render_salud_financiera(ticker_symbol, años_analisis):
                 fig_venc.add_trace(go.Bar(y=['Balance Actual'], x=[caja_actual_bs], name='Liquidez (Caja)', orientation='h', marker_color='#21c354', text=f_millones(caja_actual_bs, sym), textposition='inside'))
                 fig_venc.add_trace(go.Bar(y=['Balance Actual'], x=[st_debt], name='Deuda Corto (< 1 Año)', orientation='h', marker_color='#ff9800', text=f_millones(st_debt, sym), textposition='inside'))
                 fig_venc.add_trace(go.Bar(y=['Balance Actual'], x=[lt_debt], name='Deuda Largo (> 1 Año)', orientation='h', marker_color='#ff4b4b', text=f_millones(lt_debt, sym), textposition='inside'))
-                fig_venc.update_layout(barmode='stack', template='plotly_dark', margin=dict(l=0, r=0, t=20, b=70), height=310, hovermode="y unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), xaxis=dict(showticklabels=False, title=""))
+                fig_venc.update_layout(barmode='stack', template='plotly_dark', margin=dict(l=0, r=0, t=20, b=70), height=320, hovermode="y unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="center", x=0.5), xaxis=dict(showticklabels=False, title=""))
                 st.plotly_chart(fig_venc, use_container_width=True)
 
                 cobertura_corto_pct = (caja_actual_bs / st_debt * 100) if st_debt > 0 else 999.0
-                estado_liquidez = f"cubre el <strong>{f_num(cobertura_corto_pct, 0, '%')}</strong> de los vencimientos a corto plazo sin necesidad de refinanciarse" if st_debt > 0 else "no tiene deuda con vencimiento inferior a 12 meses"
+                total_deuda_sum = st_debt + lt_debt
+                peso_st_debt = (st_debt / total_deuda_sum * 100) if total_deuda_sum > 0 else 0.0
+                
+                eval_liq = "✅ EXCELENTE LIQUIDEZ (Cubre 100% sin refinanciar)" if cobertura_corto_pct >= 100.0 else ("🟡 COBERTURA SUFICIENTE" if cobertura_corto_pct >= 60.0 else "⚠️ RIESGO DE REFINANCIACIÓN A CORTO PLAZO")
 
                 st.markdown(f"""
 <div class="explicacion-graf notranslate" translate="no">
-💡 <strong>Qué vemos en el último balance:</strong> Cuenta con <strong>{f_millones(caja_actual_bs, sym)}</strong> en liquidez inmediata (verde) frente a <strong>{f_millones(st_debt, sym)}</strong> de deuda que vence en menos de 12 meses (naranja) y <strong>{f_millones(lt_debt, sym)}</strong> a largo plazo (roja). Su tesorería {estado_liquidez}.
+🎯 <strong>Criterio DGI Moderno & Geraldine Weiss:</strong> La tesorería debe <strong>cubrir al menos el 100% de la deuda a corto plazo (&lt; 1 año)</strong> y los vencimientos cercanos deben representar <strong>menos del 20-25% de la deuda total</strong> para blindar a la empresa contra shocks crediticios.<br>
+💡 <strong>Diagnóstico {ticker_symbol}:</strong> Dispone de <strong>{f_millones(caja_actual_bs, sym)}</strong> en caja frente a <strong>{f_millones(st_debt, sym)}</strong> que vencen en menos de 12 meses (cobertura del <strong style="color:{'#21c354' if cobertura_corto_pct >= 100 else '#ff4b4b'};">{f_num(cobertura_corto_pct, 0, '%')}</strong> ➔ <strong>{eval_liq}</strong>). La deuda a corto plazo supone solo un <strong>{f_num(peso_st_debt, 1, '%')}</strong> del pasivo total.
 </div>
 """, unsafe_allow_html=True)
             else:
