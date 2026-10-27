@@ -107,6 +107,20 @@ def cargar_fundamentales_pesados(ticker_symbol):
         shares_hist = t.get_shares_full(start="2008-01-01")
     except Exception: pass
 
+    earnings_est = pd.DataFrame()
+    try:
+        ee = t.earnings_estimate
+        if ee is not None and not ee.empty:
+            earnings_est = ee
+    except Exception: pass
+
+    eps_trend = pd.DataFrame()
+    try:
+        et = t.eps_trend
+        if et is not None and not et.empty:
+            eps_trend = et
+    except Exception: pass
+
     curr_cot = info.get('currency')
     if not curr_cot:
         try:
@@ -129,7 +143,7 @@ def cargar_fundamentales_pesados(ticker_symbol):
         except Exception:
             fx_rate = 1.0
 
-    return info, divs, inc_stmt, bs_stmt, cf_stmt, shares_hist, fx_rate, curr_fin
+    return info, divs, inc_stmt, bs_stmt, cf_stmt, shares_hist, fx_rate, curr_fin, earnings_est, eps_trend
 
 @st.cache_data(ttl=15, show_spinner=False)
 def cargar_cotizacion_tiempo_real(ticker_symbol):
@@ -153,7 +167,7 @@ def cargar_cotizacion_tiempo_real(ticker_symbol):
 # FUNCIÓN PRINCIPAL PESTAÑA 2: SALUD FINANCIERA
 # ==========================================
 def render_salud_financiera(ticker_symbol, años_analisis):
-    info, dividendos_raw, inc_stmt, bs_stmt, cf_stmt, shares_hist, fx_rate, curr_fin = cargar_fundamentales_pesados(ticker_symbol)
+    info, dividendos_raw, inc_stmt, bs_stmt, cf_stmt, shares_hist, fx_rate, curr_fin, earnings_est, eps_trend = cargar_fundamentales_pesados(ticker_symbol)
     historial_raw, precio_vivo, shares_fast, mcap_fast = cargar_cotizacion_tiempo_real(ticker_symbol)
 
     if dividendos_raw.empty or len(historial_raw) < 252:
@@ -278,12 +292,6 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 
     bpa_trailing = get_safe('trailingEps', 0.0)
     if bpa_trailing == 0: bpa_trailing = ultimo_valor_tabla(inc_stmt, ['Diluted EPS', 'Basic EPS']) * fx_rate
-    bpa_forward = get_safe('forwardEps', 0.0)
-
-    per_actual = get_safe('trailingPE', 0.0)
-    if per_actual <= 0 and bpa_trailing > 0: per_actual = precio_actual / bpa_trailing
-    per_forward = get_safe('forwardPE', 0.0)
-    if per_forward <= 0 and bpa_forward > 0: per_forward = precio_actual / bpa_forward
 
     total_debt = get_safe('totalDebt', 0.0) * fx_rate
     if total_debt <= 0: total_debt = ultimo_valor_tabla(bs_stmt, ['Total Debt', 'Long Term Debt And Capital Lease Obligation', 'Long Term Debt']) * fx_rate
@@ -359,7 +367,17 @@ def render_salud_financiera(ticker_symbol, años_analisis):
                     revenue_cagr_3y = (((rev_series.iloc[-1] / rev_series.iloc[-4]) ** (1 / 3)) - 1) * 100
                 break
 
-    # Cobertura de intereses (EBITDA/Intereses en REITs; EBIT/Intereses en el resto)
+    # Crecimiento de BPA 3A
+    crecimiento_bpa_3y = None
+    if not inc_stmt.empty:
+        for k in ['Diluted EPS', 'Basic EPS']:
+            if k in inc_stmt.index:
+                eps_series = inc_stmt.loc[k].dropna()
+                if len(eps_series) >= 4 and eps_series.iloc[-4] > 0 and eps_series.iloc[-1] > 0:
+                    crecimiento_bpa_3y = (((eps_series.iloc[-1] / eps_series.iloc[-4]) ** (1 / 3)) - 1) * 100
+                break
+
+    # Cobertura de intereses
     cobertura_intereses = None
     if not inc_stmt.empty:
         try:
@@ -439,7 +457,80 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         except Exception: pass
 
     # ==========================================
-    # CABECERA Y TARJETAS EJECUTIVAS DGI (BPA Y PER ACTUAL VS FUTURO)
+    # RECUPERACIÓN / ESTIMACIÓN BLINDADA DE BPA Y PER FUTURO
+    # ==========================================
+    bpa_forward = get_safe('forwardEps', 0.0)
+    if bpa_forward == 0:
+        bpa_forward = get_safe('epsForward', 0.0)
+    origen_fwd = "Consenso de analistas para los próximos 4 trimestres"
+
+    if bpa_forward == 0 and earnings_est is not None and not earnings_est.empty:
+        try:
+            for p_col in ['+1y', '0y', '+1q']:
+                if p_col in earnings_est.index and 'avg' in earnings_est.columns:
+                    val_e = earnings_est.loc[p_col, 'avg']
+                    if pd.notna(val_e) and float(val_e) != 0:
+                        bpa_forward = float(val_e)
+                        origen_fwd = f"Consenso analistas ({p_col})"
+                        break
+                elif 'avg' in earnings_est.index and p_col in earnings_est.columns:
+                    val_e = earnings_est.loc['avg', p_col]
+                    if pd.notna(val_e) and float(val_e) != 0:
+                        bpa_forward = float(val_e)
+                        origen_fwd = f"Consenso analistas ({p_col})"
+                        break
+        except Exception: pass
+
+    if bpa_forward == 0 and eps_trend is not None and not eps_trend.empty:
+        try:
+            for p_col in ['+1y', '0y']:
+                if p_col in eps_trend.index and 'current' in eps_trend.columns:
+                    val_e = eps_trend.loc[p_col, 'current']
+                    if pd.notna(val_e) and float(val_e) != 0:
+                        bpa_forward = float(val_e)
+                        origen_fwd = f"Tendencia EPS analistas ({p_col})"
+                        break
+                elif 'current' in eps_trend.index and p_col in eps_trend.columns:
+                    val_e = eps_trend.loc['current', p_col]
+                    if pd.notna(val_e) and float(val_e) != 0:
+                        bpa_forward = float(val_e)
+                        origen_fwd = f"Tendencia EPS analistas ({p_col})"
+                        break
+        except Exception: pass
+
+    per_forward_raw = get_safe('forwardPE', 0.0)
+    if bpa_forward == 0 and per_forward_raw > 0 and precio_actual > 0:
+        bpa_forward = precio_actual / per_forward_raw
+        origen_fwd = "Derivado de PER Forward de consenso"
+
+    # MODELADO FUNDAMENTAL DGI SI YAHOO CARECE DE COBERTURA (Común en bolsas europeas/españolas)
+    if bpa_forward == 0 and bpa_trailing > 0:
+        candidatos_crec = []
+        if crecimiento_bpa_3y is not None and -20.0 < crecimiento_bpa_3y < 35.0:
+            candidatos_crec.append(crecimiento_bpa_3y)
+        if revenue_cagr_3y is not None and -15.0 < revenue_cagr_3y < 25.0:
+            candidatos_crec.append(revenue_cagr_3y)
+        payout_raw = (forward_dividend / bpa_trailing * 100) if bpa_trailing > 0 else 50.0
+        if roe > 0 and 0 < payout_raw < 100:
+            sgr = roe * (1.0 - (payout_raw / 100.0))
+            if 0 < sgr < 25.0: candidatos_crec.append(sgr)
+        if dgr_5y is not None and 0 < dgr_5y < 20.0:
+            candidatos_crec.append(dgr_5y)
+
+        tasa_fwd = float(np.median(candidatos_crec)) if candidatos_crec else 4.0
+        tasa_fwd = max(-10.0, min(18.0, tasa_fwd))
+        bpa_forward = bpa_trailing * (1.0 + (tasa_fwd / 100.0))
+        origen_fwd = f"Proyección Fundamental DGI ({tasa_fwd:+.1f}% s/ histórico)"
+
+    if bpa_forward != 0 and fx_rate != 1.0 and origen_fwd.startswith("Consenso"):
+        bpa_forward = bpa_forward * fx_rate
+
+    per_actual = get_safe('trailingPE', 0.0)
+    if per_actual <= 0 and bpa_trailing > 0: per_actual = precio_actual / bpa_trailing
+    per_forward = per_forward_raw if per_forward_raw > 0 else (precio_actual / bpa_forward if bpa_forward > 0 else 0.0)
+
+    # ==========================================
+    # CABECERA Y TARJETAS EJECUTIVAS DGI (TODOS LOS NÚMEROS COLOREADOS)
     # ==========================================
     st.header(f"📊 Radiografía Financiera y Gráficos — {nombre_empresa} ({ticker_symbol})")
     st.caption(f"Sector: {sector_final} | Divisa de análisis: {currency} ({sym}) | Ventana histórica: {años_analisis} Años")
@@ -467,19 +558,18 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 <strong style="font-size: 1.45rem; color: {col_bpa_fwd};">{f_num(bpa_forward, 2, sym)}</strong>
 </div>
 </div>
-<span style="font-size: 0.75rem; color: #888;">Consenso de analistas para los próximos 4 trimestres (apoyo de subidas del cupón)</span>
+<span style="font-size: 0.75rem; color: #888;">{origen_fwd}</span>
 </div>
 """, unsafe_allow_html=True)
         else:
-            txt_fwd = f_num(bpa_forward, 2, sym) if bpa_forward != 0 else "N/D"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">💵 Beneficio por Acción (BPA Actual ➔ Futuro)</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.35rem; font-weight: bold; color:{col_bpa_act};">Actual: {f_num(bpa_trailing, 2, sym)}</span>
-<span style="font-size: 1.1rem; color:{col_bpa_fwd};">Futuro: {txt_fwd}</span>
+<strong style="font-size: 1.35rem; color:{col_bpa_act};">Actual: {f_num(bpa_trailing, 2, sym)}</strong>
+<strong style="font-size: 1.1rem; color:#ff4b4b;">Futuro: N/D</strong>
 </div>
-<span style="font-size: 0.75rem; color: #888;">Datos de previsión a futuro limitados en Yahoo Finance</span>
+<span style="font-size: 0.75rem; color: #888;">Datos de previsión a futuro no disponibles</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -490,7 +580,7 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         if per_actual > 0 and per_forward > 0:
             var_per = ((per_forward - per_actual) / per_actual) * 100
             p_class = "badge-verde" if var_per < -1.0 else ("badge-ambar" if var_per <= 2.0 else "badge-rojo")
-            p_txt = "Se abarata por BPA" if var_per < -1.0 else ("Estable" if var_per <= 2.0 else "Encariñamiento")
+            p_txt = "Se abarata por BPA" if var_per < -1.0 else ("Estable" if var_per <= 2.0 else "Encarecimiento")
             
             reit_extra = f" <span style='font-size:0.75rem; color:#00d4ff;'>· P/FFO: {f_num(p_fcf, 1, 'x')}</span>" if (es_reit_puro and p_fcf > 0) else ""
             st.markdown(f"""
@@ -512,13 +602,12 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 </div>
 """, unsafe_allow_html=True)
         else:
-            txt_pfwd = f_num(per_forward, 1, 'x') if per_forward > 0 else "N/D"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">🏷️ Múltiplo de Valoración (PER Actual ➔ Futuro)</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.35rem; font-weight: bold; color:{c_per_act};">Actual: {f_num(per_actual, 1, 'x')}</span>
-<span style="font-size: 1.1rem; color:{c_per_fwd};">Futuro: {txt_pfwd}</span>
+<strong style="font-size: 1.35rem; color:{c_per_act};">Actual: {f_num(per_actual, 1, 'x')}</strong>
+<strong style="font-size: 1.1rem; color:#ff4b4b;">Futuro: N/D</strong>
 </div>
 <span style="font-size: 0.75rem; color: #888;">Objetivo DGI: ≤16,0x óptimo de entrada</span>
 </div>
@@ -531,14 +620,17 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         if val_rent_mostrar is not None and val_rent_mostrar > 0:
             umbral_alto = 28.0 if (es_reit_puro and val_rent_mostrar == operating_margins) else 15.0
             umbral_medio = 18.0 if (es_reit_puro and val_rent_mostrar == operating_margins) else 9.0
-            if val_rent_mostrar >= umbral_alto: r_badge, r_txt = "badge-verde", f"Foso Amplio (≥ {f_num(umbral_alto, 0, '%')})"
-            elif val_rent_mostrar >= umbral_medio: r_badge, r_txt = "badge-ambar", f"Foso Medio (≥ {f_num(umbral_medio, 0, '%')})"
-            else: r_badge, r_txt = "badge-rojo", f"Foso Débil (< {f_num(umbral_medio, 0, '%')})"
+            if val_rent_mostrar >= umbral_alto: 
+                r_badge, r_txt, c_rent_num = "badge-verde", f"Foso Amplio (≥ {f_num(umbral_alto, 0, '%')})", "#21c354"
+            elif val_rent_mostrar >= umbral_medio: 
+                r_badge, r_txt, c_rent_num = "badge-ambar", f"Foso Medio (≥ {f_num(umbral_medio, 0, '%')})", "#faca2b"
+            else: 
+                r_badge, r_txt, c_rent_num = "badge-rojo", f"Foso Débil (< {f_num(umbral_medio, 0, '%')})", "#ff4b4b"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">{lbl_rent}</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(val_rent_mostrar, 2, '%')}</span>
+<strong style="font-size: 1.5rem; color: {c_rent_num};">{f_num(val_rent_mostrar, 2, '%')}</strong>
 <span class="{r_badge}">{r_txt}</span>
 </div>
 <span style="font-size: 0.75rem; color: #888;">Rentabilidad real que genera el negocio sobre su capital</span>
@@ -548,20 +640,24 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">{lbl_rent}</span>
-<div style="font-size: 1.3rem; font-weight: bold; margin-top: 4px;">N/D</div>
+<div style="font-size: 1.3rem; font-weight: bold; color: #888; margin-top: 4px;">N/D</div>
 <span style="font-size: 0.75rem; color: #888;">Datos de balance insuficientes</span>
 </div>
 """, unsafe_allow_html=True)
 
     with col_foso2:
         if revenue_cagr_3y is not None:
-            v_badge = "badge-verde" if revenue_cagr_3y >= 3.0 else ("badge-ambar" if revenue_cagr_3y > 0 else "badge-rojo")
-            v_txt = "Expandiendo" if revenue_cagr_3y >= 3.0 else ("Crec. Lento" if revenue_cagr_3y > 0 else "Contrayendo")
+            if revenue_cagr_3y >= 3.0:
+                v_badge, v_txt, c_rev_num = "badge-verde", "Expandiendo", "#21c354"
+            elif revenue_cagr_3y > 0:
+                v_badge, v_txt, c_rev_num = "badge-ambar", "Crec. Lento", "#faca2b"
+            else:
+                v_badge, v_txt, c_rev_num = "badge-rojo", "Contrayendo", "#ff4b4b"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">📊 Crecimiento de Ventas (Top-Line 3A)</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(revenue_cagr_3y, 2, '%', signo_pos=True)}</span>
+<strong style="font-size: 1.5rem; color: {c_rev_num};">{f_num(revenue_cagr_3y, 2, '%', signo_pos=True)}</strong>
 <span class="{v_badge}">{v_txt}</span>
 </div>
 <span style="font-size: 0.75rem; color: #888;">CAGR anualizado de ingresos netos (filtro anti trampa de valor)</span>
@@ -571,7 +667,7 @@ def render_salud_financiera(ticker_symbol, años_analisis):
             st.markdown("""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">📊 Crecimiento de Ventas (Top-Line 3A)</span>
-<div style="font-size: 1.3rem; font-weight: bold; margin-top: 4px;">N/D</div>
+<div style="font-size: 1.3rem; font-weight: bold; color: #888; margin-top: 4px;">N/D</div>
 <span style="font-size: 0.75rem; color: #888;">Historial de facturación insuficiente</span>
 </div>
 """, unsafe_allow_html=True)
@@ -579,25 +675,29 @@ def render_salud_financiera(ticker_symbol, años_analisis):
     col_sol1, col_sol2 = st.columns(2)
     with col_sol1:
         if es_financiera:
+            c_pb = "#21c354" if 0 < price_to_book <= 1.2 else ("#faca2b" if price_to_book <= 1.8 else "#ff4b4b")
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">🏦 Precio / Valor Contable (P/B)</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(price_to_book, 2, 'x')}</span>
+<strong style="font-size: 1.5rem; color: {c_pb};">{f_num(price_to_book, 2, 'x')}</strong>
 <span class="{'badge-verde' if 0 < price_to_book <= 1.5 else 'badge-ambar'}">Banca/Seguros</span>
 </div>
 <span style="font-size: 0.75rem; color: #888;">En entidades financieras no aplica Deuda/EBITDA</span>
 </div>
 """, unsafe_allow_html=True)
         elif deuda_ebitda < 900:
-            if deuda_ebitda <= lim_deuda_optima: b_deb, t_deb = "badge-verde", f"Óptimo (≤ {f_num(lim_deuda_optima, 1, 'x')})"
-            elif deuda_ebitda <= lim_deuda_aceptable: b_deb, t_deb = "badge-ambar", f"Aceptable (≤ {f_num(lim_deuda_aceptable, 1, 'x')})"
-            else: b_deb, t_deb = "badge-rojo", "Apalancada"
+            if deuda_ebitda <= lim_deuda_optima: 
+                b_deb, t_deb, c_deb_num = "badge-verde", f"Óptimo (≤ {f_num(lim_deuda_optima, 1, 'x')})", "#21c354"
+            elif deuda_ebitda <= lim_deuda_aceptable: 
+                b_deb, t_deb, c_deb_num = "badge-ambar", f"Aceptable (≤ {f_num(lim_deuda_aceptable, 1, 'x')})", "#faca2b"
+            else: 
+                b_deb, t_deb, c_deb_num = "badge-rojo", "Apalancada", "#ff4b4b"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">🛡️ Deuda Neta / EBITDA</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(deuda_ebitda, 2, 'x')}</span>
+<strong style="font-size: 1.5rem; color: {c_deb_num};">{f_num(deuda_ebitda, 2, 'x')}</strong>
 <span class="{b_deb}">{t_deb}</span>
 </div>
 <span style="font-size: 0.75rem; color: #888;">Años de EBITDA necesarios para extinguir la deuda neta</span>
@@ -609,14 +709,17 @@ def render_salud_financiera(ticker_symbol, años_analisis):
         u_cob_ok = 3.0 if es_reit_puro else 5.0
         u_cob_med = 1.8 if es_reit_puro else 3.0
         if cobertura_intereses is not None:
-            if cobertura_intereses >= u_cob_ok: b_cob, t_cob = "badge-verde", f"Holgada (≥ {f_num(u_cob_ok, 1, 'x')})"
-            elif cobertura_intereses >= u_cob_med: b_cob, t_cob = "badge-ambar", f"Aceptable (≥ {f_num(u_cob_med, 1, 'x')})"
-            else: b_cob, t_cob = "badge-rojo", f"Riesgo (< {f_num(u_cob_med, 1, 'x')})"
+            if cobertura_intereses >= u_cob_ok: 
+                b_cob, t_cob, c_cob_num = "badge-verde", f"Holgada (≥ {f_num(u_cob_ok, 1, 'x')})", "#21c354"
+            elif cobertura_intereses >= u_cob_med: 
+                b_cob, t_cob, c_cob_num = "badge-ambar", f"Aceptable (≥ {f_num(u_cob_med, 1, 'x')})", "#faca2b"
+            else: 
+                b_cob, t_cob, c_cob_num = "badge-rojo", f"Riesgo (< {f_num(u_cob_med, 1, 'x')})", "#ff4b4b"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">{lbl_cob}</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(cobertura_intereses, 2, 'x')}</span>
+<strong style="font-size: 1.5rem; color: {c_cob_num};">{f_num(cobertura_intereses, 2, 'x')}</strong>
 <span class="{b_cob}">{t_cob}</span>
 </div>
 <span style="font-size: 0.75rem; color: #888;">Veces que el flujo operativo cubre los intereses de la deuda</span>
@@ -624,10 +727,11 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 """, unsafe_allow_html=True)
         else:
             txt_caja_neta = "Caja Neta (Sin Deuda)" if deuda_neta == 0 else "N/D"
+            col_caja_txt = "#21c354" if deuda_neta == 0 else "#888"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">{lbl_cob}</span>
-<div style="font-size: 1.3rem; font-weight: bold; margin-top: 4px;">{txt_caja_neta}</div>
+<div style="font-size: 1.3rem; font-weight: bold; color: {col_caja_txt}; margin-top: 4px;">{txt_caja_neta}</div>
 <span style="font-size: 0.75rem; color: #888;">Sin cargos netos por intereses bancarios</span>
 </div>
 """, unsafe_allow_html=True)
@@ -635,12 +739,17 @@ def render_salud_financiera(ticker_symbol, años_analisis):
     col_caj1, col_caj2 = st.columns(2)
     with col_caj1:
         if meses_caja_div is not None:
-            b_caj = "badge-verde" if meses_caja_div >= 12.0 else ("badge-ambar" if meses_caja_div >= 6.0 else "badge-rojo")
+            if meses_caja_div >= 12.0:
+                b_caj, c_caj_num = "badge-verde", "#21c354"
+            elif meses_caja_div >= 6.0:
+                b_caj, c_caj_num = "badge-ambar", "#faca2b"
+            else:
+                b_caj, c_caj_num = "badge-rojo", "#ff4b4b"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">💰 Colchón de Caja para Dividendos</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(meses_caja_div, 1)} Meses</span>
+<strong style="font-size: 1.5rem; color: {c_caj_num};">{f_num(meses_caja_div, 1)} Meses</strong>
 <span class="{b_caj}">{f_num(meses_caja_div / 12, 1)} Años</span>
 </div>
 <span style="font-size: 0.75rem; color: #888;">Tiempo cubierto solo con su liquidez actual ({f_millones(total_cash, sym)})</span>
@@ -649,15 +758,19 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 
     with col_caj2:
         if variacion_acciones is not None:
-            if variacion_acciones < -0.5: t_acc, c_acc_b, sub_acc = "🟢 Recomprando", "badge-verde", "Destruye acciones y aumenta tu participación"
-            elif variacion_acciones <= 2.0: t_acc, c_acc_b, sub_acc = "🟡 Estable", "badge-ambar", "Capital social prácticamente constante"
-            elif es_reit_puro: t_acc, c_acc_b, sub_acc = "🏢 Ampliación REIT", "badge-ambar", "Emite capital para adquirir nuevos inmuebles"
-            else: t_acc, c_acc_b, sub_acc = "🔴 Diluyendo", "badge-rojo", "Emite acciones nuevas (diluye al accionista)"
+            if variacion_acciones < -0.5: 
+                t_acc, c_acc_b, sub_acc, c_acc_num = "🟢 Recomprando", "badge-verde", "Destruye acciones y aumenta tu participación", "#21c354"
+            elif variacion_acciones <= 2.0: 
+                t_acc, c_acc_b, sub_acc, c_acc_num = "🟡 Estable", "badge-ambar", "Capital social prácticamente constante", "#faca2b"
+            elif es_reit_puro: 
+                t_acc, c_acc_b, sub_acc, c_acc_num = "🏢 Ampliación REIT", "badge-ambar", "Emite capital para adquirir nuevos inmuebles", "#faca2b"
+            else: 
+                t_acc, c_acc_b, sub_acc, c_acc_num = "🔴 Diluyendo", "badge-rojo", "Emite acciones nuevas (diluye al accionista)", "#ff4b4b"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">🔄 Variación de Acciones ({años_analisis} Años)</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.5rem; font-weight: bold;">{f_num(variacion_acciones, 1, '%', signo_pos=True)}</span>
+<strong style="font-size: 1.5rem; color: {c_acc_num};">{f_num(variacion_acciones, 1, '%', signo_pos=True)}</strong>
 <span class="{c_acc_b}">{t_acc}</span>
 </div>
 <span style="font-size: 0.75rem; color: #888;">{sub_acc}</span>
@@ -668,12 +781,17 @@ def render_salud_financiera(ticker_symbol, años_analisis):
     with col_dgr1:
         if dgr_5y is not None:
             inf_diff = dgr_5y - 2.5
-            b_inf = "badge-verde" if inf_diff >= 2.0 else ("badge-ambar" if inf_diff >= 0 else "badge-rojo")
+            if inf_diff >= 2.0:
+                b_inf, c_dgr_num = "badge-verde", "#21c354"
+            elif inf_diff >= 0:
+                b_inf, c_dgr_num = "badge-ambar", "#faca2b"
+            else:
+                b_inf, c_dgr_num = "badge-rojo", "#ff4b4b"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">🚀 DGR 5 Años (Crecimiento Medio Plazo)</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.6rem; font-weight: bold; color: #faca2b;">{f_num(dgr_5y, 2, '%')}</span>
+<strong style="font-size: 1.6rem; color: {c_dgr_num};">{f_num(dgr_5y, 2, '%')}</strong>
 <span class="{b_inf}">{f_num(inf_diff, 1, '%', signo_pos=True)} vs Inflación</span>
 </div>
 <span style="font-size: 0.75rem; color: #888;">Poder adquisitivo ganado anualmente sobre una inflación media del 2,5%</span>
@@ -682,14 +800,17 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 
     with col_dgr2:
         if dgr_1y is not None and dgr_5y is not None:
-            if fatiga_dividendo: t_iner, b_iner = "⚠️ Fatiga (Frenando)", "badge-rojo"
-            elif inercia_ratio is not None and inercia_ratio >= 1.0: t_iner, b_iner = "⚡ Acelerando", "badge-verde"
-            else: t_iner, b_iner = "➡️ Ritmo Estable", "badge-ambar"
+            if fatiga_dividendo or dgr_1y < 0: 
+                t_iner, b_iner, c_iner_num = "⚠️ Fatiga (Frenando)", "badge-rojo", "#ff4b4b"
+            elif inercia_ratio is not None and inercia_ratio >= 1.0: 
+                t_iner, b_iner, c_iner_num = "⚡ Acelerando", "badge-verde", "#21c354"
+            else: 
+                t_iner, b_iner, c_iner_num = "➡️ Ritmo Estable", "badge-ambar", "#faca2b"
             st.markdown(f"""
 <div class="card-dgi notranslate" translate="no">
 <span style="color: #aaa; font-size: 0.85rem;">⏱️ Inercia del Dividendo (Último Año vs Media 5A)</span>
 <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px;">
-<span style="font-size: 1.6rem; font-weight: bold; color: #00d4ff;">{f_num(dgr_1y, 2, '%', signo_pos=True)}</span>
+<strong style="font-size: 1.6rem; color: {c_iner_num};">{f_num(dgr_1y, 2, '%', signo_pos=True)}</strong>
 <span class="{b_iner}">{t_iner}</span>
 </div>
 <span style="font-size: 0.75rem; color: #888;">Última subida anual comparada con su media quinquenal ({f_num(dgr_5y, 2, '%')})</span>
@@ -941,7 +1062,7 @@ def render_salud_financiera(ticker_symbol, años_analisis):
 </div>
 """, unsafe_allow_html=True)
         else:
-            st.info("Datos anuales insuficientes para el gráfico de Ingresos.")
+            st.info("Datos anuales不足 para el gráfico de Ingresos.")
 
     # ==========================================
     # 6. EV / FCF (CRITERIO DGI: VALORACIÓN COMPLETA CON DEUDA)
