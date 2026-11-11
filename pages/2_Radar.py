@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -1469,4 +1469,3 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
         mime="text/csv",
         use_container_width=True
     )
-```
