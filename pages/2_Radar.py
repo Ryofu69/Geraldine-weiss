@@ -710,18 +710,30 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         )
 
         # ==============================================================================
-        # 2. REGLA DE CHOWDER OFICIAL (SEGÚN EL LISTÓN DEL AUTOR DEL GRÁFICO)
+        # 2. REGLA DE CHOWDER REAL (ESTÁNDAR DGI)
         # ==============================================================================
-        # Listón oficial del gráfico:
-        # - Si Rentabilidad (Yield) >= 3.0%: se exigen 12 puntos (o 8 en Utilities/REITs puros de alto yield)
-        # - Si Rentabilidad (Yield) < 3.0%: el autor exige 15 puntos
-        chowder_target_autor = 12.0 if yield_actual >= 3.0 else 15.0
-        chowder_target_sectorial = 8.0 if ((es_utility_pura or es_reit_puro) and yield_actual >= 4.0) else chowder_target_autor
-        chowder_number = (yield_actual + dgr_5y) if dgr_5y is not None else -999.0
+        # Regla de Chowder oficial:
+        # - Utilities / REITs / Telecom con Yield >= 4.0%: Objetivo >= 8 puntos
+        # - Acciones generales con Yield >= 3.0%: Objetivo >= 12 puntos
+        # - Acciones de bajo Yield (< 3.0%): Objetivo >= 15 puntos
+        if (es_utility_pura or es_reit_puro or es_telecom) and yield_actual >= 4.0:
+            chowder_target = 8.0
+            regla_tipo_str = "REIT/Util/Telco (≥8)"
+        elif yield_actual >= 3.0:
+            chowder_target = 12.0
+            regla_tipo_str = "Yield ≥ 3% (≥12)"
+        else:
+            chowder_target = 15.0
+            regla_tipo_str = "Yield < 3% (≥15)"
 
-        pasa_liston_autor = bool(chowder_number != -999.0 and dgr_5y is not None and dgr_5y > 0 and chowder_number >= chowder_target_autor)
-        pasa_12_no_15 = bool(chowder_number != -999.0 and yield_actual < 3.0 and 12.0 <= chowder_number < 15.0)
-        pasa_chowder_ajustado = bool(chowder_number != -999.0 and dgr_5y is not None and dgr_5y >= 1.5 and chowder_number >= chowder_target_sectorial)
+        chowder_number = (yield_actual + dgr_5y) if dgr_5y is not None else -999.0
+        cumple_chowder = bool(
+            chowder_number != -999.0
+            and dgr_5y is not None
+            and dgr_5y > 0
+            and (dgr_1y is None or dgr_1y >= -1.0)
+            and chowder_number >= chowder_target
+        )
 
         # ==============================================================================
         # 3. SCORE DE VALORACIÓN AJUSTADO POR CRECIMIENTO (0 A 10.0 PUNTOS)
@@ -760,7 +772,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
                 pts_chowder = 0.0
             else:
                 chowder_efectivo = min(yield_actual, 7.0) + dgr_5y
-                pts_chowder = interpolar_puntos(chowder_efectivo, chowder_target_sectorial, chowder_target_sectorial - 3.0, 1.5, 0.3, inverso=False)
+                pts_chowder = interpolar_puntos(chowder_efectivo, chowder_target, chowder_target - 3.0, 1.5, 0.3, inverso=False)
         else:
             pts_chowder = 0.0
 
@@ -838,7 +850,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             "Calidad": f"{f_num(score_calidad, 1)}/10",
             "Valoración": f"{f_num(score_val, 1)}/10",
             "Score Total": f"{f_num(score_total, 1)}/20",
-            "Chowder": f"{f_num(chowder_number, 1)} (Obj: {f_num(chowder_target_autor, 0)})" if chowder_number != -999.0 else "N/D",
+            "Chowder": f"{f_num(chowder_number, 1)} (Obj: {f_num(chowder_target, 0)})" if chowder_number != -999.0 else "N/D",
             "Bogle-Weiss 5A": f"{f_num(retorno_bogle_neto, 1, '%', signo_pos=True)}/año (➔ {f_num(valor_total_5a_weiss, 0, sym_m)})",
             col_renta_nombre: f"{f_num(renta_neta_orden_anual, 2, sym_m)}/año ({f_num(acc_compradas, 1)} tít.)",
             "Cotización Actual": f"{f_num(precio_actual, 2, sym_m)} ({f_num(dist_real_suelo, 1, '%', signo_pos=True)})",
@@ -865,6 +877,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
             # Metadatos internos para ordenación, estilos y Gráfico Zona Chowder
             "_nombre": nombre_empresa,
+            "_regla_tipo": regla_tipo_str,
             "_orden_estado": orden_estado,
             "_score_total": score_total,
             "_score_calidad": score_calidad,
@@ -884,11 +897,8 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
             "_dgr_per": dgr_periodo if dgr_periodo is not None else -999,
             "_cbpa3": crecimiento_bpa_3y if crecimiento_bpa_3y is not None else -999,
             "_chowder": chowder_number,
-            "_chowder_target": chowder_target_autor,
-            "_chowder_target_sec": chowder_target_sectorial,
-            "_pasa_liston_autor": pasa_liston_autor,
-            "_pasa_12_no_15": pasa_12_no_15,
-            "_pasa_chowder_sec": pasa_chowder_ajustado,
+            "_chowder_target": chowder_target,
+            "_cumple_chowder": cumple_chowder,
             "_col_renta": col_renta_nombre
         }
     except Exception:
@@ -898,219 +908,210 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 # ==============================================================================
 # GENERADOR DEL GRÁFICO INTERACTIVO "ZONA CHOWDER" + PUNTOS COLOREADOS POR ESTADO
 # ==============================================================================
-def construir_grafico_zona_chowder(df_source, mostrar_etiquetas="Zona Chowder y Compras", acotar_extremos=True):
+def construir_grafico_zona_chowder(df_source, mostrar_etiquetas="Cumplen Chowder y Compras"):
     """
-    Construye el gráfico de la Zona Chowder fiel al diseño de referencia:
-    - Eje X: Crecimiento anual del dividendo, últimos 5 años (%)
+    Construye el gráfico limpio de la Regla de Chowder:
+    - Eje X: Crecimiento anual del dividendo 5A (%)
     - Eje Y: Rentabilidad por dividendo (%)
-    - Zona sombreada dorada: >= 12 puntos (si Yield >= 3%) y >= 15 puntos (si Yield < 3%)
-    - Línea discontinua entre 12 y 15 puntos para Yield < 3% ("Pasa los 12, no los 15")
-    - Puntos coloreados según el Estado en la Watchlist (Verde P95, Azul P90, Rojo Sobrevalorada, Amarillo Mantener, Naranja Trampa...)
+    - Frontera de la Regla de Chowder:
+        * Yield >= 3%: Suma >= 12 puntos
+        * Yield < 3%: Suma >= 15 puntos
+        * Línea punteada auxiliar para REITs/Utilities (Yield >= 4%: Suma >= 8 puntos)
+    - Puntos coloreados 100% según su Estado en la lista (sin bordes amarillos que distorsionen el color ni leyendas superpuestas).
     """
     df_plot = df_source[df_source["_dgr"] != -999].copy()
     if df_plot.empty:
         return None
 
-    # Límites dinámicos o acotados al marco visual clásico [0% - 18%+ en X, 0% - 10%+ en Y]
-    max_x_data = float(df_plot["_dgr"].max()) if not df_plot.empty else 18.0
-    max_y_data = float(df_plot["_y_act"].max()) if not df_plot.empty else 10.0
+    # Rango visual limpio centrado en la zona relevante [-2% a 22% en DGR, 0% a 11% en Yield]
+    # pero ampliable automáticamente con el zoom de Plotly sin aplastar puntos en los bordes
+    q95_x = float(df_plot["_dgr"].quantile(0.95)) if len(df_plot) > 3 else float(df_plot["_dgr"].max())
+    min_x = float(df_plot["_dgr"].min())
+    max_y = float(df_plot["_y_act"].max())
 
-    x_max_axis = max(18.5, min(26.0, max_x_data + 1.5)) if acotar_extremos else max(18.5, max_x_data + 1.5)
-    y_max_axis = max(10.2, min(14.0, max_y_data + 0.8)) if acotar_extremos else max(10.2, max_y_data + 1.0)
-    x_min_axis = 0.0 if acotar_extremos else min(0.0, float(df_plot["_dgr"].min()) - 1.0)
+    x_min_view = max(-5.0, min(0.0, min_x - 1.0))
+    x_max_view = max(18.5, min(26.0, q95_x + 2.5))
+    y_max_view = max(10.0, min(13.5, max_y + 1.0))
 
-    # Coordenadas del área sombreada "Zona Chowder" (Listón del autor: 12 pts si Y >= 3%, 15 pts si Y < 3%)
-    x_top_left = max(0.0, 12.0 - y_max_axis)
-    poly_x = [x_top_left, 9.0, 12.0, 15.0, x_max_axis, x_max_axis, x_top_left]
-    poly_y = [y_max_axis, 3.0, 3.0, 0.0, 0.0, y_max_axis, y_max_axis]
+    # Polígono de la Zona Chowder general (12 pts para Yield >= 3%, 15 pts para Yield < 3%)
+    x_far_right = max(x_max_view + 10.0, float(df_plot["_dgr"].max()) + 5.0)
+    y_far_top = max(y_max_view + 5.0, max_y + 2.0)
+    x_top_intersect = 12.0 - y_far_top
+
+    poly_x = [x_top_intersect, 9.0, 12.0, 15.0, x_far_right, x_far_right, x_top_intersect]
+    poly_y = [y_far_top, 3.0, 3.0, 0.0, 0.0, y_far_top, y_far_top]
 
     fig = go.Figure()
 
-    # 1. Polígono sombreado de la "Zona Chowder"
+    # 1. Área sombreada de la Zona Chowder
     fig.add_trace(go.Scatter(
         x=poly_x,
         y=poly_y,
         fill="toself",
-        fillcolor="rgba(218, 165, 32, 0.22)",
+        fillcolor="rgba(218, 165, 32, 0.18)",
         line=dict(color="rgba(0,0,0,0)"),
         hoverinfo="skip",
-        showlegend=False,
-        name="Zona Chowder"
+        showlegend=False
     ))
 
-    # 2. Línea discontinua amarilla de los 12 puntos totales (desde Y=10% hasta Y=0%, X=12%)
+    # 2. Frontera oficial Regla de Chowder (12 pts si Yield >= 3% | 15 pts si Yield < 3%)
     fig.add_trace(go.Scatter(
-        x=[x_top_left, 9.0, 12.0],
-        y=[y_max_axis, 3.0, 0.0],
+        x=[x_top_intersect, 9.0, 12.0, 15.0],
+        y=[y_far_top, 3.0, 3.0, 0.0],
         mode="lines",
-        line=dict(color="#f5b700", width=2.2, dash="dash"),
+        line=dict(color="#f5b700", width=2.8),
         hoverinfo="skip",
-        name="Línea 12 puntos (Yield + DGR = 12)"
+        showlegend=False
     ))
 
-    # 3. Escalón sólido del autor para Yield < 3% (exige 15 puntos: de (9,3) -> (12,3) -> (15,0))
+    # 3. Proyección discontinua de la diagonal de 12 puntos por debajo del 3% de Yield
     fig.add_trace(go.Scatter(
-        x=[9.0, 12.0, 15.0],
-        y=[3.0, 3.0, 0.0],
+        x=[9.0, 12.0],
+        y=[3.0, 0.0],
         mode="lines",
-        line=dict(color="#f5b700", width=3.4),
+        line=dict(color="rgba(245, 183, 0, 0.55)", width=1.8, dash="dash"),
         hoverinfo="skip",
-        name="Listón estricto (<3% yield exige 15 pts)"
+        showlegend=False
     ))
 
-    # 4. Trazado de las empresas agrupadas por su ESTADO en la lista (con sus colores exactos)
+    # 4. Línea punteada sutil para REITs / Utilities (Regla >= 8 puntos con Yield >= 4%)
+    fig.add_trace(go.Scatter(
+        x=[max(x_min_view, 8.0 - y_far_top), 4.0],
+        y=[y_far_top, 4.0],
+        mode="lines",
+        line=dict(color="rgba(0, 212, 255, 0.40)", width=1.5, dash="dot"),
+        hoverinfo="skip",
+        showlegend=False
+    ))
+
+    # 5. Puntos de las empresas agrupados y coloreados fielmente por su ESTADO en la lista
     orden_estados_leyenda = [
-        "💎 COMPRA FUERTE",
-        "🎯 COMPRA (P95)",
-        "🔵 ACUMULAR (P90)",
-        "🟡 MANTENER",
-        "⚠️ TRAMPA VALOR",
-        "⚪ RIESGO / BAJA CALIDAD",
-        "🔴 SOBREVALORADA"
+        ("💎 COMPRA FUERTE", "Compra Fuerte"),
+        ("🎯 COMPRA (P95)", "Compra P95"),
+        ("🔵 ACUMULAR (P90)", "Acumular P90"),
+        ("🟡 MANTENER", "Mantener"),
+        ("⚠️ TRAMPA VALOR", "Trampa Valor"),
+        ("⚪ RIESGO / BAJA CALIDAD", "Baja Calidad"),
+        ("🔴 SOBREVALORADA", "Sobrevalorada")
     ]
 
-    for est in orden_estados_leyenda:
-        sub = df_plot[df_plot["Estado"] == est].copy()
+    posiciones_texto = ["top center", "bottom center", "top right", "bottom right", "top left"]
+
+    for est_clave, est_etiqueta_corta in orden_estados_leyenda:
+        sub = df_plot[df_plot["Estado"] == est_clave].copy()
         if sub.empty:
             continue
 
-        color_punto = MAPA_COLORES_ESTADO.get(est, "#ffffff")
-
-        # Coordenadas X e Y (acotadas al borde si tienen DGR negativo para que siempre sean visibles en el gráfico)
-        x_vals = np.clip(sub["_dgr"].values, x_min_axis + 0.15, x_max_axis - 0.25) if acotar_extremos else sub["_dgr"].values
-        y_vals = np.clip(sub["_y_act"].values, 0.1, y_max_axis - 0.2) if acotar_extremos else sub["_y_act"].values
-
-        # Borde dorado grueso si supera el listón del autor, aro ámbar si está entre 12 y 15 (<3% yield), borde fino oscuro para el resto
-        colores_borde = []
-        anchos_borde = []
-        tamanos_punto = []
+        color_punto = MAPA_COLORES_ESTADO.get(est_clave, "#ffffff")
         textos_etiqueta = []
+        pos_etiqueta = []
         hover_texts = []
+        tamanos = []
 
-        for idx_t, row in sub.iterrows():
-            pasa_autor = bool(row["_pasa_liston_autor"])
-            pasa_12_15 = bool(row["_pasa_12_no_15"])
+        for idx_i, (idx_t, row) in enumerate(sub.iterrows()):
+            cumple = bool(row["_cumple_chowder"])
+            es_compra_o_acum = ("COMPRA" in est_clave or "ACUMULAR" in est_clave)
 
-            if pasa_autor:
-                colores_borde.append("#ffd700")
-                anchos_borde.append(2.8)
-                tamanos_punto.append(14)
-                veredicto_chowder_txt = "✅ SÍ pasa el listón del autor"
-            elif pasa_12_15:
-                colores_borde.append("#ffae00")
-                anchos_borde.append(2.4)
-                tamanos_punto.append(13)
-                veredicto_chowder_txt = "🟡 Pasa los 12, no los 15 (Yield < 3%)"
-            else:
-                colores_borde.append("#0b1520")
-                anchos_borde.append(1.4)
-                tamanos_punto.append(11)
-                veredicto_chowder_txt = "❌ No alcanza el listón (12 / 15 pts)"
+            tamanos.append(13 if (cumple or es_compra_o_acum) else 10)
+            pos_etiqueta.append(posiciones_texto[idx_i % len(posiciones_texto)])
 
-            # Control de etiquetas de texto sobre los puntos
-            es_compra_o_acum = ("COMPRA" in est or "ACUMULAR" in est)
             if mostrar_etiquetas == "Todas las empresas":
                 textos_etiqueta.append(idx_t)
-            elif mostrar_etiquetas == "Zona Chowder y Compras":
-                textos_etiqueta.append(idx_t if (pasa_autor or pasa_12_15 or es_compra_o_acum) else "")
-            elif mostrar_etiquetas == "Solo en Zona Chowder":
-                textos_etiqueta.append(idx_t if (pasa_autor or pasa_12_15) else "")
+            elif mostrar_etiquetas == "Cumplen Chowder y Compras":
+                textos_etiqueta.append(idx_t if (cumple or es_compra_o_acum) else "")
+            elif mostrar_etiquetas == "Solo las que cumplen Chowder":
+                textos_etiqueta.append(idx_t if cumple else "")
+            elif mostrar_etiquetas == "Solo en Compra / Acumulación":
+                textos_etiqueta.append(idx_t if es_compra_o_acum else "")
             else:
                 textos_etiqueta.append("")
 
+            veredicto_chowder_txt = (
+                f"✅ CUMPLE ({f_num(row['_chowder'], 1)} ≥ {f_num(row['_chowder_target'], 0)})"
+                if cumple else
+                f"❌ NO CUMPLE ({f_num(row['_chowder'], 1)} vs Obj. {f_num(row['_chowder_target'], 0)})"
+            )
+
             hover_texts.append(
                 f"<b>{idx_t} — {row['_nombre']}</b><br>"
-                f"Estado Radar: <b>{est}</b><br>"
-                f"Calidad Forense: <b>{row['Calidad']}</b> | Valoración: <b>{row['Valoración']}</b><br>"
+                f"Estado Lista: <b>{est_clave}</b><br>"
+                f"Calidad: <b>{row['Calidad']}</b> | Valoración: <b>{row['Valoración']}</b><br>"
                 f"──────────────────────────<br>"
                 f"Rentabilidad (Yield): <b>{f_num(row['_y_act'], 2, '%')}</b><br>"
                 f"Crecimiento Div. 5A: <b>{f_num(row['_dgr'], 2, '%')}</b><br>"
-                f"Número Chowder: <b>{f_num(row['_chowder'], 1)} pts</b> (Listón: {f_num(row['_chowder_target'], 0)})<br>"
-                f"Listón Chowder: <b>{veredicto_chowder_txt}</b><br>"
+                f"Número Chowder: <b>{f_num(row['_chowder'], 1)} pts</b> ({row['_regla_tipo']})<br>"
+                f"Regla Chowder: <b>{veredicto_chowder_txt}</b><br>"
                 f"──────────────────────────<br>"
-                f"Cotización: {row['Cotización Actual']} | Suelo P95: {row['Suelo P95']}<br>"
-                f"<i>{row['Desglose Calidad']}</i>"
+                f"Cotización: {row['Cotización Actual']} | Suelo P95: {row['Suelo P95']}"
             )
 
         fig.add_trace(go.Scatter(
-            x=x_vals,
-            y=y_vals,
+            x=sub["_dgr"].values,
+            y=sub["_y_act"].values,
             mode="markers+text",
-            name=est,
+            name=est_etiqueta_corta,
             text=textos_etiqueta,
-            textposition="top center",
-            textfont=dict(color="#e8eef5", size=11, family="Arial Black, sans-serif"),
+            textposition=pos_etiqueta,
+            textfont=dict(color="#e8eef5", size=10, family="Arial, sans-serif"),
             marker=dict(
                 color=color_punto,
-                size=tamanos_punto,
-                line=dict(color=colores_borde, width=anchos_borde),
-                opacity=0.94
+                size=tamanos,
+                line=dict(color="#0b1520", width=1.5),
+                opacity=0.95
             ),
             hovertext=hover_texts,
             hoverinfo="text"
         ))
 
-    # Anotaciones idénticas al gráfico original de Zona Chowder
+    # Etiqueta limpia en la esquina superior derecha
     fig.add_annotation(
-        x=x_max_axis - 0.6,
-        y=y_max_axis - 0.6,
-        text="<b>Zona Chowder</b><br><span style='font-size:12px;'>12 puntos o más</span>",
+        x=0.98,
+        y=0.95,
+        xref="paper",
+        yref="paper",
+        text="<b>Zona Chowder</b><br><span style='font-size:11px;'>≥ 12 pts (Yield ≥ 3%)<br>≥ 15 pts (Yield < 3%)</span>",
         showarrow=False,
         xanchor="right",
         yanchor="top",
         align="right",
-        font=dict(color="#f5b700", size=18)
-    )
-
-    fig.add_annotation(
-        x=14.2,
-        y=4.4,
-        text="<b>Con rentabilidad bajo el 3 %,<br>el autor pedía 15</b>",
-        showarrow=False,
-        xanchor="center",
-        align="center",
-        font=dict(color="#f5b700", size=12)
+        bgcolor="rgba(11, 21, 32, 0.75)",
+        bordercolor="rgba(245, 183, 0, 0.4)",
+        borderwidth=1,
+        borderpad=5,
+        font=dict(color="#f5b700", size=14)
     )
 
     fig.update_layout(
-        title=dict(
-            text="Número Chowder = <span style='color:#f5b700;'>rentabilidad</span> + <span style='color:#f5b700;'>crecimiento anual del dividendo</span> a 5 años",
-            font=dict(color="#ffffff", size=18),
-            x=0.01,
-            y=0.96
-        ),
         paper_bgcolor="#0b1520",
         plot_bgcolor="#101f30",
-        height=600,
-        margin=dict(l=55, r=30, t=65, b=65),
+        height=560,
+        margin=dict(l=48, r=20, t=55, b=55),
         xaxis=dict(
-            title=dict(text="<b>Crecimiento anual del dividendo, últimos 5 años</b>", font=dict(color="#ffffff", size=14)),
-            range=[x_min_axis, x_max_axis],
+            title=dict(text="<b>Crecimiento anual del dividendo 5A (%)</b>", font=dict(color="#ffffff", size=13)),
+            range=[x_min_view, x_max_view],
             dtick=3,
-            ticksuffix=" %",
+            ticksuffix="%",
             gridcolor="rgba(255, 255, 255, 0.08)",
-            zerolinecolor="rgba(255, 255, 255, 0.18)",
-            tickfont=dict(color="#b0c4de", size=12)
+            zerolinecolor="rgba(255, 255, 255, 0.25)",
+            tickfont=dict(color="#b0c4de", size=11)
         ),
         yaxis=dict(
-            title=dict(text="<b>Rentabilidad por dividendo</b>", font=dict(color="#ffffff", size=14)),
-            range=[0.0, y_max_axis],
+            title=dict(text="<b>Rentabilidad por dividendo (%)</b>", font=dict(color="#ffffff", size=13)),
+            range=[0.0, y_max_view],
             dtick=2,
-            ticksuffix=" %",
+            ticksuffix="%",
             gridcolor="rgba(255, 255, 255, 0.08)",
-            zerolinecolor="rgba(255, 255, 255, 0.18)",
-            tickfont=dict(color="#b0c4de", size=12)
+            zerolinecolor="rgba(255, 255, 255, 0.25)",
+            tickfont=dict(color="#b0c4de", size=11)
         ),
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=-0.22,
-            xanchor="center",
-            x=0.5,
-            font=dict(color="#e0e6ed", size=12),
-            bgcolor="rgba(11, 21, 32, 0.85)",
-            bordercolor="rgba(255, 255, 255, 0.15)",
-            borderwidth=1
+            y=1.02,
+            xanchor="left",
+            x=0.0,
+            font=dict(color="#e0e6ed", size=11),
+            bgcolor="rgba(11, 21, 32, 0.0)"
         ),
         hoverlabel=dict(
             bgcolor="#0e1b29",
@@ -1215,21 +1216,24 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
     total_emp = len(df_res)
     n_compra_p95 = int(df_res["Estado"].isin(["💎 COMPRA FUERTE", "🎯 COMPRA (P95)"]).sum())
     n_acum_p90 = int((df_res["Estado"] == "🔵 ACUMULAR (P90)").sum())
-    n_chowder_ok = int(df_res["_pasa_liston_autor"].sum())
+    n_chowder_ok = int(df_res["_cumple_chowder"].sum())
     n_calidad_alta = int((df_res["_score_calidad"] >= 7.5).sum())
 
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Empresas Auditadas", f"{total_emp}")
     k2.metric("🟢 En Compra (P95)", f"{n_compra_p95}")
     k3.metric("🔵 En Acumulación (P90)", f"{n_acum_p90}")
-    k4.metric("🏆 Superan Listón Chowder", f"{n_chowder_ok}")
+    k4.metric("🏆 Cumplen Regla Chowder", f"{n_chowder_ok}")
     k5.metric("⭐ Calidad Élite (≥ 7,5/10)", f"{n_calidad_alta}")
 
     # ==========================================
     # SECCIÓN 1: GRÁFICO INTERACTIVO ZONA CHOWDER
     # ==========================================
-    st.markdown("### 📊 Mapa Visual: Zona Chowder y Estado de Valoración")
-    col_f1, col_f2, col_f3 = st.columns([2, 1.5, 1.5])
+    st.markdown(
+        "### 📊 Número Chowder = <span style='color:#f5b700;'>rentabilidad</span> + <span style='color:#f5b700;'>crecimiento anual del dividendo</span> a 5 años",
+        unsafe_allow_html=True
+    )
+    col_f1, col_f2 = st.columns([2.2, 1.3])
     with col_f1:
         estados_disponibles = list(MAPA_COLORES_ESTADO.keys())
         filtro_estados_graf = st.multiselect(
@@ -1240,51 +1244,46 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
     with col_f2:
         modo_etiquetas = st.selectbox(
             "Mostrar nombres (Tickers) en el gráfico:",
-            options=["Zona Chowder y Compras", "Todas las empresas", "Solo en Zona Chowder", "Ninguna (solo al pasar ratón)"],
+            options=[
+                "Cumplen Chowder y Compras",
+                "Solo en Compra / Acumulación",
+                "Solo las que cumplen Chowder",
+                "Todas las empresas",
+                "Ninguna (ver al pasar ratón)"
+            ],
             index=0
-        )
-    with col_f3:
-        acotar_ejes = st.checkbox(
-            "Mantener escala clásica Chowder (0% a 18%+)",
-            value=True,
-            help="Mantiene los ejes limpios como en el gráfico clásico de Chowder, situando valores con DGR negativo en el borde izquierdo (0%) y mostrando su dato exacto al pasar el cursor."
         )
 
     df_graf_filtrado = df_res[df_res["Estado"].isin(filtro_estados_graf)] if filtro_estados_graf else df_res
-    fig_chowder = construir_grafico_zona_chowder(df_graf_filtrado, mostrar_etiquetas=modo_etiquetas, acotar_extremos=acotar_ejes)
+    fig_chowder = construir_grafico_zona_chowder(df_graf_filtrado, mostrar_etiquetas=modo_etiquetas)
 
     if fig_chowder is not None:
         st.plotly_chart(fig_chowder, use_container_width=True)
         st.caption(
-            "💡 **Leyenda rápida del gráfico:** El **color interior de cada punto** corresponde exactamente a su **Estado en la lista** "
-            "(🟢 Verde = Compra P95 / Compra Fuerte, 🔵 Azul = Acumular P90, 🟡 Amarillo = Mantener, 🟠 Naranja = Trampa de Valor, 🔴 Rojo = Sobrevalorada). "
-            "El **borde dorado brillante** destaca las empresas que cumplen el **Listón oficial de Chowder** (≥ 12 pts con yield ≥ 3%, o ≥ 15 pts con yield < 3%)."
+            "💡 **Colores de los puntos según su Estado en la lista:** "
+            "🟢 **Verde** = Compra Fuerte / Compra P95 | 🔵 **Azul** = Acumular P90 | 🟡 **Amarillo** = Mantener | "
+            "🟠 **Naranja** = Trampa de Valor | 🔴 **Rojo** = Sobrevalorada | ⚪ **Gris** = Baja Calidad. "
+            "**Regla de Chowder real:** ≥ 12 pts (si Yield ≥ 3%), ≥ 15 pts (si Yield < 3%) y ≥ 8 pts en REITs/Utilities (línea punteada azul)."
         )
 
-    # Tabla resumen del Listón de Chowder (igual a la parte inferior de la imagen) + Auditor de Calidad
-    with st.expander("🏅 Ver Tabla del Listón de Chowder y Desglose Forense de los 5 Pilares de Calidad", expanded=False):
-        tab_c1, tab_c2 = st.tabs(["📋 Listón del Autor (Zona Chowder)", "🔬 Auditoría de Calidad Forense (5 Pilares)"])
+    # Tabla resumen de la Regla de Chowder + Auditor de Calidad
+    with st.expander("🏅 Ver Tabla de Cumplimiento Chowder y Desglose Forense de los 5 Pilares de Calidad", expanded=False):
+        tab_c1, tab_c2 = st.tabs(["📋 Regla de Chowder Real", "🔬 Auditoría de Calidad Forense (5 Pilares)"])
 
         with tab_c1:
             df_ch_tabla = df_res[df_res["_chowder"] != -999].sort_values(by="_chowder", ascending=False).copy()
             filas_chowder = []
             for tk, r in df_ch_tabla.iterrows():
-                if r["_pasa_liston_autor"]:
-                    liston_str = "Sí"
-                elif r["_pasa_12_no_15"]:
-                    liston_str = "No (12-15)"
-                else:
-                    liston_str = "No"
                 filas_chowder.append({
                     "Ticker": tk,
                     "Estado": r["Estado"],
                     "Calidad": r["Calidad"],
                     "Rentabilidad": f_num(r["_y_act"], 2, " %"),
                     "Crecimiento 5 años": f_num(r["_dgr"], 1, " %"),
-                    "Listón del autor": liston_str,
+                    "Regla Aplicada": r["_regla_tipo"],
+                    "Cumple Chowder": "Sí" if r["_cumple_chowder"] else "No",
                     "Número": f_num(r["_chowder"], 1),
-                    "_pasa": r["_pasa_liston_autor"],
-                    "_pasa12": r["_pasa_12_no_15"]
+                    "_cumple": r["_cumple_chowder"]
                 })
             df_ch_view = pd.DataFrame(filas_chowder).set_index("Ticker")
 
@@ -1294,18 +1293,13 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
                 for i, col in enumerate(row.index):
                     if col == "Estado":
                         estilos[i] = f"color: {est_c}; font-weight: bold;"
-                    elif col == "Listón del autor":
-                        if row["_pasa"]:
-                            estilos[i] = "color: #21c354; font-weight: bold;"
-                        elif row["_pasa12"]:
-                            estilos[i] = "color: #faca2b; font-weight: bold;"
-                        else:
-                            estilos[i] = "color: #8b9bb4;"
+                    elif col == "Cumple Chowder":
+                        estilos[i] = "color: #21c354; font-weight: bold;" if row["_cumple"] else "color: #ff4b4b;"
                     elif col == "Número":
                         estilos[i] = "color: #f5b700; font-weight: bold;"
                 return estilos
 
-            cols_ch_vis = ["Estado", "Calidad", "Rentabilidad", "Crecimiento 5 años", "Listón del autor", "Número"]
+            cols_ch_vis = ["Estado", "Calidad", "Rentabilidad", "Crecimiento 5 años", "Regla Aplicada", "Cumple Chowder", "Número"]
             st.dataframe(
                 df_ch_view.style.apply(estilo_tabla_chowder, axis=1),
                 column_order=cols_ch_vis,
@@ -1438,9 +1432,9 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
                 else: styles[idx] = 'color: #ff4b4b;'
             elif col_name == 'Chowder':
                 if row['_chowder'] != -999.0:
-                    if row['_pasa_liston_autor']:
+                    if row['_cumple_chowder']:
                         styles[idx] = 'color: #21c354; font-weight: bold;'
-                    elif row['_pasa_12_no_15'] or row['_pasa_chowder_sec']:
+                    elif row['_chowder'] >= (row['_chowder_target'] - 1.5) and row['_dgr'] > 0:
                         styles[idx] = 'color: #faca2b; font-weight: bold;'
                     else:
                         styles[idx] = 'color: #ff4b4b;'
