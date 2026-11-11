@@ -713,18 +713,22 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
         # 2. REGLA DE CHOWDER REAL (ESTÁNDAR DGI)
         # ==============================================================================
         # Regla de Chowder oficial:
-        # - Utilities / REITs / Telecom con Yield >= 4.0%: Objetivo >= 8 puntos
-        # - Acciones generales con Yield >= 3.0%: Objetivo >= 12 puntos
-        # - Acciones de bajo Yield (< 3.0%): Objetivo >= 15 puntos
-        if (es_utility_pura or es_reit_puro or es_telecom) and yield_actual >= 4.0:
-            chowder_target = 8.0
-            regla_tipo_str = "REIT/Util/Telco (≥8)"
+        # - Utilities / REITs / Telecom: Objetivo >= 8 puntos (si Yield >= 3%) o >= 12 puntos (si Yield < 3%)
+        # - Acciones generales: Objetivo >= 12 puntos (si Yield >= 3%) o >= 15 puntos (si Yield < 3%)
+        es_sector_regla_8 = bool(es_utility_pura or es_reit_puro or es_telecom)
+        if es_sector_regla_8:
+            if yield_actual >= 3.0:
+                chowder_target = 8.0
+                regla_tipo_str = "REIT/Util/Telco (≥8)"
+            else:
+                chowder_target = 12.0
+                regla_tipo_str = "REIT/Util <3% (≥12)"
         elif yield_actual >= 3.0:
             chowder_target = 12.0
-            regla_tipo_str = "Yield ≥ 3% (≥12)"
+            regla_tipo_str = "General ≥3% (≥12)"
         else:
             chowder_target = 15.0
-            regla_tipo_str = "Yield < 3% (≥15)"
+            regla_tipo_str = "General <3% (≥15)"
 
         chowder_number = (yield_actual + dgr_5y) if dgr_5y is not None else -999.0
         cumple_chowder = bool(
@@ -877,6 +881,7 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 
             # Metadatos internos para ordenación, estilos y Gráfico Zona Chowder
             "_nombre": nombre_empresa,
+            "_es_sector_8": es_sector_regla_8,
             "_regla_tipo": regla_tipo_str,
             "_orden_estado": orden_estado,
             "_score_total": score_total,
@@ -908,37 +913,52 @@ def analizar_empresa_rapido(ticker_symbol, años_analisis, impuesto_pct, aplicar
 # ==============================================================================
 # GENERADOR DEL GRÁFICO INTERACTIVO "ZONA CHOWDER" + PUNTOS COLOREADOS POR ESTADO
 # ==============================================================================
-def construir_grafico_zona_chowder(df_source, mostrar_etiquetas="Cumplen Chowder y Compras"):
+def construir_grafico_zona_chowder(df_source, mostrar_etiquetas="Cumplen Chowder y Compras", modo_sector="general"):
     """
-    Construye el gráfico limpio de la Regla de Chowder:
-    - Eje X: Crecimiento anual del dividendo 5A (%)
-    - Eje Y: Rentabilidad por dividendo (%)
-    - Frontera de la Regla de Chowder:
-        * Yield >= 3%: Suma >= 12 puntos
-        * Yield < 3%: Suma >= 15 puntos
-        * Línea punteada auxiliar para REITs/Utilities (Yield >= 4%: Suma >= 8 puntos)
-    - Puntos coloreados 100% según su Estado en la lista (sin bordes amarillos que distorsionen el color ni leyendas superpuestas).
+    Construye el gráfico de la Regla de Chowder separado por categoría:
+    - modo_sector == "general": Empresas Generales (Exige >= 12 pts si Yield >= 3%, y >= 15 pts si Yield < 3%)
+    - modo_sector == "reit_util": REITs, Utilities y Telecom (Exige >= 8 pts si Yield >= 3%, y >= 12 pts si Yield < 3%)
     """
     df_plot = df_source[df_source["_dgr"] != -999].copy()
+    if modo_sector == "reit_util":
+        df_plot = df_plot[df_plot["_es_sector_8"] == True].copy()
+        umbral_alto = 8.0
+        umbral_bajo_3 = 12.0
+        titulo_zona = "<b>Zona Chowder (REIT / Util / Telco)</b><br><span style='font-size:11px;'>≥ 8 pts (Yield ≥ 3%)<br>≥ 12 pts (Yield < 3%)</span>"
+        color_linea = "#00d4ff"
+        color_relleno = "rgba(0, 212, 255, 0.14)"
+        color_dash = "rgba(0, 212, 255, 0.50)"
+    else:
+        df_plot = df_plot[df_plot["_es_sector_8"] == False].copy()
+        umbral_alto = 12.0
+        umbral_bajo_3 = 15.0
+        titulo_zona = "<b>Zona Chowder (General)</b><br><span style='font-size:11px;'>≥ 12 pts (Yield ≥ 3%)<br>≥ 15 pts (Yield < 3%)</span>"
+        color_linea = "#f5b700"
+        color_relleno = "rgba(218, 165, 32, 0.18)"
+        color_dash = "rgba(245, 183, 0, 0.55)"
+
     if df_plot.empty:
         return None
 
-    # Rango visual limpio centrado en la zona relevante [-2% a 22% en DGR, 0% a 11% en Yield]
-    # pero ampliable automáticamente con el zoom de Plotly sin aplastar puntos en los bordes
+    # Rango visual estable que muestra siempre toda la frontera de Chowder con claridad
     q95_x = float(df_plot["_dgr"].quantile(0.95)) if len(df_plot) > 3 else float(df_plot["_dgr"].max())
     min_x = float(df_plot["_dgr"].min())
     max_y = float(df_plot["_y_act"].max())
 
-    x_min_view = max(-5.0, min(0.0, min_x - 1.0))
-    x_max_view = max(18.5, min(26.0, q95_x + 2.5))
-    y_max_view = max(10.0, min(13.5, max_y + 1.0))
+    x_min_view = max(-4.0, min(0.0, min_x - 1.0))
+    x_max_base = 16.5 if modo_sector == "general" else 13.5
+    x_max_view = max(x_max_base, min(26.0, q95_x + 2.5))
+    y_max_view = max(9.5, min(13.5, max_y + 1.2))
 
-    # Polígono de la Zona Chowder general (12 pts para Yield >= 3%, 15 pts para Yield < 3%)
+    # Coordenadas exactas del polígono de la Zona Chowder según el grupo
     x_far_right = max(x_max_view + 10.0, float(df_plot["_dgr"].max()) + 5.0)
     y_far_top = max(y_max_view + 5.0, max_y + 2.0)
-    x_top_intersect = 12.0 - y_far_top
+    x_top_intersect = umbral_alto - y_far_top
+    x_codo_sup = umbral_alto - 3.0       # 9.0 en General | 5.0 en REIT/Util
+    x_codo_inf = umbral_bajo_3 - 3.0     # 12.0 en General | 9.0 en REIT/Util
+    x_suelo_0 = umbral_bajo_3            # 15.0 en General | 12.0 en REIT/Util
 
-    poly_x = [x_top_intersect, 9.0, 12.0, 15.0, x_far_right, x_far_right, x_top_intersect]
+    poly_x = [x_top_intersect, x_codo_sup, x_codo_inf, x_suelo_0, x_far_right, x_far_right, x_top_intersect]
     poly_y = [y_far_top, 3.0, 3.0, 0.0, 0.0, y_far_top, y_far_top]
 
     fig = go.Figure()
@@ -948,43 +968,33 @@ def construir_grafico_zona_chowder(df_source, mostrar_etiquetas="Cumplen Chowder
         x=poly_x,
         y=poly_y,
         fill="toself",
-        fillcolor="rgba(218, 165, 32, 0.18)",
+        fillcolor=color_relleno,
         line=dict(color="rgba(0,0,0,0)"),
         hoverinfo="skip",
         showlegend=False
     ))
 
-    # 2. Frontera oficial Regla de Chowder (12 pts si Yield >= 3% | 15 pts si Yield < 3%)
+    # 2. Frontera oficial Regla de Chowder con el escalón en Yield = 3%
     fig.add_trace(go.Scatter(
-        x=[x_top_intersect, 9.0, 12.0, 15.0],
+        x=[x_top_intersect, x_codo_sup, x_codo_inf, x_suelo_0],
         y=[y_far_top, 3.0, 3.0, 0.0],
         mode="lines",
-        line=dict(color="#f5b700", width=2.8),
+        line=dict(color=color_linea, width=2.8),
         hoverinfo="skip",
         showlegend=False
     ))
 
-    # 3. Proyección discontinua de la diagonal de 12 puntos por debajo del 3% de Yield
+    # 3. Proyección discontinua de la diagonal principal por debajo del 3% de Yield
     fig.add_trace(go.Scatter(
-        x=[9.0, 12.0],
+        x=[x_codo_sup, umbral_alto],
         y=[3.0, 0.0],
         mode="lines",
-        line=dict(color="rgba(245, 183, 0, 0.55)", width=1.8, dash="dash"),
+        line=dict(color=color_dash, width=1.8, dash="dash"),
         hoverinfo="skip",
         showlegend=False
     ))
 
-    # 4. Línea punteada sutil para REITs / Utilities (Regla >= 8 puntos con Yield >= 4%)
-    fig.add_trace(go.Scatter(
-        x=[max(x_min_view, 8.0 - y_far_top), 4.0],
-        y=[y_far_top, 4.0],
-        mode="lines",
-        line=dict(color="rgba(0, 212, 255, 0.40)", width=1.5, dash="dot"),
-        hoverinfo="skip",
-        showlegend=False
-    ))
-
-    # 5. Puntos de las empresas agrupados y coloreados fielmente por su ESTADO en la lista
+    # 4. Puntos de las empresas agrupados y coloreados fielmente por su ESTADO en la lista
     orden_estados_leyenda = [
         ("💎 COMPRA FUERTE", "Compra Fuerte"),
         ("🎯 COMPRA (P95)", "Compra P95"),
@@ -1015,7 +1025,7 @@ def construir_grafico_zona_chowder(df_source, mostrar_etiquetas="Cumplen Chowder
             tamanos.append(13 if (cumple or es_compra_o_acum) else 10)
             pos_etiqueta.append(posiciones_texto[idx_i % len(posiciones_texto)])
 
-            if mostrar_etiquetas == "Todas las empresas":
+            if mostrar_etiquetas == "Todas las empresas visibles":
                 textos_etiqueta.append(idx_t)
             elif mostrar_etiquetas == "Cumplen Chowder y Compras":
                 textos_etiqueta.append(idx_t if (cumple or es_compra_o_acum) else "")
@@ -1052,7 +1062,7 @@ def construir_grafico_zona_chowder(df_source, mostrar_etiquetas="Cumplen Chowder
             name=est_etiqueta_corta,
             text=textos_etiqueta,
             textposition=pos_etiqueta,
-            textfont=dict(color="#e8eef5", size=10, family="Arial, sans-serif"),
+            textfont=dict(color="#e8eef5", size=11, family="Arial, sans-serif"),
             marker=dict(
                 color=color_punto,
                 size=tamanos,
@@ -1069,23 +1079,23 @@ def construir_grafico_zona_chowder(df_source, mostrar_etiquetas="Cumplen Chowder
         y=0.95,
         xref="paper",
         yref="paper",
-        text="<b>Zona Chowder</b><br><span style='font-size:11px;'>≥ 12 pts (Yield ≥ 3%)<br>≥ 15 pts (Yield < 3%)</span>",
+        text=titulo_zona,
         showarrow=False,
         xanchor="right",
         yanchor="top",
         align="right",
-        bgcolor="rgba(11, 21, 32, 0.75)",
-        bordercolor="rgba(245, 183, 0, 0.4)",
+        bgcolor="rgba(11, 21, 32, 0.80)",
+        bordercolor=color_linea,
         borderwidth=1,
         borderpad=5,
-        font=dict(color="#f5b700", size=14)
+        font=dict(color=color_linea, size=13)
     )
 
     fig.update_layout(
         paper_bgcolor="#0b1520",
         plot_bgcolor="#101f30",
-        height=560,
-        margin=dict(l=48, r=20, t=55, b=55),
+        height=520,
+        margin=dict(l=45, r=18, t=68, b=52),
         xaxis=dict(
             title=dict(text="<b>Crecimiento anual del dividendo 5A (%)</b>", font=dict(color="#ffffff", size=13)),
             range=[x_min_view, x_max_view],
@@ -1117,7 +1127,7 @@ def construir_grafico_zona_chowder(df_source, mostrar_etiquetas="Cumplen Chowder
             bgcolor="#0e1b29",
             font_size=12,
             font_family="sans-serif",
-            bordercolor="#f5b700"
+            bordercolor=color_linea
         )
     )
 
@@ -1203,8 +1213,13 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
     df_res = pd.DataFrame(resultados)
     col_renta_actual = df_res["_col_renta"].iloc[0]
 
+    # Ordenación prioritaria:
+    # 1º Estado (Compra Fuerte -> Compra P95 -> Acumular P90 -> Mantener...)
+    # 2º Mayor Calidad Forense (_score_calidad)
+    # 3º Mayor Score Total (_score_total)
+    # 4º Mayor cercanía/descuento respecto al Suelo P95 (_Dist_Suelo)
     df_res = df_res.sort_values(
-        by=["_orden_estado", "_score_total", "_score_calidad", "_Dist_Suelo"],
+        by=["_orden_estado", "_score_calidad", "_score_total", "_Dist_Suelo"],
         ascending=[True, False, False, True]
     )
 
@@ -1227,7 +1242,7 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
     k5.metric("⭐ Calidad Élite (≥ 7,5/10)", f"{n_calidad_alta}")
 
     # ==========================================
-    # SECCIÓN 1: GRÁFICO INTERACTIVO ZONA CHOWDER
+    # SECCIÓN 1: GRÁFICOS INTERACTIVOS ZONA CHOWDER (SEPARADOS POR REGLA)
     # ==========================================
     st.markdown(
         "### 📊 Número Chowder = <span style='color:#f5b700;'>rentabilidad</span> + <span style='color:#f5b700;'>crecimiento anual del dividendo</span> a 5 años",
@@ -1236,42 +1251,72 @@ if "resultados_radar_cache" in st.session_state and st.session_state["resultados
     col_f1, col_f2 = st.columns([2.2, 1.3])
     with col_f1:
         estados_disponibles = list(MAPA_COLORES_ESTADO.keys())
+        estados_compra_inicial = ["💎 COMPRA FUERTE", "🎯 COMPRA (P95)", "🔵 ACUMULAR (P90)"]
         filtro_estados_graf = st.multiselect(
-            "Filtrar estados en el gráfico:",
+            "Filtrar estados en el gráfico (por defecto solo en zona de Compra / Acumulación):",
             options=estados_disponibles,
-            default=estados_disponibles
+            default=estados_compra_inicial
         )
     with col_f2:
         modo_etiquetas = st.selectbox(
             "Mostrar nombres (Tickers) en el gráfico:",
             options=[
+                "Todas las empresas visibles",
                 "Cumplen Chowder y Compras",
-                "Solo en Compra / Acumulación",
                 "Solo las que cumplen Chowder",
-                "Todas las empresas",
+                "Solo en Compra / Acumulación",
                 "Ninguna (ver al pasar ratón)"
             ],
             index=0
         )
 
     df_graf_filtrado = df_res[df_res["Estado"].isin(filtro_estados_graf)] if filtro_estados_graf else df_res
-    fig_chowder = construir_grafico_zona_chowder(df_graf_filtrado, mostrar_etiquetas=modo_etiquetas)
 
-    if fig_chowder is not None:
-        st.plotly_chart(fig_chowder, use_container_width=True)
-        st.caption(
-            "💡 **Colores de los puntos según su Estado en la lista:** "
-            "🟢 **Verde** = Compra Fuerte / Compra P95 | 🔵 **Azul** = Acumular P90 | 🟡 **Amarillo** = Mantener | "
-            "🟠 **Naranja** = Trampa de Valor | 🔴 **Rojo** = Sobrevalorada | ⚪ **Gris** = Baja Calidad. "
-            "**Regla de Chowder real:** ≥ 12 pts (si Yield ≥ 3%), ≥ 15 pts (si Yield < 3%) y ≥ 8 pts en REITs/Utilities (línea punteada azul)."
+    n_gen_vis = int((df_graf_filtrado["_es_sector_8"] == False).sum())
+    n_reit_vis = int((df_graf_filtrado["_es_sector_8"] == True).sum())
+
+    tab_graf_gen, tab_graf_reit = st.tabs([
+        f"🏢 Empresas Generales — Regla 12 / 15 pts ({n_gen_vis})",
+        f"🏘️⚡ REITs, Utilities y Telecom — Regla 8 / 12 pts ({n_reit_vis})"
+    ])
+
+    with tab_graf_gen:
+        fig_chowder_gen = construir_grafico_zona_chowder(
+            df_graf_filtrado,
+            mostrar_etiquetas=modo_etiquetas,
+            modo_sector="general"
         )
+        if fig_chowder_gen is not None:
+            st.plotly_chart(fig_chowder_gen, use_container_width=True)
+        else:
+            st.info("No hay empresas generales en los estados seleccionados actualmente.")
 
-    # Tabla resumen de la Regla de Chowder + Auditor de Calidad
+    with tab_graf_reit:
+        fig_chowder_reit = construir_grafico_zona_chowder(
+            df_graf_filtrado,
+            mostrar_etiquetas=modo_etiquetas,
+            modo_sector="reit_util"
+        )
+        if fig_chowder_reit is not None:
+            st.plotly_chart(fig_chowder_reit, use_container_width=True)
+        else:
+            st.info("No hay REITs, Utilities ni Telecoms en los estados seleccionados actualmente.")
+
+    st.caption(
+        "💡 **Colores de los puntos según su Estado en la lista:** "
+        "🟢 **Verde Lima** = Compra Fuerte | 🟢 **Verde** = Compra P95 | 🔵 **Azul** = Acumular P90 | "
+        "🟡 **Amarillo** = Mantener | 🟠 **Naranja** = Trampa de Valor | 🔴 **Rojo** = Sobrevalorada."
+    )
+
+    # Tabla resumen de la Regla de Chowder + Auditor de Calidad (Ordenadas también por Estado y Calidad)
     with st.expander("🏅 Ver Tabla de Cumplimiento Chowder y Desglose Forense de los 5 Pilares de Calidad", expanded=False):
         tab_c1, tab_c2 = st.tabs(["📋 Regla de Chowder Real", "🔬 Auditoría de Calidad Forense (5 Pilares)"])
 
         with tab_c1:
-            df_ch_tabla = df_res[df_res["_chowder"] != -999].sort_values(by="_chowder", ascending=False).copy()
+            df_ch_tabla = df_res[df_res["_chowder"] != -999].sort_values(
+                by=["_orden_estado", "_score_calidad", "_chowder"],
+                ascending=[True, False, False]
+            ).copy()
             filas_chowder = []
             for tk, r in df_ch_tabla.iterrows():
                 filas_chowder.append({
