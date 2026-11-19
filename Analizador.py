@@ -110,6 +110,12 @@ CUSTOM_CSS = """
 .val-purple { color: #A855F7; }
 .val-slate  { color: inherit; }
 
+.kpi-yields {
+    font-size: 0.74rem;
+    opacity: 0.88;
+    margin-bottom: 4px;
+    line-height: 1.3;
+}
 .kpi-sub {
     font-size: 0.78rem;
     opacity: 0.80;
@@ -369,10 +375,12 @@ def render_kpi_grid(cards: list[dict]):
         accent = c.get("accent", "slate")
         val_cls = c.get("val_class", f"val-{accent}")
         sub_cls = c.get("sub_class", "")
+        yields_html = f'<div class="kpi-yields">{c["yields"]}</div>' if c.get("yields") else ""
         html_cards.append(
             f'<div class="kpi-card accent-{accent}">'
             f'<div class="kpi-label">{c["label"]}</div>'
             f'<div class="kpi-value {val_cls}">{c["value"]}</div>'
+            f'{yields_html}'
             f'<div class="kpi-sub {sub_cls}">{c.get("sub", "")}</div>'
             f'</div>'
         )
@@ -444,7 +452,7 @@ with st.container(border=True):
     with col_per:
         years = st.selectbox("Periodo", options=[5, 7, 10, 12, 15, 20], index=3, format_func=lambda x: f"{x} años")
 
-    with st.expander("⚙️ Ajustes de cálculo (método Weiss, franjas, YoC y dividendo)", expanded=False):
+    with st.expander("⚙️ Ajustes de cálculo (método Weiss, franjas, YoC e impuestos)", expanded=False):
         a1, a2, a3 = st.columns(3)
         with a1:
             opciones_modo = {
@@ -473,6 +481,16 @@ with st.container(border=True):
             div_manual = None
             if fuente_dividendo == "Manual":
                 div_manual = st.number_input("Dividendo anual manual", min_value=0.0001, value=1.0, step=0.05, format="%.4f")
+
+            impuesto_div = st.number_input(
+                "Impuesto / Retención dividendos (%)",
+                min_value=0.0,
+                max_value=60.0,
+                value=19.0,
+                step=0.5,
+                format="%.1f",
+                help="Porcentaje fiscal para calcular el Yield neto (ej. 19% primer tramo IRPF en España)."
+            )
 
         with a3:
             freq_opciones = {
@@ -579,6 +597,14 @@ else:
     etiqueta_div = "Indicado" if "Escalón" in etiqueta_modo else f"TTM ({freq_usada}p)"
 
 yield_actual = (div_actual / precio_actual) * 100.0
+
+# Cálculo de Yields netos aplicando la retención/impuesto configurado
+factor_neto = max(0.0, 1.0 - (impuesto_div / 100.0))
+yield_actual_neto = yield_actual * factor_neto
+yield_infra_neto = yield_infra * factor_neto
+yield_medio_neto = yield_medio * factor_neto
+yield_sobre_neto = yield_sobre * factor_neto
+imp_label = f"{impuesto_div:g}%"
 
 # Yield on Cost (YoC):
 # - Modo histórico (por defecto): YoC que cobrarías HOY si hubieras comprado en cada fecha t -> Div_Actual / Close(t)
@@ -708,7 +734,7 @@ header_html = (
     '<div>'
     f'<div class="weiss-title">{nombre_empresa} <span style="opacity:0.65;font-weight:500;">({ticker_actual})</span></div>'
     f'<div class="weiss-meta">{sector} · Dividendo {etiqueta_div}: <b>{div_actual:.3f}{sufijo_moneda}</b> · '
-    f'{freq_usada} pagos/año · Cierre: {fecha_ultimo}</div>'
+    f'{freq_usada} pagos/año · Imp. div.: <b>{imp_label}</b> · Cierre: {fecha_ultimo}</div>'
     '</div>'
     f'<span class="status-pill {badge_weiss[1]}">{badge_weiss[0]}</span>'
     '</div>'
@@ -738,30 +764,34 @@ with tab_weiss:
         {
             "label": f"Precio Actual ({etiqueta_franja_actual})",
             "value": f"{precio_actual:.2f}{sufijo_moneda}",
-            "sub": f"Yield actual: {yield_actual:.2f}%",
+            "yields": f"Bruto: <b>{yield_actual:.2f}%</b> · Neto: <b>{yield_actual_neto:.2f}%</b>",
+            "sub": f"Neto tras {imp_label} impuestos",
             "sub_class": sub_actual_cls,
             "accent": color_actual_key,
             "val_class": f"val-{color_actual_key}"
         },
         {
-            "label": f"Infravaloración ({yield_infra:.2f}%)",
+            "label": "Infravaloración",
             "value": f"{precio_infra:.2f}{sufijo_moneda}",
+            "yields": f"Bruto: <b>{yield_infra:.2f}%</b> · Neto: <b>{yield_infra_neto:.2f}%</b>",
             "sub": f"{dist_infra:+.1f}% vs actual",
             "sub_class": "pos" if dist_infra >= 0 else "",
             "accent": "green",
             "val_class": "val-green"
         },
         {
-            "label": f"Valoración Media ({yield_medio:.2f}%)",
+            "label": "Valoración Media",
             "value": f"{precio_medio:.2f}{sufijo_moneda}",
+            "yields": f"Bruto: <b>{yield_medio:.2f}%</b> · Neto: <b>{yield_medio_neto:.2f}%</b>",
             "sub": f"{dist_medio:+.1f}% potencial",
             "sub_class": "pos" if dist_medio >= 0 else "neg",
             "accent": "amber",
             "val_class": "val-amber"
         },
         {
-            "label": f"Sobrevaloración ({yield_sobre:.2f}%)",
+            "label": "Sobrevaloración",
             "value": f"{precio_sobre:.2f}{sufijo_moneda}",
+            "yields": f"Bruto: <b>{yield_sobre:.2f}%</b> · Neto: <b>{yield_sobre_neto:.2f}%</b>",
             "sub": f"{dist_sobre:+.1f}% vs actual",
             "accent": "red",
             "val_class": "val-red"
@@ -990,6 +1020,7 @@ with tab_chowder:
             {
                 "label": "Dividend Yield Actual",
                 "value": f"{yield_actual:.2f}%",
+                "yields": f"Neto: <b>{yield_actual_neto:.2f}%</b> ({imp_label} imp.)",
                 "sub": f"Franja: {etiqueta_franja_actual}",
                 "sub_class": sub_actual_cls,
                 "accent": color_actual_key,
@@ -1093,7 +1124,7 @@ with tab_datos:
     col_t1, col_t2 = st.columns(2)
 
     with col_t1:
-        st.markdown("#### 🎯 Resumen de Precios Objetivo")
+        st.markdown(f"#### 🎯 Resumen de Precios Objetivo (Imp. {imp_label})")
         col_precio_lbl = f"Precio{sufijo_moneda}"
         resumen_df = pd.DataFrame({
             "Zona": [
@@ -1102,11 +1133,17 @@ with tab_datos:
                 "🔴 Sobrevaloración",
                 f"● Actual ({etiqueta_franja_actual})"
             ],
-            "Yield": [
+            "Yield Bruto": [
                 f"{yield_infra:.2f}%",
                 f"{yield_medio:.2f}%",
                 f"{yield_sobre:.2f}%",
                 f"{yield_actual:.2f}%"
+            ],
+            "Yield Neto": [
+                f"{yield_infra_neto:.2f}%",
+                f"{yield_medio_neto:.2f}%",
+                f"{yield_sobre_neto:.2f}%",
+                f"{yield_actual_neto:.2f}%"
             ],
             col_precio_lbl: [
                 f"{precio_infra:.2f}",
@@ -1128,6 +1165,7 @@ with tab_datos:
             c = colores_filas[row.name]
             return [
                 "",
+                f"color: {c}; font-weight: 600;",
                 f"color: {c}; font-weight: 600;",
                 f"color: {c}; font-weight: 700;",
                 ""
