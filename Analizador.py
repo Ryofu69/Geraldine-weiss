@@ -39,8 +39,9 @@ CUSTOM_CSS = """
 }
 .weiss-meta {
     font-size: 0.82rem;
-    opacity: 0.74;
+    opacity: 0.76;
     margin-top: 4px;
+    line-height: 1.4;
 }
 .status-pill {
     display: inline-flex;
@@ -57,6 +58,17 @@ CUSTOM_CSS = """
 .pill-blue  { background: rgba(56, 189, 248, 0.15); color: #38BDF8; border-color: rgba(56, 189, 248, 0.38); }
 .pill-amber { background: rgba(245, 158, 11, 0.15); color: #F59E0B; border-color: rgba(245, 158, 11, 0.38); }
 .pill-red   { background: rgba(239, 68, 68, 0.15);  color: #EF4444; border-color: rgba(239, 68, 68, 0.38); }
+
+.tax-banner {
+    background: rgba(245, 158, 11, 0.10);
+    border: 1px solid rgba(245, 158, 11, 0.32);
+    border-left: 3px solid #F59E0B;
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-size: 0.80rem;
+    margin: 0.35rem 0 0.8rem 0;
+    line-height: 1.4;
+}
 
 .kpi-grid {
     display: grid;
@@ -117,7 +129,7 @@ CUSTOM_CSS = """
     line-height: 1.3;
 }
 .kpi-sub {
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     opacity: 0.80;
 }
 .kpi-sub.pos  { color: #10B981; opacity: 1; font-weight: 600; }
@@ -144,6 +156,16 @@ CUSTOM_CSS = """
     height: 10px;
     border-radius: 999px;
     background: linear-gradient(90deg, #10B981 0%, #F59E0B 50%, #EF4444 100%);
+}
+.gauge-mid-tick {
+    position: absolute;
+    left: 50%;
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.82);
+    border-radius: 2px;
+    transform: translateX(-50%);
 }
 .gauge-marker {
     position: absolute;
@@ -188,6 +210,58 @@ EJEMPLOS_DGI = {
     "Inditex (ITX.MC)": "ITX.MC",
     "Enagás (ENG.MC)": "ENG.MC",
     "Viscofan (VIS.MC)": "VIS.MC",
+    "Allianz (ALV.DE)": "ALV.DE",
+    "Nestlé (NESN.SW)": "NESN.SW",
+    "Unilever (ULVR.L)": "ULVR.L",
+}
+
+# Tabla de retenciones en origen y límite deducible en Renta (CDI España)
+# Formato: "Country Yahoo": (Nombre ES, Retención origen %, Límite deducible CDI %, Nota fiscal)
+FISCALIDAD_PAISES = {
+    "Spain": ("España", 0.0, 0.0, "Sin retención extranjera; tributa únicamente en IRPF destino."),
+    "United States": ("EE. UU.", 15.0, 15.0, "15% en origen con W-8BEN (30% sin W-8BEN). Deducible hasta 15% en Renta."),
+    "Ireland": ("Irlanda", 25.0, 0.0, "Irlanda retiene 25% DWT, pero el convenio con España fija 0% (no deducible en Casilla 588; requiere exención en origen o reclamación a Irlanda)."),
+    "United Kingdom": ("Reino Unido", 0.0, 0.0, "0% en origen en acciones ordinarias (20% en REITs PID)."),
+    "Germany": ("Alemania", 26.375, 15.0, "26,375% en origen; solo 15% deducible en Renta (11,375% reclamable a Alemania)."),
+    "France": ("Francia", 25.0, 15.0, "25% estándar en origen (12,8% si tu bróker aplica tarifa persona física). Máximo 15% deducible en Renta."),
+    "Switzerland": ("Suiza", 35.0, 15.0, "35% en origen; solo 15% deducible en Renta (20% reclamable a Suiza)."),
+    "Netherlands": ("Países Bajos", 15.0, 15.0, "15% en origen, íntegramente deducible en Renta (CDI 15%)."),
+    "Italy": ("Italia", 26.0, 15.0, "26% en origen; solo 15% deducible en Renta (11% reclamable a Italia)."),
+    "Canada": ("Canadá", 15.0, 15.0, "15% con formulario NR301 (25% sin él). Máximo 15% deducible en Renta."),
+    "Belgium": ("Bélgica", 30.0, 15.0, "30% en origen; solo 15% deducible en Renta (15% reclamable a Bélgica)."),
+    "Portugal": ("Portugal", 25.0, 15.0, "25% estándar en origen (puede ser 35% en cuentas ómnibus). Máximo 15% deducible en Renta."),
+    "Japan": ("Japón", 15.315, 15.0, "15,315% en origen; deducible hasta 15% en Renta."),
+    "Sweden": ("Suecia", 30.0, 15.0, "30% en origen; solo 15% deducible en Renta."),
+    "Norway": ("Noruega", 25.0, 15.0, "25% en origen; solo 15% deducible en Renta."),
+    "Finland": ("Finlandia", 35.0, 15.0, "35% en origen; solo 15% deducible en Renta."),
+    "Denmark": ("Dinamarca", 27.0, 19.0, "27% en origen (sin convenio vigente con España; deducción sujeta al art. 80 LIRPF hasta el tipo medio)."),
+    "Australia": ("Australia", 15.0, 15.0, "0% en dividendos franked / 15% en unfranked (CDI 15%)."),
+    "Hong Kong": ("Hong Kong", 0.0, 0.0, "0% en origen."),
+    "Singapore": ("Singapur", 0.0, 0.0, "0% en origen."),
+}
+
+SUFIJO_A_PAIS = {
+    ".MC": "Spain",
+    ".L": "United Kingdom",
+    ".DE": "Germany",
+    ".F": "Germany",
+    ".PA": "France",
+    ".SW": "Switzerland",
+    ".AS": "Netherlands",
+    ".MI": "Italy",
+    ".TO": "Canada",
+    ".V": "Canada",
+    ".BR": "Belgium",
+    ".LS": "Portugal",
+    ".T": "Japan",
+    ".ST": "Sweden",
+    ".OL": "Norway",
+    ".HE": "Finland",
+    ".CO": "Denmark",
+    ".IR": "Ireland",
+    ".AX": "Australia",
+    ".HK": "Hong Kong",
+    ".SI": "Singapore",
 }
 
 if "ticker_activo" not in st.session_state:
@@ -201,11 +275,85 @@ def actualizar_desde_ejemplo():
         st.session_state.input_ticker = EJEMPLOS_DGI[seleccion]
 
 
+def detectar_fiscalidad_pais(ticker: str, info: dict) -> tuple[str, str, float, float, str]:
+    """Devuelve (pais_en, pais_es, retencion_origen_pct, limite_cdi_pct, nota)."""
+    pais_en = str(info.get("country") or "").strip()
+    if not pais_en:
+        for suf, p_fallback in SUFIJO_A_PAIS.items():
+            if ticker.upper().endswith(suf):
+                pais_en = p_fallback
+                break
+
+    if pais_en in FISCALIDAD_PAISES:
+        p_es, r_orig, l_cdi, nota = FISCALIDAD_PAISES[pais_en]
+        return pais_en, p_es, r_orig, l_cdi, nota
+
+    if pais_en:
+        return pais_en, pais_en, 15.0, 15.0, f"País detectado ({pais_en}): retención estimada 15% / CDI 15% (editable en Ajustes)."
+    return "", "No detectado", 0.0, 0.0, "No se detectó el país fiscal; revisa la retención en origen en Ajustes."
+
+
+def calcular_fiscalidad_efectiva(
+    ret_origen: float,
+    limite_cdi: float,
+    imp_destino: float,
+    modo_neto: str
+) -> dict:
+    """
+    Calcula la carga fiscal total sobre el dividendo bruto para un residente en España:
+    - Modo 'renta': Tributación final tras IRPF aplicando deducción por doble imposición (Casilla 588).
+      Deducción = min(ret_origen, limite_cdi, imp_destino).
+      Impuesto efectivo = imp_destino + max(0, ret_origen - Deducción).
+    - Modo 'cascada': Retención inmediata en cuenta con bróker español antes de la Renta.
+      Factor neto = (1 - ret_origen/100) * (1 - imp_destino/100).
+    """
+    r_orig = max(0.0, min(100.0, float(ret_origen)))
+    l_cdi = max(0.0, min(100.0, float(limite_cdi)))
+    t_dest = max(0.0, min(100.0, float(imp_destino)))
+
+    deducible_renta = min(r_orig, l_cdi, t_dest)
+    exceso_no_deducible = max(0.0, r_orig - deducible_renta)
+    efectivo_renta = min(100.0, t_dest + exceso_no_deducible)
+
+    factor_cascada = (1.0 - r_orig / 100.0) * (1.0 - t_dest / 100.0)
+    efectivo_cascada = (1.0 - factor_cascada) * 100.0
+
+    if modo_neto == "cascada":
+        tasa_efectiva = efectivo_cascada
+        factor_neto = factor_cascada
+        etiqueta_corta = f"Cobro cascada: {tasa_efectiva:.2f}%"
+    else:
+        tasa_efectiva = efectivo_renta
+        factor_neto = max(0.0, 1.0 - tasa_efectiva / 100.0)
+        etiqueta_corta = f"Efectivo Renta: {tasa_efectiva:.2f}%"
+
+    return {
+        "tasa_efectiva": tasa_efectiva,
+        "factor_neto": factor_neto,
+        "deducible_renta": deducible_renta,
+        "exceso_no_deducible": exceso_no_deducible,
+        "efectivo_renta": efectivo_renta,
+        "efectivo_cascada": efectivo_cascada,
+        "etiqueta_corta": etiqueta_corta,
+    }
+
+
+def fmt_pct_limpio(valor: float) -> str:
+    if abs(valor - round(valor)) < 1e-6:
+        return f"{int(round(valor))}%"
+    if abs(valor * 10 - round(valor * 10)) < 1e-5:
+        return f"{valor:.1f}%"
+    return f"{valor:.2f}%"
+
+
 # ==============================================================================
 # FUNCIONES DE DESCARGA Y CÁLCULO FINANCIERO
 # ==============================================================================
 def consolidar_eventos_dividendo(div_series: pd.Series, ventana_dias: int = 7) -> pd.Series:
-    """Agrupa registros duplicados o contiguos en menos de 7 días."""
+    """
+    Agrupa pagos contiguos en menos de 7 días (ej. ordinario + extraordinario)
+    y descarta registros duplicados idénticos de Yahoo Finance separados por 1–5 días.
+    """
     eventos = div_series[div_series > 0].sort_index()
     if eventos.empty:
         return eventos
@@ -215,14 +363,22 @@ def consolidar_eventos_dividendo(div_series: pd.Series, ventana_dias: int = 7) -
     m_act = float(eventos.iloc[0])
 
     for fecha, monto in list(eventos.items())[1:]:
-        if (fecha - f_act).days <= ventana_dias:
-            m_act += float(monto)
-            f_act = fecha
+        monto_f = float(monto)
+        diff_dias = (fecha - f_act).days
+        if diff_dias <= ventana_dias:
+            es_duplicado = (
+                diff_dias <= 5
+                and m_act > 0
+                and abs(monto_f - m_act) / m_act < 0.002
+            )
+            if not es_duplicado:
+                m_act += monto_f
+                f_act = fecha
         else:
             fechas.append(f_act)
             montos.append(m_act)
             f_act = fecha
-            m_act = float(monto)
+            m_act = monto_f
 
     fechas.append(f_act)
     montos.append(m_act)
@@ -232,8 +388,7 @@ def consolidar_eventos_dividendo(div_series: pd.Series, ventana_dias: int = 7) -
 def detectar_frecuencia_dinamica(div_events: pd.Series) -> pd.Series:
     """
     Detecta la frecuencia anual (1, 2, 3, 4, 6 o 12 pagos/año) en cada momento histórico.
-    Usa días reales (independiente de la resolución interna ns/us/s de pandas) para
-    detectar cambios reales de calendario (como ACN pasando de 2 a 4 pagos/año en 2019).
+    Usa días reales (independiente de la resolución interna ns/us/s de pandas).
     """
     if div_events.empty:
         return pd.Series(dtype=int)
@@ -306,9 +461,6 @@ def validar_cambios_frecuencia(
     """
     Valida cambios de frecuencia comprobando la continuidad del dividendo anualizado
     y contrastando el tramo actual con dividendRate de Yahoo Finance.
-    - Acepta cambios reales (ej. ACN oct 2019: 1.46×2 -> 0.80×4, importe anual continuo).
-    - Rechaza falsos cambios provocados por pagos omitidos en Yahoo Finance (ej. ACN 2025-2026:
-      el pago sigue en 1.48 -> 1.63 -> 1.71, por lo que bajar a 2/año recortaría a la mitad el anual).
     """
     if len(div_events) < 2:
         return freq_serie
@@ -317,7 +469,6 @@ def validar_cambios_frecuencia(
     freqs = freq_serie.values.astype(int).copy()
     n = len(freqs)
 
-    # 1. Segmentar rachas contiguas
     segmentos = []
     s = 0
     for i in range(1, n):
@@ -326,7 +477,6 @@ def validar_cambios_frecuencia(
             s = i
     segmentos.append([s, n, int(freqs[s])])
 
-    # 2. Validar continuidad del dividendo anual en cada transición
     if len(segmentos) > 1:
         for idx in range(1, len(segmentos)):
             prev_s, prev_e, f_prev = segmentos[idx - 1]
@@ -342,13 +492,10 @@ def validar_cambios_frecuencia(
                 err_mantener = abs(np.log((v_after * f_prev) / anual_prev))
                 err_cambiar = abs(np.log((v_after * f_curr) / anual_prev))
 
-                # Si mantener f_prev preserva la continuidad anual mejor que cambiar a f_curr,
-                # el supuesto cambio se debe a pagos ausentes en Yahoo Finance.
                 if err_mantener < err_cambiar:
                     segmentos[idx][2] = f_prev
                     freqs[curr_s:curr_e] = f_prev
 
-    # 3. Contraste del tramo actual con dividendRate oficial de Yahoo (pagadores uniformes)
     forward_rate = (info or {}).get("dividendRate")
     if forward_rate and float(forward_rate) > 0 and vals[-1] > 0:
         ratio = float(forward_rate) / float(vals[-1])
@@ -403,7 +550,7 @@ def detectar_intercalados_extra(div_events: pd.Series, freq_serie: pd.Series) ->
 def detectar_pagos_uniformes(div_events: pd.Series, freq_serie: pd.Series) -> bool:
     """
     Determina si la empresa paga importes regulares iguales dentro de su régimen actual
-    (ej. EE. UU.: MKC, ACN, JNJ, KO) o pagos desiguales alternantes (ej. Europa: IBE.MC, VIS.MC).
+    (ej. EE. UU.: MKC, ACN, JNJ) o pagos desiguales alternantes (ej. Europa: IBE.MC, VIS.MC).
     """
     if div_events.empty:
         return True
@@ -431,8 +578,7 @@ def detectar_pagos_uniformes(div_events: pd.Series, freq_serie: pd.Series) -> bo
 
 def filtrar_dividendos_extraordinarios(serie_anual: pd.Series) -> pd.Series:
     """
-    Evita que un dividendo extraordinario aislado (pago puntual muy superior seguido de
-    vuelta al importe regular) genere un pico falso en las bandas de Weiss.
+    Evita que un dividendo extraordinario aislado genere un pico falso en las bandas de Weiss.
     """
     if len(serie_anual) < 3:
         return serie_anual.copy()
@@ -475,7 +621,6 @@ def calcular_dividendo_weiss(
 
     freq_actual = int(freq_serie.iloc[-1])
 
-    # Construir etiqueta limpia de cambios históricos (sin duplicar la frecuencia actual)
     freqs_unicas = list(dict.fromkeys(int(x) for x in freq_serie.values))
     previas_lista = [x for x in freqs_unicas if x != freq_actual]
     if previas_lista and freq_override == 0:
@@ -484,7 +629,6 @@ def calcular_dividendo_weiss(
     else:
         info_cambio_freq = f"{freq_actual} pagos/año"
 
-    # Filtrar pagos extraordinarios pequeños intercalados
     intercalados = detectar_intercalados_extra(div_events, freq_serie)
     ev_reg = div_events[~intercalados]
     freq_reg = freq_serie[~intercalados]
@@ -564,6 +708,52 @@ def render_kpi_grid(cards: list[dict]):
     st.markdown(f'<div class="kpi-grid">{"".join(html_cards)}</div>', unsafe_allow_html=True)
 
 
+def normalizar_divisa_subunidad(df_full: pd.DataFrame, info: dict) -> tuple[pd.DataFrame, dict]:
+    """
+    Corrige desajustes 100x en mercados con subunidades (ej. Bolsa de Londres .L en GBp vs GBP),
+    donde Yahoo puede devolver Close en peniques (GBp) y Dividends o dividendRate en libras (GBP).
+    """
+    moneda = str(info.get("currency") or "")
+    if moneda not in {"GBp", "GBX", "ZAc", "ILA"}:
+        return df_full, info
+
+    df_norm = df_full.copy()
+    info_norm = dict(info)
+
+    close_ult = float(df_norm["Close"].iloc[-1])
+    divs_pos = df_norm["Dividends"][df_norm["Dividends"] > 0]
+    if close_ult <= 0 or divs_pos.empty:
+        return df_norm, info_norm
+
+    fecha_max = df_norm.index.max()
+    div_1y = float(divs_pos[divs_pos.index >= fecha_max - timedelta(days=365)].sum())
+    if div_1y <= 0:
+        div_1y = float(divs_pos.tail(4).sum())
+
+    yield_bruto_est = div_1y / close_ult
+    trailing_y = info_norm.get("trailingAnnualDividendYield")
+
+    desajuste_divs = False
+    if trailing_y is not None and float(trailing_y) > 0.005 and yield_bruto_est < 0.0025:
+        if 40.0 <= (float(trailing_y) / max(yield_bruto_est, 1e-9)) <= 160.0:
+            desajuste_divs = True
+    elif yield_bruto_est < 0.0015 and (yield_bruto_est * 100.0) <= 0.30:
+        desajuste_divs = True
+
+    if desajuste_divs:
+        df_norm["Dividends"] = df_norm["Dividends"] * 100.0
+        div_1y *= 100.0
+        info_norm["_nota_divisa"] = f"Dividendos normalizados ×100 a {moneda}"
+
+    fwd = info_norm.get("dividendRate")
+    if fwd is not None and float(fwd) > 0 and div_1y > 0:
+        ratio_fwd = div_1y / float(fwd)
+        if 45.0 <= ratio_fwd <= 160.0:
+            info_norm["dividendRate"] = float(fwd) * 100.0
+
+    return df_norm, info_norm
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def cargar_datos_yahoo(ticker: str, years: int):
     """Descarga precios de cierre SIN ajustar por dividendos (auto_adjust=False)."""
@@ -588,13 +778,14 @@ def cargar_datos_yahoo(ticker: str, years: int):
         except Exception:
             info = {}
 
+        df_full, info = normalizar_divisa_subunidad(df_full, info)
         return df_full, info
     except Exception as exc:
         return None, {"_error": str(exc)}
 
 
 # ==============================================================================
-# BARRA SUPERIOR DE SELECCIÓN DE EMPRESA (COMPACTA Y ACCESIBLE EN MÓVIL)
+# BARRA SUPERIOR DE SELECCIÓN DE EMPRESA Y CARGA DE DATOS
 # ==============================================================================
 st.markdown("### 📊 Analizador Geraldine Weiss & Regla de Chowder")
 
@@ -627,9 +818,27 @@ with st.container(border=True):
         )
 
     with col_per:
-        years = st.selectbox("Periodo", options=[5, 7, 10, 12, 15, 20], index=3, format_func=lambda x: f"{x} años")
+        years = st.selectbox(
+            "Periodo",
+            options=[5, 7, 10, 12, 15, 20],
+            index=3,
+            format_func=lambda x: f"{x} años"
+        )
 
-    with st.expander("⚙️ Ajustes de cálculo (método Weiss, franjas, YoC e impuestos)", expanded=False):
+    ticker_actual = st.session_state.ticker_activo
+
+    # Descargar datos antes de los ajustes para autocompletar la fiscalidad por país
+    with st.spinner(f"Cargando datos históricos de {ticker_actual}..."):
+        df_full, info = cargar_datos_yahoo(ticker_actual, years)
+
+    pais_en, pais_es, orig_def, cdi_def, nota_pais = detectar_fiscalidad_pais(ticker_actual, info or {})
+    clave_fiscal = (ticker_actual, pais_en)
+    if st.session_state.get("fiscal_sync_key") != clave_fiscal:
+        st.session_state["ret_origen_input"] = float(orig_def)
+        st.session_state["limite_cdi_input"] = float(cdi_def)
+        st.session_state["fiscal_sync_key"] = clave_fiscal
+
+    with st.expander("⚙️ Ajustes de cálculo (método Weiss, franjas, YoC y doble retención)", expanded=False):
         a1, a2, a3 = st.columns(3)
         with a1:
             opciones_modo = {
@@ -647,9 +856,64 @@ with st.container(border=True):
             )
             percentil = st.slider("Recorte en extremos (%)", 1, 15, 5) if metodo_franjas.startswith("Percentiles") else 0
 
-        with a2:
-            tipo_media = st.radio("Referencia central", ["Media aritmética", "Mediana"], index=0)
+            tipo_media = st.radio(
+                "Referencia central",
+                ["Media aritmética", "Mediana"],
+                index=0,
+                help="Usa Mediana en empresas con desplomes recientes extremos que sesguen la media aritmética."
+            )
 
+        with a2:
+            st.markdown(f"**Fiscalidad ({pais_es})**")
+            modo_neto_sel = st.radio(
+                "Cálculo del Yield Neto",
+                options=[
+                    "Neto final tras Renta (deducción CDI)",
+                    "Neto al cobro (cascada bróker español)"
+                ],
+                index=0,
+                help=(
+                    "Tras Renta: descuenta el IRPF destino más cualquier exceso de retención en origen "
+                    "por encima del límite deducible del convenio (Casilla 588). "
+                    "Cascada: muestra lo que llega inicialmente a cuenta antes de regularizar en la Renta."
+                )
+            )
+            modo_neto = "cascada" if modo_neto_sel.startswith("Neto al cobro") else "renta"
+
+            f_col1, f_col2 = st.columns(2)
+            with f_col1:
+                ret_origen = st.number_input(
+                    "Ret. origen (%)",
+                    min_value=0.0,
+                    max_value=60.0,
+                    step=0.5,
+                    format="%.2f",
+                    key="ret_origen_input",
+                    help="Retención en el país de domicilio fiscal de la empresa (editable si tu bróker aplica exención o W-8BEN)."
+                )
+            with f_col2:
+                limite_cdi = st.number_input(
+                    "Deducible CDI (%)",
+                    min_value=0.0,
+                    max_value=60.0,
+                    step=0.5,
+                    format="%.2f",
+                    key="limite_cdi_input",
+                    help="Porcentaje máximo de retención en origen deducible en la Renta (habitualmente 15%, o 0% en Irlanda)."
+                )
+
+            impuesto_destino = st.number_input(
+                "IRPF destino España (%)",
+                min_value=0.0,
+                max_value=60.0,
+                value=19.0,
+                step=1.0,
+                format="%.1f",
+                help="Tramo del ahorro en España: 19%, 21%, 23%, 27% o 30%."
+            )
+            st.caption(f"ℹ️ {nota_pais}")
+
+        with a3:
             fuente_dividendo = st.radio(
                 "Dividendo anual actual",
                 options=["Según franja (Indicado / TTM)", "Forward (Yahoo)", "Manual"],
@@ -659,17 +923,6 @@ with st.container(border=True):
             if fuente_dividendo == "Manual":
                 div_manual = st.number_input("Dividendo anual manual", min_value=0.0001, value=1.0, step=0.05, format="%.4f")
 
-            impuesto_div = st.number_input(
-                "Impuesto / Retención dividendos (%)",
-                min_value=0.0,
-                max_value=60.0,
-                value=19.0,
-                step=0.5,
-                format="%.1f",
-                help="Porcentaje fiscal para calcular el Yield neto (ej. 19% primer tramo IRPF en España)."
-            )
-
-        with a3:
             freq_opciones = {
                 "Automática (dinámica por tramos)": 0,
                 "Anual (1/año)": 1,
@@ -683,65 +936,63 @@ with st.container(border=True):
             modo_yoc = st.radio(
                 "Curva YoC en gráfico",
                 options=["YoC hoy según fecha de compra", "Evolución YoC desde precio fijo"],
-                index=0,
-                help=(
-                    "Por defecto muestra el YoC que tendrías HOY si hubieras comprado en cada fecha del pasado "
-                    "(Dividendo actual / Precio histórico). La segunda opción muestra los escalones desde un precio fijo."
-                )
+                index=0
             )
             precio_compra_yoc = st.number_input(
                 "Tu precio medio de compra (opcional)",
                 min_value=0.0,
                 value=0.0,
                 step=1.0,
-                format="%.2f",
-                help="Si introduces tu precio medio, dibuja tu línea personal de YoC en el gráfico."
+                format="%.2f"
             )
             escala_log = st.checkbox("Escala logarítmica en precio", value=False)
             forzar_defensiva = st.checkbox("Umbral Chowder defensivo (≥ 8%)", value=False)
 
-ticker_actual = st.session_state.ticker_activo
-
 # ==============================================================================
-# CARGA Y CÁLCULOS PRINCIPALES
+# VALIDACIÓN Y CÁLCULO DE BANDAS GERALDINE WEISS
 # ==============================================================================
-with st.spinner(f"Analizando {ticker_actual}..."):
-    df_full, info = cargar_datos_yahoo(ticker_actual, years)
-
 if df_full is None or df_full.empty:
-    st.error(f"No se encontraron datos para **{ticker_actual}** en Yahoo Finance.")
-    if info.get("_error"):
-        st.caption(f"Detalle: {info['_error']}")
+    detalle_err = (info or {}).get("_error", "")
+    st.error(
+        f"No se pudieron obtener datos de **{ticker_actual}** en Yahoo Finance. "
+        f"Comprueba el ticker (en Bolsa española añade `.MC`, ej. `IBE.MC`)."
+        + (f" ({detalle_err})" if detalle_err else "")
+    )
     st.stop()
 
-df_full["Div_Anual"], freq_usada, etiqueta_modo, info_cambio_freq, ev_reg, freq_reg = calcular_dividendo_weiss(
-    df_full, modo_calculo=modo_calculo, freq_override=freq_override, info=info
+div_anual_serie, freq_actual, etiqueta_modo, info_cambio_freq, ev_reg, freq_reg = calcular_dividendo_weiss(
+    df_full,
+    modo_calculo=modo_calculo,
+    freq_override=freq_override,
+    info=info
 )
 
-if freq_usada == 0 or df_full["Div_Anual"].dropna().empty:
-    st.error(f"**{ticker_actual}** no cuenta con suficiente historial de dividendos para aplicar Geraldine Weiss.")
+if freq_actual == 0 or div_anual_serie.isna().all():
+    st.warning(f"**{ticker_actual}** no tiene suficiente historial de dividendos en Yahoo Finance para aplicar Geraldine Weiss.")
     st.stop()
 
-cutoff_date = datetime.today() - timedelta(days=years * 365)
-df = df_full[df_full.index >= cutoff_date].copy()
-df = df[(df["Close"] > 0) & (df["Div_Anual"].notna()) & (df["Div_Anual"] > 0)].copy()
+df_full = df_full.copy()
+df_full["Div_Anual"] = div_anual_serie
+
+fecha_corte = datetime.today() - timedelta(days=years * 365)
+df = df_full[df_full.index >= fecha_corte].copy()
+df = df[df["Div_Anual"].notna() & (df["Div_Anual"] > 0) & (df["Close"] > 0)].copy()
 
 if df.empty:
-    st.error(f"No hay datos válidos de dividendo para **{ticker_actual}** en los últimos {years} años.")
+    st.warning(f"No hay suficientes registros válidos de precio y dividendo para **{ticker_actual}** en los últimos {years} años.")
     st.stop()
 
-# Dividend Yield histórico real sobre cierre SIN ajustar por dividendos
 df["Yield"] = (df["Div_Anual"] / df["Close"]) * 100.0
 
 nombre_empresa = info.get("longName") or info.get("shortName") or ticker_actual
 moneda = info.get("currency", "")
+sufijo_moneda = f" {moneda}" if moneda else ""
 sector = info.get("sector", "N/D")
 
-# Bandas de Yield de Geraldine Weiss
 if percentil == 0:
     yield_infra = float(df["Yield"].max())
     yield_sobre = float(df["Yield"].min())
-    etiqueta_extremo = "Mín/Máx absoluto"
+    etiqueta_extremo = "Mín–Máx"
 else:
     yield_infra = float(df["Yield"].quantile(1.0 - percentil / 100.0))
     yield_sobre = float(df["Yield"].quantile(percentil / 100.0))
@@ -750,17 +1001,17 @@ else:
 yield_medio = float(df["Yield"].mean()) if tipo_media == "Media aritmética" else float(df["Yield"].median())
 
 if yield_sobre <= 0 or yield_medio <= 0 or yield_infra <= 0:
-    st.error("Los valores de Dividend Yield no permiten generar bandas válidas.")
+    st.error("Los valores de Dividend Yield calculados no permiten construir las bandas.")
     st.stop()
 
-# Franjas históricas sobre el precio (escalones limpios de dividendo a dividendo)
 df["Banda_Infra"] = df["Div_Anual"] / (yield_infra / 100.0)
 df["Banda_Media"] = df["Div_Anual"] / (yield_medio / 100.0)
 df["Banda_Sobre"] = df["Div_Anual"] / (yield_sobre / 100.0)
 
+# Precio y dividendo anual de referencia
 precio_actual = float(df["Close"].iloc[-1])
 fecha_ultimo = df.index[-1].strftime("%d/%m/%Y")
-div_serie_actual = float(df["Div_Anual"].iloc[-1])
+div_actual_franja = float(df["Div_Anual"].iloc[-1])
 forward_yahoo = info.get("dividendRate")
 
 if fuente_dividendo == "Manual" and div_manual is not None:
@@ -768,55 +1019,23 @@ if fuente_dividendo == "Manual" and div_manual is not None:
     etiqueta_div = "Manual"
 elif fuente_dividendo == "Forward (Yahoo)" and forward_yahoo and float(forward_yahoo) > 0:
     div_actual = float(forward_yahoo)
-    etiqueta_div = "Forward Yahoo"
+    etiqueta_div = "Forward"
 else:
-    div_actual = div_serie_actual
-    etiqueta_div = "Indicado" if "Escalón" in etiqueta_modo else f"TTM ({freq_usada}p)"
+    div_actual = div_actual_franja
+    etiqueta_div = "Indicado" if "Escalón" in etiqueta_modo else "TTM"
+
+# Cálculo de fiscalidad (doble retención en origen + CDI + IRPF destino)
+fisc = calcular_fiscalidad_efectiva(ret_origen, limite_cdi, impuesto_destino, modo_neto)
+factor_neto = fisc["factor_neto"]
+tasa_efectiva = fisc["tasa_efectiva"]
 
 yield_actual = (div_actual / precio_actual) * 100.0
-
-# Cálculo de Yields netos aplicando la retención/impuesto configurado
-factor_neto = max(0.0, 1.0 - (impuesto_div / 100.0))
 yield_actual_neto = yield_actual * factor_neto
 yield_infra_neto = yield_infra * factor_neto
 yield_medio_neto = yield_medio * factor_neto
 yield_sobre_neto = yield_sobre * factor_neto
-imp_label = f"{impuesto_div:g}%"
 
-# Yield on Cost (YoC)
-sufijo_moneda = f" {moneda}" if moneda else ""
-fecha_inicio_yoc = df.index[0].strftime("%d/%m/%Y")
-precio_inicio_periodo = float(df["Close"].iloc[0])
-mi_yoc_personal = (div_actual / float(precio_compra_yoc)) * 100.0 if precio_compra_yoc > 0 else None
-
-if modo_yoc.startswith("YoC hoy"):
-    df["YoC"] = (div_actual / df["Close"]) * 100.0
-    yoc_inicio = float(df["YoC"].iloc[0])
-    yoc_medio_hist = float(df["YoC"].mean())
-    etiqueta_leyenda_yoc = f"YoC hoy ({years}a: {yoc_inicio:.2f}%)"
-    texto_caption_yoc = (
-        f"Si compraste hace {years} años ({precio_inicio_periodo:.2f}{sufijo_moneda} el {fecha_inicio_yoc}), "
-        f"tu <b>YoC hoy es {yoc_inicio:.2f}%</b> · YoC medio del periodo: <b>{yoc_medio_hist:.2f}%</b>."
-    )
-    if mi_yoc_personal is not None:
-        texto_caption_yoc += (
-            f" · <span style='color:#EC4899;font-weight:600;'>Mi YoC ({precio_compra_yoc:.2f}{sufijo_moneda}): "
-            f"{mi_yoc_personal:.2f}%</span>"
-        )
-    shape_yoc = "linear"
-else:
-    precio_base_fijo = float(precio_compra_yoc) if precio_compra_yoc > 0 else precio_inicio_periodo
-    df["YoC"] = (df["Div_Anual"] / precio_base_fijo) * 100.0
-    yoc_fijo_actual = (div_actual / precio_base_fijo) * 100.0
-    etiqueta_leyenda_yoc = f"YoC fijo ({yoc_fijo_actual:.2f}%)"
-    base_txt = (
-        f"tu precio medio ({precio_base_fijo:.2f}{sufijo_moneda})"
-        if precio_compra_yoc > 0
-        else f"inicio del periodo ({precio_base_fijo:.2f}{sufijo_moneda} el {fecha_inicio_yoc})"
-    )
-    texto_caption_yoc = f"Evolución del YoC desde {base_txt} → <b>YoC actual: {yoc_fijo_actual:.2f}%</b>."
-    shape_yoc = "hv"
-
+# Precios objetivo Geraldine Weiss
 precio_infra = div_actual / (yield_infra / 100.0)
 precio_medio = div_actual / (yield_medio / 100.0)
 precio_sobre = div_actual / (yield_sobre / 100.0)
@@ -825,37 +1044,75 @@ dist_infra = ((precio_infra - precio_actual) / precio_actual) * 100.0
 dist_medio = ((precio_medio - precio_actual) / precio_actual) * 100.0
 dist_sobre = ((precio_sobre - precio_actual) / precio_actual) * 100.0
 
-# Diagnóstico y color dinámico del precio actual según la franja Weiss
+# Diagnóstico de valoración y color dinámico de la franja actual
 if precio_actual <= precio_infra:
     badge_weiss = ("🟢 Infravalorada · Zona de Compra", "pill-green")
     color_actual_key = "green"
     color_actual_hex = "#10B981"
-    sub_actual_cls = "pos"
     etiqueta_franja_actual = "Infravalorada"
+    sub_actual_cls = "pos"
 elif precio_actual <= precio_medio:
     badge_weiss = ("🟢 Franja Atractiva · Bajo la Media", "pill-teal")
     color_actual_key = "teal"
     color_actual_hex = "#2DD4BF"
-    sub_actual_cls = "teal"
     etiqueta_franja_actual = "Bajo la Media"
+    sub_actual_cls = "teal"
 elif precio_actual < precio_sobre:
     badge_weiss = ("🟠 Franja Cara · Sobre la Media", "pill-amber")
     color_actual_key = "amber"
     color_actual_hex = "#F59E0B"
-    sub_actual_cls = "warn"
     etiqueta_franja_actual = "Sobre la Media"
+    sub_actual_cls = "warn"
 else:
-    badge_weiss = ("🔴 Sobrevalorada · Precaución", "pill-red")
+    badge_weiss = ("🔴 Sobrevalorada · Zona de Venta", "pill-red")
     color_actual_key = "red"
     color_actual_hex = "#EF4444"
-    sub_actual_cls = "neg"
     etiqueta_franja_actual = "Sobrevalorada"
+    sub_actual_cls = "neg"
+
+# Cálculo de YoC (Yield on Cost)
+mi_yoc_personal = (div_actual / float(precio_compra_yoc)) * 100.0 if precio_compra_yoc > 0 else None
+precio_inicio = float(df["Close"].iloc[0])
+fecha_inicio = df.index[0].strftime("%d/%m/%Y")
+
+if modo_yoc.startswith("YoC hoy"):
+    df["YoC"] = (div_actual / df["Close"]) * 100.0
+    shape_yoc = "linear"
+    yoc_inicio = float(df["YoC"].iloc[0])
+    yoc_medio_hist = float(df["YoC"].mean())
+    etiqueta_leyenda_yoc = f"YoC hoy si compraste ahí (inicio: {yoc_inicio:.2f}%)"
+    texto_caption_yoc = (
+        f"Si compraste hace {years} años ({precio_inicio:.2f}{sufijo_moneda} el {fecha_inicio}), "
+        f"tu <b>YoC hoy es {yoc_inicio:.2f}%</b> bruto (<b>{yoc_inicio * factor_neto:.2f}%</b> neto) · "
+        f"YoC medio del periodo: <b>{yoc_medio_hist:.2f}%</b>."
+    )
+    if mi_yoc_personal is not None:
+        texto_caption_yoc += (
+            f" · <b>Tu YoC ({precio_compra_yoc:.2f}{sufijo_moneda}): "
+            f"{mi_yoc_personal:.2f}% bruto / {mi_yoc_personal * factor_neto:.2f}% neto</b>."
+        )
+else:
+    base_yoc_precio = float(precio_compra_yoc) if precio_compra_yoc > 0 else precio_inicio
+    etiqueta_base_yoc = (
+        f"tu compra ({base_yoc_precio:.2f}{sufijo_moneda})"
+        if precio_compra_yoc > 0
+        else f"inicio del periodo ({precio_inicio:.2f}{sufijo_moneda} el {fecha_inicio})"
+    )
+    df["YoC"] = (df["Div_Anual"] / base_yoc_precio) * 100.0
+    shape_yoc = "hv"
+    yoc_actual_fijo = (div_actual / base_yoc_precio) * 100.0
+    etiqueta_leyenda_yoc = f"Evolución YoC ({yoc_actual_fijo:.2f}%)"
+    texto_caption_yoc = (
+        f"YoC actual: <b>{yoc_actual_fijo:.2f}%</b> bruto (<b>{yoc_actual_fijo * factor_neto:.2f}%</b> neto) · "
+        f"Base: {etiqueta_base_yoc}."
+    )
 
 # ==============================================================================
-# CÁLCULO DE DGR Y REGLA DE CHOWDER (CON REPARACIÓN DE AÑOS INCOMPLETOS EN YAHOO)
+# CÁLCULO DE DGR Y REGLA DE CHOWDER (CON REPARACIÓN DE AÑOS ANÓMALOS EN YAHOO)
 # ==============================================================================
 anio_actual = datetime.today().year
-div_por_anio = df_full["Dividends"].groupby(df_full.index.year).sum()
+div_eventos_limpios = consolidar_eventos_dividendo(df_full["Dividends"])
+div_por_anio = div_eventos_limpios.groupby(div_eventos_limpios.index.year).sum()
 div_por_anio = div_por_anio[div_por_anio > 0]
 anios_completos = div_por_anio[div_por_anio.index < anio_actual].copy()
 anios_reparados = []
@@ -876,7 +1133,11 @@ if "Escalón" in etiqueta_modo and not anios_completos.empty and not freq_reg.em
             continue
 
         est_anio = float(serie_anio.mean())
-        if (n_pagos_anio < f_esperada or hubo_cambio_en_anio) and float(anios_completos.loc[anio]) < est_anio * 0.85:
+        val_anio = float(anios_completos.loc[anio])
+        deficit_pagos = (n_pagos_anio < f_esperada or hubo_cambio_en_anio) and val_anio < est_anio * 0.85
+        exceso_pagos = (n_pagos_anio > f_esperada or hubo_cambio_en_anio) and val_anio > est_anio * 1.15
+
+        if deficit_pagos or exceso_pagos:
             anios_completos.loc[anio] = est_anio
             div_por_anio.loc[anio] = est_anio
             anios_reparados.append(int(anio))
@@ -924,19 +1185,40 @@ else:
     regla_texto = "Yield < 3%"
 
 # ==============================================================================
-# CABECERA DE LA EMPRESA ANALIZADA
+# CABECERA DE LA EMPRESA ANALIZADA Y AVISO FISCAL
 # ==============================================================================
+nota_divisa = info.get("_nota_divisa")
+nota_divisa_html = f" · <i>{nota_divisa}</i>" if nota_divisa else ""
+resumen_fiscal_meta = (
+    f"Origen ({pais_es}): <b>{fmt_pct_limpio(ret_origen)}</b>"
+    + (f" (CDI {fmt_pct_limpio(limite_cdi)})" if ret_origen > 0 else "")
+    + f" · IRPF: <b>{fmt_pct_limpio(impuesto_destino)}</b> → "
+    + f"<b>{fmt_pct_limpio(tasa_efectiva)}</b> ({'tras Renta' if modo_neto == 'renta' else 'cascada cobro'})"
+)
+
 header_html = (
     '<div class="weiss-header">'
     '<div>'
     f'<div class="weiss-title">{nombre_empresa} <span style="opacity:0.65;font-weight:500;">({ticker_actual})</span></div>'
     f'<div class="weiss-meta">{sector} · Dividendo {etiqueta_div}: <b>{div_actual:.3f}{sufijo_moneda}</b> · '
-    f'{info_cambio_freq} · Imp. div.: <b>{imp_label}</b> · Cierre: {fecha_ultimo}</div>'
+    f'{info_cambio_freq} · Cierre: {fecha_ultimo}{nota_divisa_html}<br/>{resumen_fiscal_meta}</div>'
     '</div>'
     f'<span class="status-pill {badge_weiss[1]}">{badge_weiss[0]}</span>'
     '</div>'
 )
 st.markdown(header_html, unsafe_allow_html=True)
+
+if fisc["exceso_no_deducible"] > 0.01:
+    st.markdown(
+        '<div class="tax-banner">'
+        f'⚠️ <b>Doble retención en origen ({pais_es}):</b> se retiene un <b>{fmt_pct_limpio(ret_origen)}</b> en origen '
+        f'y solo es deducible un <b>{fmt_pct_limpio(fisc["deducible_renta"])}</b> en la Renta (exceso no recuperado: '
+        f'<b>{fmt_pct_limpio(fisc["exceso_no_deducible"])}</b>). Carga final tras Renta: '
+        f'<b>{fmt_pct_limpio(fisc["efectivo_renta"])}</b> (en cobro en cascada: <b>{fmt_pct_limpio(fisc["efectivo_cascada"])}</b>). '
+        'Si tu bróker tramita exención en origen o reclamas la devolución, ajusta la retención en ⚙️ Ajustes.'
+        '</div>',
+        unsafe_allow_html=True
+    )
 
 # ==============================================================================
 # PESTAÑAS ORGANIZADAS
@@ -962,7 +1244,7 @@ with tab_weiss:
             "label": f"Precio Actual ({etiqueta_franja_actual})",
             "value": f"{precio_actual:.2f}{sufijo_moneda}",
             "yields": f"Bruto: <b>{yield_actual:.2f}%</b> · Neto: <b>{yield_actual_neto:.2f}%</b>",
-            "sub": f"Neto tras {imp_label} impuestos",
+            "sub": fisc["etiqueta_corta"],
             "sub_class": sub_actual_cls,
             "accent": color_actual_key,
             "val_class": f"val-{color_actual_key}"
@@ -990,23 +1272,32 @@ with tab_weiss:
             "value": f"{precio_sobre:.2f}{sufijo_moneda}",
             "yields": f"Bruto: <b>{yield_sobre:.2f}%</b> · Neto: <b>{yield_sobre_neto:.2f}%</b>",
             "sub": f"{dist_sobre:+.1f}% vs actual",
+            "sub_class": "neg" if dist_sobre <= 0 else "",
             "accent": "red",
             "val_class": "val-red"
         },
     ])
 
-    # Barra visual de posición en el canal de Weiss
+    # Barra visual por tramos: 0% = Infravalorada | 50% = Media | 100% = Sobrevalorada
     rango_total = precio_sobre - precio_infra
     if rango_total > 0:
-        pos_rel = (precio_actual - precio_infra) / rango_total
+        if precio_infra < precio_medio < precio_sobre:
+            if precio_actual <= precio_medio:
+                pos_rel = 0.5 * (precio_actual - precio_infra) / (precio_medio - precio_infra)
+            else:
+                pos_rel = 0.5 + 0.5 * (precio_actual - precio_medio) / (precio_sobre - precio_medio)
+        else:
+            pos_rel = (precio_actual - precio_infra) / rango_total
+
         pos_pct = min(max(pos_rel * 100.0, 0.0), 100.0)
         gauge_html = (
             '<div class="gauge-box">'
             '<div class="gauge-top">'
-            f'<span><b>Posición en el canal de Weiss</b> <span style="opacity:0.68;">({etiqueta_extremo})</span></span>'
+            f'<span><b>Posición en el canal de Weiss</b> <span style="opacity:0.68;">({etiqueta_extremo} · Media = 50%)</span></span>'
             f'<span style="color:{color_actual_hex};font-weight:800;">{pos_rel * 100:.1f}%</span>'
             '</div>'
             '<div class="gauge-track">'
+            '<div class="gauge-mid-tick"></div>'
             f'<div class="gauge-marker" style="left:{pos_pct:.1f}%;border-color:{color_actual_hex};"></div>'
             '</div>'
             '<div class="gauge-labels">'
@@ -1217,7 +1508,7 @@ with tab_chowder:
             {
                 "label": "Dividend Yield Actual",
                 "value": f"{yield_actual:.2f}%",
-                "yields": f"Neto: <b>{yield_actual_neto:.2f}%</b> ({imp_label} imp.)",
+                "yields": f"Neto: <b>{yield_actual_neto:.2f}%</b> ({fmt_pct_limpio(tasa_efectiva)} ef.)",
                 "sub": f"Franja: {etiqueta_franja_actual}",
                 "sub_class": sub_actual_cls,
                 "accent": color_actual_key,
@@ -1244,7 +1535,7 @@ with tab_chowder:
             lista_rep = ", ".join(str(a) for a in sorted(anios_reparados))
             st.caption(
                 f"ℹ️ Se han normalizado los dividendos de **{lista_rep}** usando la tasa anual indicada "
-                "(por cambio de calendario o pagos omitidos en el histórico de Yahoo Finance)."
+                "(por cambio de calendario, pagos omitidos en Yahoo o desplazamiento de fecha ex-dividendo)."
             )
 
         st.markdown("#### Ritmo histórico de crecimiento del dividendo (DGR)")
@@ -1288,7 +1579,6 @@ with tab_chowder:
             },
         ])
 
-        # Gráfico de barras de dividendos anuales completos
         div_hist_bar = anios_completos.tail(min(len(anios_completos), 12))
         if not div_hist_bar.empty:
             st.markdown("#### Evolución del dividendo anual (años completos)")
@@ -1328,7 +1618,7 @@ with tab_datos:
     col_t1, col_t2 = st.columns(2)
 
     with col_t1:
-        st.markdown(f"#### 🎯 Resumen de Precios Objetivo (Imp. {imp_label})")
+        st.markdown(f"#### 🎯 Precios Objetivo ({fisc['etiqueta_corta']})")
         col_precio_lbl = f"Precio{sufijo_moneda}"
         resumen_df = pd.DataFrame({
             "Zona": [
@@ -1381,6 +1671,28 @@ with tab_datos:
             hide_index=True
         )
 
+        # Mini tabla de desglose fiscal
+        st.markdown(f"#### 🧾 Desglose Fiscal ({pais_es})")
+        fiscal_df = pd.DataFrame({
+            "Concepto": [
+                "Retención en origen",
+                "Deducible en Renta (CDI)",
+                "Exceso no deducible",
+                "IRPF destino (España)",
+                "Carga final tras Renta",
+                "Retención al cobro (cascada)"
+            ],
+            "Porcentaje": [
+                fmt_pct_limpio(ret_origen),
+                fmt_pct_limpio(fisc["deducible_renta"]),
+                fmt_pct_limpio(fisc["exceso_no_deducible"]),
+                fmt_pct_limpio(impuesto_destino),
+                fmt_pct_limpio(fisc["efectivo_renta"]),
+                fmt_pct_limpio(fisc["efectivo_cascada"])
+            ]
+        })
+        st.dataframe(fiscal_df, use_container_width=True, hide_index=True)
+
     with col_t2:
         st.markdown("#### 📅 Historial de Dividendos Anuales")
         div_mostrar = div_por_anio.tail(years + 1)
@@ -1417,7 +1729,7 @@ with tab_datos:
             hide_index=True
         )
         if anios_reparados:
-            st.caption("*Año normalizado por cambio de calendario o pagos omitidos en Yahoo Finance.")
+            st.caption("*Año normalizado por cambio de calendario, pagos omitidos o desplazamiento de fecha ex-dividendo.")
 
     csv_export = df[
         ["Close", "Dividends", "Div_Anual", "Yield", "YoC", "Banda_Infra", "Banda_Media", "Banda_Sobre"]
