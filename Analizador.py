@@ -52,10 +52,11 @@ CUSTOM_CSS = """
     font-weight: 600;
     border: 1px solid transparent;
 }
-.pill-green { background: rgba(16, 185, 129, 0.15); color: #10B981; border-color: rgba(16, 185, 129, 0.35); }
-.pill-blue  { background: rgba(56, 189, 248, 0.15); color: #38BDF8; border-color: rgba(56, 189, 248, 0.35); }
-.pill-amber { background: rgba(245, 158, 11, 0.15); color: #F59E0B; border-color: rgba(245, 158, 11, 0.35); }
-.pill-red   { background: rgba(239, 68, 68, 0.15);  color: #EF4444; border-color: rgba(239, 68, 68, 0.35); }
+.pill-green { background: rgba(16, 185, 129, 0.15); color: #10B981; border-color: rgba(16, 185, 129, 0.38); }
+.pill-teal  { background: rgba(20, 184, 166, 0.15); color: #2DD4BF; border-color: rgba(20, 184, 166, 0.38); }
+.pill-blue  { background: rgba(56, 189, 248, 0.15); color: #38BDF8; border-color: rgba(56, 189, 248, 0.38); }
+.pill-amber { background: rgba(245, 158, 11, 0.15); color: #F59E0B; border-color: rgba(245, 158, 11, 0.38); }
+.pill-red   { background: rgba(239, 68, 68, 0.15);  color: #EF4444; border-color: rgba(239, 68, 68, 0.38); }
 
 .kpi-grid {
     display: grid;
@@ -79,32 +80,44 @@ CUSTOM_CSS = """
     flex-direction: column;
     justify-content: space-between;
 }
-.kpi-card.accent-blue  { border-top-color: #38BDF8; }
-.kpi-card.accent-green { border-top-color: #10B981; }
-.kpi-card.accent-amber { border-top-color: #F59E0B; }
-.kpi-card.accent-red   { border-top-color: #EF4444; }
-.kpi-card.accent-slate { border-top-color: #94A3B8; }
+.kpi-card.accent-blue   { border-top-color: #38BDF8; }
+.kpi-card.accent-green  { border-top-color: #10B981; }
+.kpi-card.accent-teal   { border-top-color: #2DD4BF; }
+.kpi-card.accent-amber  { border-top-color: #F59E0B; }
+.kpi-card.accent-red    { border-top-color: #EF4444; }
+.kpi-card.accent-purple { border-top-color: #A855F7; }
+.kpi-card.accent-slate  { border-top-color: #94A3B8; }
 
 .kpi-label {
     font-size: 0.75rem;
     font-weight: 600;
-    opacity: 0.72;
+    opacity: 0.74;
     text-transform: uppercase;
     letter-spacing: 0.03em;
     margin-bottom: 6px;
 }
 .kpi-value {
-    font-size: 1.42rem;
-    font-weight: 700;
+    font-size: 1.44rem;
+    font-weight: 800;
     line-height: 1.15;
     margin-bottom: 4px;
 }
+.val-green  { color: #10B981; }
+.val-teal   { color: #2DD4BF; }
+.val-blue   { color: #38BDF8; }
+.val-amber  { color: #F59E0B; }
+.val-red    { color: #EF4444; }
+.val-purple { color: #A855F7; }
+.val-slate  { color: inherit; }
+
 .kpi-sub {
     font-size: 0.78rem;
-    opacity: 0.78;
+    opacity: 0.80;
 }
-.kpi-sub.pos { color: #10B981; opacity: 1; font-weight: 600; }
-.kpi-sub.neg { color: #EF4444; opacity: 1; font-weight: 600; }
+.kpi-sub.pos  { color: #10B981; opacity: 1; font-weight: 600; }
+.kpi-sub.teal { color: #2DD4BF; opacity: 1; font-weight: 600; }
+.kpi-sub.warn { color: #F59E0B; opacity: 1; font-weight: 600; }
+.kpi-sub.neg  { color: #EF4444; opacity: 1; font-weight: 600; }
 
 .gauge-box {
     background: rgba(148, 163, 184, 0.06);
@@ -140,13 +153,13 @@ CUSTOM_CSS = """
 .gauge-labels {
     display: flex;
     justify-content: space-between;
-    font-size: 0.73rem;
-    opacity: 0.72;
+    font-size: 0.74rem;
+    font-weight: 600;
     margin-top: 8px;
 }
 .section-caption {
     font-size: 0.82rem;
-    opacity: 0.72;
+    opacity: 0.78;
     margin-top: -8px;
     margin-bottom: 10px;
 }
@@ -258,7 +271,6 @@ def detectar_pagos_uniformes(div_events: pd.Series, freq: int) -> bool:
     if cambios.empty:
         return True
 
-    # Contar alternancias claras de subida/bajada fuertes (> 12% en sentido contrario)
     caidas_fuertes = (cambios < -0.12).sum()
     subidas_fuertes = (cambios > 0.12).sum()
     if caidas_fuertes >= 2 and subidas_fuertes >= 2 and (caidas_fuertes / len(cambios)) >= 0.20:
@@ -282,7 +294,6 @@ def filtrar_dividendos_extraordinarios(div_events: pd.Series) -> pd.Series:
         prev_v = valores[i - 1]
         curr_v = valores[i]
         next_v = valores[i + 1]
-        # Si el pago actual es >55% mayor que el anterior y el siguiente vuelve cerca del anterior
         if prev_v > 0 and curr_v > prev_v * 1.55 and next_v < curr_v * 0.75:
             limpios.iloc[i] = prev_v
 
@@ -323,7 +334,6 @@ def calcular_dividendo_weiss(
 
     serie_diaria = div_anual_evento.reindex(df_precios.index, method="ffill")
 
-    # Anular si la empresa lleva > 420 días sin pagar dividendo
     fechas_ev = pd.Series(div_events.index, index=div_events.index)
     ultima_fecha = fechas_ev.reindex(df_precios.index, method="ffill")
     dias_sin_pago = (df_precios.index.to_series() - ultima_fecha).dt.days
@@ -340,16 +350,29 @@ def calcular_cagr(valor_final: float, valor_inicial: float, anios: int):
     return ((valor_final / valor_inicial) ** (1.0 / anios) - 1.0) * 100.0
 
 
+def color_dgr(valor):
+    if valor is None:
+        return "slate", ""
+    if valor >= 5.0:
+        return "green", "pos"
+    if valor > 0:
+        return "teal", "teal"
+    if valor == 0:
+        return "amber", "warn"
+    return "red", "neg"
+
+
 def render_kpi_grid(cards: list[dict]):
-    """Renderiza una cuadrícula limpia 2x2 en móvil y 4x1 en escritorio."""
+    """Renderiza una cuadrícula limpia 2x2 en móvil y 4x1 en escritorio con valores coloreados."""
     html_cards = []
     for c in cards:
         accent = c.get("accent", "slate")
+        val_cls = c.get("val_class", f"val-{accent}")
         sub_cls = c.get("sub_class", "")
         html_cards.append(
             f'<div class="kpi-card accent-{accent}">'
             f'<div class="kpi-label">{c["label"]}</div>'
-            f'<div class="kpi-value">{c["value"]}</div>'
+            f'<div class="kpi-value {val_cls}">{c["value"]}</div>'
             f'<div class="kpi-sub {sub_cls}">{c.get("sub", "")}</div>'
             f'</div>'
         )
@@ -421,7 +444,7 @@ with st.container(border=True):
     with col_per:
         years = st.selectbox("Periodo", options=[5, 7, 10, 12, 15, 20], index=3, format_func=lambda x: f"{x} años")
 
-    with st.expander("⚙️ Ajustes de cálculo (método Weiss, franjas y dividendo)", expanded=False):
+    with st.expander("⚙️ Ajustes de cálculo (método Weiss, franjas, YoC y dividendo)", expanded=False):
         a1, a2, a3 = st.columns(3)
         with a1:
             opciones_modo = {
@@ -461,13 +484,23 @@ with st.container(border=True):
                 "Mensual (12/año)": 12,
             }
             freq_override = freq_opciones[st.selectbox("Frecuencia de pagos", list(freq_opciones.keys()), index=0)]
+
+            modo_yoc = st.radio(
+                "Curva YoC en gráfico",
+                options=["YoC hoy según fecha de compra", "Evolución YoC desde precio fijo"],
+                index=0,
+                help=(
+                    "Por defecto muestra el YoC que tendrías HOY si hubieras comprado en cada fecha del pasado "
+                    "(Dividendo actual / Precio histórico). La segunda opción muestra los escalones desde un precio fijo."
+                )
+            )
             precio_compra_yoc = st.number_input(
-                "Precio compra para YoC (0 = inicio periodo)",
+                "Tu precio medio de compra (opcional)",
                 min_value=0.0,
                 value=0.0,
                 step=1.0,
                 format="%.2f",
-                help="Déjalo en 0 para ver el YoC comprando al inicio del periodo, o introduce tu precio medio real."
+                help="Si introduces tu precio medio, dibuja tu línea personal de YoC en el gráfico."
             )
             escala_log = st.checkbox("Escala logarítmica en precio", value=False)
             forzar_defensiva = st.checkbox("Umbral Chowder defensivo (≥ 8%)", value=False)
@@ -547,18 +580,41 @@ else:
 
 yield_actual = (div_actual / precio_actual) * 100.0
 
-# Yield on Cost (YoC) histórico y actual
+# Yield on Cost (YoC):
+# - Modo histórico (por defecto): YoC que cobrarías HOY si hubieras comprado en cada fecha t -> Div_Actual / Close(t)
+# - Modo precio fijo: evolución escalonada del YoC comprando al inicio del periodo o a tu precio medio
+sufijo_moneda = f" {moneda}" if moneda else ""
 fecha_inicio_yoc = df.index[0].strftime("%d/%m/%Y")
-moneda_sp = f" {moneda}" if moneda else ""
-if precio_compra_yoc > 0:
-    precio_base_yoc = float(precio_compra_yoc)
-    etiqueta_base_yoc = f"tu precio medio ({precio_base_yoc:.2f}{moneda_sp})"
-else:
-    precio_base_yoc = float(df["Close"].iloc[0])
-    etiqueta_base_yoc = f"inicio del periodo ({precio_base_yoc:.2f}{moneda_sp} el {fecha_inicio_yoc})"
+precio_inicio_periodo = float(df["Close"].iloc[0])
+mi_yoc_personal = (div_actual / float(precio_compra_yoc)) * 100.0 if precio_compra_yoc > 0 else None
 
-df["YoC"] = (df["Div_Anual"] / precio_base_yoc) * 100.0
-yoc_actual = (div_actual / precio_base_yoc) * 100.0
+if modo_yoc.startswith("YoC hoy"):
+    df["YoC"] = (div_actual / df["Close"]) * 100.0
+    yoc_inicio = float(df["YoC"].iloc[0])
+    yoc_medio_hist = float(df["YoC"].mean())
+    etiqueta_leyenda_yoc = f"YoC hoy ({years}a: {yoc_inicio:.2f}%)"
+    texto_caption_yoc = (
+        f"Si compraste hace {years} años ({precio_inicio_periodo:.2f}{sufijo_moneda} el {fecha_inicio_yoc}), "
+        f"tu <b>YoC hoy es {yoc_inicio:.2f}%</b> · YoC medio del periodo: <b>{yoc_medio_hist:.2f}%</b>."
+    )
+    if mi_yoc_personal is not None:
+        texto_caption_yoc += (
+            f" · <span style='color:#EC4899;font-weight:600;'>Mi YoC ({precio_compra_yoc:.2f}{sufijo_moneda}): "
+            f"{mi_yoc_personal:.2f}%</span>"
+        )
+    shape_yoc = "linear"
+else:
+    precio_base_fijo = float(precio_compra_yoc) if precio_compra_yoc > 0 else precio_inicio_periodo
+    df["YoC"] = (df["Div_Anual"] / precio_base_fijo) * 100.0
+    yoc_fijo_actual = (div_actual / precio_base_fijo) * 100.0
+    etiqueta_leyenda_yoc = f"YoC fijo ({yoc_fijo_actual:.2f}%)"
+    base_txt = (
+        f"tu precio medio ({precio_base_fijo:.2f}{sufijo_moneda})"
+        if precio_compra_yoc > 0
+        else f"inicio del periodo ({precio_base_fijo:.2f}{sufijo_moneda} el {fecha_inicio_yoc})"
+    )
+    texto_caption_yoc = f"Evolución del YoC desde {base_txt} → <b>YoC actual: {yoc_fijo_actual:.2f}%</b>."
+    shape_yoc = "hv"
 
 precio_infra = div_actual / (yield_infra / 100.0)
 precio_medio = div_actual / (yield_medio / 100.0)
@@ -568,15 +624,31 @@ dist_infra = ((precio_infra - precio_actual) / precio_actual) * 100.0
 dist_medio = ((precio_medio - precio_actual) / precio_actual) * 100.0
 dist_sobre = ((precio_sobre - precio_actual) / precio_actual) * 100.0
 
-# Diagnóstico de estado Weiss
+# Diagnóstico y color dinámico del precio actual según la franja Weiss
 if precio_actual <= precio_infra:
     badge_weiss = ("🟢 Infravalorada · Zona de Compra", "pill-green")
+    color_actual_key = "green"
+    color_actual_hex = "#10B981"
+    sub_actual_cls = "pos"
+    etiqueta_franja_actual = "Infravalorada"
 elif precio_actual <= precio_medio:
-    badge_weiss = ("🔵 Por debajo de la Media · Atractiva", "pill-blue")
+    badge_weiss = ("🟢 Franja Atractiva · Bajo la Media", "pill-teal")
+    color_actual_key = "teal"
+    color_actual_hex = "#2DD4BF"
+    sub_actual_cls = "teal"
+    etiqueta_franja_actual = "Bajo la Media"
 elif precio_actual < precio_sobre:
-    badge_weiss = ("🟠 Por encima de la Media · Esperar", "pill-amber")
+    badge_weiss = ("🟠 Franja Cara · Sobre la Media", "pill-amber")
+    color_actual_key = "amber"
+    color_actual_hex = "#F59E0B"
+    sub_actual_cls = "warn"
+    etiqueta_franja_actual = "Sobre la Media"
 else:
     badge_weiss = ("🔴 Sobrevalorada · Precaución", "pill-red")
+    color_actual_key = "red"
+    color_actual_hex = "#EF4444"
+    sub_actual_cls = "neg"
+    etiqueta_franja_actual = "Sobrevalorada"
 
 # ==============================================================================
 # CÁLCULO DE DGR Y REGLA DE CHOWDER
@@ -631,8 +703,6 @@ else:
 # ==============================================================================
 # CABECERA DE LA EMPRESA ANALIZADA
 # ==============================================================================
-sufijo_moneda = f" {moneda}" if moneda else ""
-
 header_html = (
     '<div class="weiss-header">'
     '<div>'
@@ -646,7 +716,7 @@ header_html = (
 st.markdown(header_html, unsafe_allow_html=True)
 
 # ==============================================================================
-# PESTAÑAS ORGANIZADAS (CERO SCROLL INFINITO EN MÓVIL)
+# PESTAÑAS ORGANIZADAS
 # ==============================================================================
 tab_weiss, tab_chowder, tab_datos = st.tabs([
     "📈 Valoración Weiss",
@@ -666,30 +736,35 @@ plotly_config = {
 with tab_weiss:
     render_kpi_grid([
         {
-            "label": "Precio Actual",
+            "label": f"Precio Actual ({etiqueta_franja_actual})",
             "value": f"{precio_actual:.2f}{sufijo_moneda}",
             "sub": f"Yield actual: {yield_actual:.2f}%",
-            "accent": "blue"
+            "sub_class": sub_actual_cls,
+            "accent": color_actual_key,
+            "val_class": f"val-{color_actual_key}"
         },
         {
             "label": f"Infravaloración ({yield_infra:.2f}%)",
             "value": f"{precio_infra:.2f}{sufijo_moneda}",
             "sub": f"{dist_infra:+.1f}% vs actual",
             "sub_class": "pos" if dist_infra >= 0 else "",
-            "accent": "green"
+            "accent": "green",
+            "val_class": "val-green"
         },
         {
             "label": f"Valoración Media ({yield_medio:.2f}%)",
             "value": f"{precio_medio:.2f}{sufijo_moneda}",
             "sub": f"{dist_medio:+.1f}% potencial",
             "sub_class": "pos" if dist_medio >= 0 else "neg",
-            "accent": "amber"
+            "accent": "amber",
+            "val_class": "val-amber"
         },
         {
             "label": f"Sobrevaloración ({yield_sobre:.2f}%)",
             "value": f"{precio_sobre:.2f}{sufijo_moneda}",
             "sub": f"{dist_sobre:+.1f}% vs actual",
-            "accent": "red"
+            "accent": "red",
+            "val_class": "val-red"
         },
     ])
 
@@ -702,15 +777,15 @@ with tab_weiss:
             '<div class="gauge-box">'
             '<div class="gauge-top">'
             f'<span><b>Posición en el canal de Weiss</b> <span style="opacity:0.68;">({etiqueta_extremo})</span></span>'
-            f'<span><b>{pos_rel * 100:.1f}%</b></span>'
+            f'<span style="color:{color_actual_hex};font-weight:800;">{pos_rel * 100:.1f}%</span>'
             '</div>'
             '<div class="gauge-track">'
-            f'<div class="gauge-marker" style="left:{pos_pct:.1f}%;"></div>'
+            f'<div class="gauge-marker" style="left:{pos_pct:.1f}%;border-color:{color_actual_hex};"></div>'
             '</div>'
             '<div class="gauge-labels">'
-            f'<span>Infravalorada ({precio_infra:.2f})</span>'
-            f'<span>Media ({precio_medio:.2f})</span>'
-            f'<span>Sobrevalorada ({precio_sobre:.2f})</span>'
+            f'<span style="color:#10B981;">Infravalorada ({precio_infra:.2f})</span>'
+            f'<span style="color:#F59E0B;">Media ({precio_medio:.2f})</span>'
+            f'<span style="color:#EF4444;">Sobrevalorada ({precio_sobre:.2f})</span>'
             '</div>'
             '</div>'
         )
@@ -793,11 +868,7 @@ with tab_weiss:
 
     # GRÁFICO 2: HISTÓRICO DE DIVIDEND YIELD Y YOC
     st.markdown("#### Histórico de Dividend Yield y YoC (%)")
-    st.markdown(
-        f'<div class="section-caption">YoC actual: <b>{yoc_actual:.2f}%</b> · '
-        f'Base: {etiqueta_base_yoc} (editable en ⚙️ Ajustes).</div>',
-        unsafe_allow_html=True
-    )
+    st.markdown(f'<div class="section-caption">{texto_caption_yoc}</div>', unsafe_allow_html=True)
 
     fig_yield = go.Figure()
     x_ext = [df.index[0], df.index[-1]]
@@ -816,10 +887,21 @@ with tab_weiss:
         x=df.index,
         y=df["YoC"],
         mode="lines",
-        name=f"YoC ({yoc_actual:.2f}%)",
-        line=dict(color="#A855F7", width=2.2, shape="hv"),
+        name=etiqueta_leyenda_yoc,
+        line=dict(color="#A855F7", width=2.1, shape=shape_yoc),
         hovertemplate="%{y:.2f}%"
     ))
+
+    if modo_yoc.startswith("YoC hoy") and mi_yoc_personal is not None:
+        fig_yield.add_trace(go.Scatter(
+            x=x_ext,
+            y=[mi_yoc_personal, mi_yoc_personal],
+            mode="lines",
+            name=f"Mi YoC ({mi_yoc_personal:.2f}%)",
+            line=dict(color="#EC4899", width=2.0, dash="dashdot"),
+            hovertemplate="%{y:.2f}%"
+        ))
+
     fig_yield.add_trace(go.Scatter(
         x=x_ext, y=[yield_infra, yield_infra], mode="lines",
         name=f"Infravaloración ({yield_infra:.2f}%)",
@@ -839,10 +921,14 @@ with tab_weiss:
         hovertemplate="%{y:.2f}%"
     ))
 
-    y_min_val = min(float(df["Yield"].min()), float(df["YoC"].min()), yield_sobre)
-    y_max_val = max(float(df["Yield"].max()), float(df["YoC"].max()), yield_infra)
-    y_min = max(0.0, y_min_val * 0.85)
-    y_max = y_max_val * 1.12
+    y_vals_max = [float(df["Yield"].max()), float(df["YoC"].max()), yield_infra]
+    y_vals_min = [float(df["Yield"].min()), float(df["YoC"].min()), yield_sobre]
+    if mi_yoc_personal is not None:
+        y_vals_max.append(mi_yoc_personal)
+        y_vals_min.append(mi_yoc_personal)
+
+    y_min = max(0.0, min(y_vals_min) * 0.85)
+    y_max = max(y_vals_max) * 1.12
 
     fig_yield.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
@@ -856,8 +942,8 @@ with tab_weiss:
             automargin=True
         ),
         hovermode="x unified",
-        height=360,
-        margin=dict(l=8, r=10, t=12, b=92),
+        height=370,
+        margin=dict(l=8, r=10, t=12, b=98),
         legend=dict(
             orientation="h",
             yanchor="top",
@@ -891,64 +977,79 @@ with tab_chowder:
             unsafe_allow_html=True
         )
 
+        acc_dgr_ch, sub_dgr_ch = color_dgr(dgr_chowder)
         render_kpi_grid([
             {
                 "label": "Número de Chowder",
                 "value": f"{chowder_val:.2f}%",
                 "sub": f"{margen_ch:+.2f} pp vs objetivo",
                 "sub_class": "pos" if margen_ch >= 0 else "neg",
-                "accent": accent_ch
+                "accent": accent_ch,
+                "val_class": f"val-{accent_ch}"
             },
             {
                 "label": "Dividend Yield Actual",
                 "value": f"{yield_actual:.2f}%",
-                "sub": "Componente renta",
-                "accent": "blue"
+                "sub": f"Franja: {etiqueta_franja_actual}",
+                "sub_class": sub_actual_cls,
+                "accent": color_actual_key,
+                "val_class": f"val-{color_actual_key}"
             },
             {
                 "label": etiqueta_dgr,
                 "value": f"{dgr_chowder:+.2f}%",
                 "sub": "Componente crecimiento",
-                "sub_class": "pos" if dgr_chowder >= 0 else "neg",
-                "accent": "green" if dgr_chowder >= 5 else "amber"
+                "sub_class": sub_dgr_ch,
+                "accent": acc_dgr_ch,
+                "val_class": f"val-{acc_dgr_ch}"
             },
             {
                 "label": "Umbral Aplicable",
                 "value": f"≥ {objetivo_chowder:.0f}%",
                 "sub": regla_texto,
-                "accent": "slate"
+                "accent": "blue",
+                "val_class": "val-blue"
             },
         ])
 
         st.markdown("#### Ritmo histórico de crecimiento del dividendo (DGR)")
+        acc_1y, sub_1y = color_dgr(dgr_1y)
+        acc_3y, sub_3y = color_dgr(dgr_3y)
+        acc_5y, sub_5y = color_dgr(dgr_5y)
+        acc_10y, sub_10y = color_dgr(dgr_10y)
+
         render_kpi_grid([
             {
                 "label": "DGR 1 Año",
                 "value": f"{dgr_1y:+.2f}%" if dgr_1y is not None else "N/D",
                 "sub": f"{ultimo_anio - 1}–{ultimo_anio}" if dgr_1y is not None else "Sin datos",
-                "sub_class": "pos" if (dgr_1y or 0) > 0 else ("neg" if (dgr_1y or 0) < 0 else ""),
-                "accent": "slate"
+                "sub_class": sub_1y,
+                "accent": acc_1y,
+                "val_class": f"val-{acc_1y}"
             },
             {
                 "label": "DGR 3 Años",
                 "value": f"{dgr_3y:+.2f}%" if dgr_3y is not None else "N/D",
                 "sub": f"{ultimo_anio - 3}–{ultimo_anio}" if dgr_3y is not None else "Sin datos",
-                "sub_class": "pos" if (dgr_3y or 0) > 0 else ("neg" if (dgr_3y or 0) < 0 else ""),
-                "accent": "slate"
+                "sub_class": sub_3y,
+                "accent": acc_3y,
+                "val_class": f"val-{acc_3y}"
             },
             {
                 "label": "DGR 5 Años",
                 "value": f"{dgr_5y:+.2f}%" if dgr_5y is not None else "N/D",
                 "sub": f"{ultimo_anio - 5}–{ultimo_anio}" if dgr_5y is not None else "Sin datos",
-                "sub_class": "pos" if (dgr_5y or 0) > 0 else ("neg" if (dgr_5y or 0) < 0 else ""),
-                "accent": "blue"
+                "sub_class": sub_5y,
+                "accent": acc_5y,
+                "val_class": f"val-{acc_5y}"
             },
             {
                 "label": "DGR 10 Años",
                 "value": f"{dgr_10y:+.2f}%" if dgr_10y is not None else "N/D",
                 "sub": f"{ultimo_anio - 10}–{ultimo_anio}" if dgr_10y is not None else "Sin datos",
-                "sub_class": "pos" if (dgr_10y or 0) > 0 else ("neg" if (dgr_10y or 0) < 0 else ""),
-                "accent": "slate"
+                "sub_class": sub_10y,
+                "accent": acc_10y,
+                "val_class": f"val-{acc_10y}"
             },
         ])
 
@@ -993,12 +1094,13 @@ with tab_datos:
 
     with col_t1:
         st.markdown("#### 🎯 Resumen de Precios Objetivo")
+        col_precio_lbl = f"Precio{sufijo_moneda}"
         resumen_df = pd.DataFrame({
             "Zona": [
                 "🟢 Infravaloración",
                 "🟡 Valoración Media",
                 "🔴 Sobrevaloración",
-                "🔵 Cotización Actual"
+                f"● Actual ({etiqueta_franja_actual})"
             ],
             "Yield": [
                 f"{yield_infra:.2f}%",
@@ -1006,7 +1108,7 @@ with tab_datos:
                 f"{yield_sobre:.2f}%",
                 f"{yield_actual:.2f}%"
             ],
-            f"Precio{sufijo_moneda}": [
+            col_precio_lbl: [
                 f"{precio_infra:.2f}",
                 f"{precio_medio:.2f}",
                 f"{precio_sobre:.2f}",
@@ -1019,7 +1121,23 @@ with tab_datos:
                 "0.0%"
             ]
         })
-        st.dataframe(resumen_df, use_container_width=True, hide_index=True)
+
+        colores_filas = ["#10B981", "#F59E0B", "#EF4444", color_actual_hex]
+
+        def estilizar_resumen(row):
+            c = colores_filas[row.name]
+            return [
+                "",
+                f"color: {c}; font-weight: 600;",
+                f"color: {c}; font-weight: 700;",
+                ""
+            ]
+
+        st.dataframe(
+            resumen_df.style.apply(estilizar_resumen, axis=1),
+            use_container_width=True,
+            hide_index=True
+        )
 
     with col_t2:
         st.markdown("#### 📅 Historial de Dividendos Anuales")
@@ -1031,11 +1149,20 @@ with tab_datos:
         tabla_div["YoY (%)"] = tabla_div[f"Dividendo{sufijo_moneda}"].pct_change() * 100.0
         tabla_div.loc[tabla_div["Año"] == str(anio_actual), "Año"] = f"{anio_actual} (YTD)"
 
+        def color_yoy(val):
+            if pd.isna(val):
+                return ""
+            if val > 0:
+                return "color: #10B981; font-weight: 600;"
+            if val < 0:
+                return "color: #EF4444; font-weight: 600;"
+            return "color: #F59E0B;"
+
         st.dataframe(
             tabla_div.iloc[::-1].style.format({
                 f"Dividendo{sufijo_moneda}": "{:.4f}",
                 "YoY (%)": "{:+.2f}%"
-            }, na_rep="—"),
+            }, na_rep="—").map(color_yoy, subset=["YoY (%)"]),
             use_container_width=True,
             hide_index=True
         )
