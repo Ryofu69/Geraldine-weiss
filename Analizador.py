@@ -232,8 +232,8 @@ def consolidar_eventos_dividendo(div_series: pd.Series, ventana_dias: int = 7) -
 def detectar_frecuencia_dinamica(div_events: pd.Series) -> pd.Series:
     """
     Detecta la frecuencia anual (1, 2, 3, 4, 6 o 12 pagos/año) en cada momento histórico.
-    Usa días reales (independiente de la unidad interna ns/us/s de pandas) para manejar
-    cambios de calendario como ACN (de 2 a 4 pagos/año en oct 2019).
+    Usa días reales (independiente de la resolución interna ns/us/s de pandas) para
+    detectar cambios reales de calendario (como ACN pasando de 2 a 4 pagos/año en 2019).
     """
     if div_events.empty:
         return pd.Series(dtype=int)
@@ -243,7 +243,6 @@ def detectar_frecuencia_dinamica(div_events: pd.Series) -> pd.Series:
     if n == 1:
         return pd.Series([1], index=fechas, dtype=int)
 
-    # Días transcurridos desde el primer dividendo (totalmente inmune a datetime64[us]/[ns]/[s])
     dias = (fechas - fechas[0]).total_seconds().to_numpy(dtype=np.float64) / 86400.0
     ventana_dias = 348.0
     ultimo_dia = float(dias[-1])
@@ -263,9 +262,7 @@ def detectar_frecuencia_dinamica(div_events: pd.Series) -> pd.Series:
         raw_freq[i] = max(1, cnt)
 
     def normalizar_freq(c: int) -> int:
-        if c >= 10:
-            return 12
-        if c in (8, 9):
+        if c >= 8:
             return 12
         if c in (5, 7):
             return 4
@@ -273,7 +270,6 @@ def detectar_frecuencia_dinamica(div_events: pd.Series) -> pd.Series:
 
     norm_raw = np.array([normalizar_freq(int(c)) for c in raw_freq], dtype=int)
 
-    # Agrupar en rachas continuas (run-length encoding) y aceptar solo regímenes sostenidos
     runs = []
     start = 0
     for i in range(1, n):
@@ -287,7 +283,6 @@ def detectar_frecuencia_dinamica(div_events: pd.Series) -> pd.Series:
         longitud = e - s
         es_tramo_final = (e == n)
         if val <= 4:
-            # Exigimos > 1 año completo para evitar que un extraordinario puntual cree un falso régimen
             min_req = val if (es_tramo_final and val >= 2) else (val + 1)
         else:
             min_req = max(5, val // 2)
@@ -300,8 +295,77 @@ def detectar_frecuencia_dinamica(div_events: pd.Series) -> pd.Series:
         fallback = int(round(float(np.median(norm_raw))))
         return pd.Series([max(1, fallback)] * n, index=fechas, dtype=int)
 
-    # Propagar régimen previo sobre puntos de transición (ej. último pago semestral antes de pasar a trimestral)
     return serie_est.ffill().bfill().astype(int)
+
+
+def validar_cambios_frecuencia(
+    div_events: pd.Series,
+    freq_serie: pd.Series,
+    info: dict | None = None
+) -> pd.Series:
+    """
+    Valida cambios de frecuencia comprobando la continuidad del dividendo anualizado
+    y contrastando el tramo actual con dividendRate de Yahoo Finance.
+    - Acepta cambios reales (ej. ACN oct 2019: 1.46×2 -> 0.80×4, importe anual continuo).
+    - Rechaza falsos cambios provocados por pagos omitidos en Yahoo Finance (ej. ACN 2025-2026:
+      el pago sigue en 1.48 -> 1.63 -> 1.71, por lo que bajar a 2/año recortaría a la mitad el anual).
+    """
+    if len(div_events) < 2:
+        return freq_serie
+
+    vals = div_events.values.astype(float)
+    freqs = freq_serie.values.astype(int).copy()
+    n = len(freqs)
+
+    # 1. Segmentar rachas contiguas
+    segmentos = []
+    s = 0
+    for i in range(1, n):
+        if freqs[i] != freqs[s]:
+            segmentos.append([s, i, int(freqs[s])])
+            s = i
+    segmentos.append([s, n, int(freqs[s])])
+
+    # 2. Validar continuidad del dividendo anual en cada transición
+    if len(segmentos) > 1:
+        for idx in range(1, len(segmentos)):
+            prev_s, prev_e, f_prev = segmentos[idx - 1]
+            curr_s, curr_e, f_curr = segmentos[idx]
+            if f_curr == f_prev:
+                continue
+
+            v_before = float(np.median(vals[max(prev_s, prev_e - min(f_prev, 2)) : prev_e]))
+            v_after = float(np.median(vals[curr_s : min(curr_e, curr_s + min(f_curr, 2))]))
+
+            if v_before > 0 and v_after > 0:
+                anual_prev = v_before * f_prev
+                err_mantener = abs(np.log((v_after * f_prev) / anual_prev))
+                err_cambiar = abs(np.log((v_after * f_curr) / anual_prev))
+
+                # Si mantener f_prev preserva la continuidad anual mejor que cambiar a f_curr,
+                # el supuesto cambio se debe a pagos ausentes en Yahoo Finance.
+                if err_mantener < err_cambiar:
+                    segmentos[idx][2] = f_prev
+                    freqs[curr_s:curr_e] = f_prev
+
+    # 3. Contraste del tramo actual con dividendRate oficial de Yahoo (pagadores uniformes)
+    forward_rate = (info or {}).get("dividendRate")
+    if forward_rate and float(forward_rate) > 0 and vals[-1] > 0:
+        ratio = float(forward_rate) / float(vals[-1])
+        estandar = [1, 2, 3, 4, 6, 12]
+        f_info = min(estandar, key=lambda f: abs(ratio - f))
+        if abs(ratio - f_info) / f_info <= 0.12 and freqs[-1] != f_info:
+            ultimos = vals[max(0, n - 4) :]
+            if len(ultimos) >= 2 and (np.max(ultimos) / max(np.min(ultimos), 1e-9)) <= 1.35:
+                last_s = segmentos[-1][0]
+                freqs[last_s:n] = f_info
+                for k in range(last_s - 1, -1, -1):
+                    if vals[k] > 0 and 0.65 <= (vals[k] / vals[k + 1]) <= 1.50:
+                        freqs[k] = f_info
+                    else:
+                        break
+
+    return pd.Series(freqs, index=div_events.index, dtype=int)
 
 
 def detectar_intercalados_extra(div_events: pd.Series, freq_serie: pd.Series) -> pd.Series:
@@ -328,7 +392,6 @@ def detectar_intercalados_extra(div_events: pd.Series, freq_serie: pd.Series) ->
         gap_next = (fechas[i + 1] - fechas[i]).days
         gap_total = gap_prev + gap_next
 
-        # Un pago intercalado cae dentro del hueco de un único periodo regular y suele ser muy inferior
         if gap_total <= periodo_esperado * 1.28:
             ref_min = min(valores[i - 1], valores[i + 1])
             if ref_min > 0 and valores[i] < ref_min * 0.45:
@@ -349,7 +412,6 @@ def detectar_pagos_uniformes(div_events: pd.Series, freq_serie: pd.Series) -> bo
     if freq_actual <= 1:
         return True
 
-    # Evaluar únicamente dentro del régimen de frecuencia actual para no confundirse con cambios pasados
     ev_regimen = div_events[freq_serie == freq_actual]
     if len(ev_regimen) < freq_actual * 2:
         return True
@@ -391,34 +453,38 @@ def filtrar_dividendos_extraordinarios(serie_anual: pd.Series) -> pd.Series:
 def calcular_dividendo_weiss(
     df_precios: pd.DataFrame,
     modo_calculo: str = "auto",
-    freq_override: int = 0
-) -> tuple[pd.Series, int, str, str]:
+    freq_override: int = 0,
+    info: dict | None = None
+) -> tuple[pd.Series, int, str, str, pd.Series, pd.Series]:
     """
-    Calcula la serie diaria de dividendo anualizado con frecuencia dinámica por tramos:
+    Calcula la serie diaria de dividendo anualizado con frecuencia dinámica validada:
     - 'weiss_clasico': Dividendo Anual Indicado (pago regular * frecuencia del tramo).
     - 'ttm': Suma móvil de los últimos N pagos regulares del tramo.
     - 'auto': Usa Weiss clásico en pagos uniformes y TTM en pagos desiguales.
     """
     div_events = consolidar_eventos_dividendo(df_precios["Dividends"])
     if div_events.empty:
-        return pd.Series(np.nan, index=df_precios.index), 0, "N/D", ""
+        vacio = pd.Series(dtype=float)
+        return pd.Series(np.nan, index=df_precios.index), 0, "N/D", "", vacio, vacio
 
     if freq_override > 0:
         freq_serie = pd.Series(freq_override, index=div_events.index, dtype=int)
     else:
-        freq_serie = detectar_frecuencia_dinamica(div_events)
+        freq_bruta = detectar_frecuencia_dinamica(div_events)
+        freq_serie = validar_cambios_frecuencia(div_events, freq_bruta, info=info)
 
     freq_actual = int(freq_serie.iloc[-1])
 
-    # Detectar si hubo cambio de frecuencia histórico para informarlo en cabecera
-    freqs_hist = list(dict.fromkeys(int(x) for x in freq_serie.values))
-    if len(freqs_hist) > 1 and freq_override == 0:
-        previas = "/".join(str(x) for x in freqs_hist[:-1])
+    # Construir etiqueta limpia de cambios históricos (sin duplicar la frecuencia actual)
+    freqs_unicas = list(dict.fromkeys(int(x) for x in freq_serie.values))
+    previas_lista = [x for x in freqs_unicas if x != freq_actual]
+    if previas_lista and freq_override == 0:
+        previas = "/".join(str(x) for x in previas_lista)
         info_cambio_freq = f"{freq_actual} pagos/año (antes {previas}/año)"
     else:
         info_cambio_freq = f"{freq_actual} pagos/año"
 
-    # Filtrar pagos extraordinarios pequeños intercalados (para no romper huecos ni escalones)
+    # Filtrar pagos extraordinarios pequeños intercalados
     intercalados = detectar_intercalados_extra(div_events, freq_serie)
     ev_reg = div_events[~intercalados]
     freq_reg = freq_serie[~intercalados]
@@ -439,7 +505,6 @@ def calcular_dividendo_weiss(
         div_anual_evento = filtrar_dividendos_extraordinarios(anual_bruto)
         etiqueta_modo = "Escalón clásico Weiss (Dividendo indicado)"
     else:
-        # TTM adaptativo: en cada pago regular suma los últimos f_i pagos regulares
         vals = ev_reg.values
         freqs = freq_reg.values
         ttm_vals = np.full(len(vals), np.nan, dtype=float)
@@ -457,7 +522,7 @@ def calcular_dividendo_weiss(
     dias_sin_pago = (df_precios.index.to_series() - ultima_fecha).dt.days
     serie_diaria = serie_diaria.where(dias_sin_pago <= 420, np.nan)
 
-    return serie_diaria, freq_actual, etiqueta_modo, info_cambio_freq
+    return serie_diaria, freq_actual, etiqueta_modo, info_cambio_freq, ev_reg, freq_reg
 
 
 def calcular_cagr(valor_final: float, valor_inicial: float, anios: int):
@@ -649,8 +714,8 @@ if df_full is None or df_full.empty:
         st.caption(f"Detalle: {info['_error']}")
     st.stop()
 
-df_full["Div_Anual"], freq_usada, etiqueta_modo, info_cambio_freq = calcular_dividendo_weiss(
-    df_full, modo_calculo=modo_calculo, freq_override=freq_override
+df_full["Div_Anual"], freq_usada, etiqueta_modo, info_cambio_freq, ev_reg, freq_reg = calcular_dividendo_weiss(
+    df_full, modo_calculo=modo_calculo, freq_override=freq_override, info=info
 )
 
 if freq_usada == 0 or df_full["Div_Anual"].dropna().empty:
@@ -787,12 +852,34 @@ else:
     etiqueta_franja_actual = "Sobrevalorada"
 
 # ==============================================================================
-# CÁLCULO DE DGR Y REGLA DE CHOWDER
+# CÁLCULO DE DGR Y REGLA DE CHOWDER (CON REPARACIÓN DE AÑOS INCOMPLETOS EN YAHOO)
 # ==============================================================================
 anio_actual = datetime.today().year
 div_por_anio = df_full["Dividends"].groupby(df_full.index.year).sum()
 div_por_anio = div_por_anio[div_por_anio > 0]
-anios_completos = div_por_anio[div_por_anio.index < anio_actual]
+anios_completos = div_por_anio[div_por_anio.index < anio_actual].copy()
+anios_reparados = []
+
+if "Escalón" in etiqueta_modo and not anios_completos.empty and not freq_reg.empty:
+    for anio in list(anios_completos.index):
+        ev_anio = ev_reg[ev_reg.index.year == anio]
+        f_anio_serie = freq_reg[freq_reg.index.year == anio]
+        if ev_anio.empty or f_anio_serie.empty:
+            continue
+
+        n_pagos_anio = len(ev_anio)
+        f_esperada = int(f_anio_serie.max())
+        hubo_cambio_en_anio = f_anio_serie.nunique() > 1
+
+        serie_anio = df_full.loc[df_full.index.year == anio, "Div_Anual"].dropna()
+        if serie_anio.empty:
+            continue
+
+        est_anio = float(serie_anio.mean())
+        if (n_pagos_anio < f_esperada or hubo_cambio_en_anio) and float(anios_completos.loc[anio]) < est_anio * 0.85:
+            anios_completos.loc[anio] = est_anio
+            div_por_anio.loc[anio] = est_anio
+            anios_reparados.append(int(anio))
 
 dgr_1y = dgr_3y = dgr_5y = dgr_10y = None
 ultimo_anio = None
@@ -1153,6 +1240,13 @@ with tab_chowder:
             },
         ])
 
+        if anios_reparados:
+            lista_rep = ", ".join(str(a) for a in sorted(anios_reparados))
+            st.caption(
+                f"ℹ️ Se han normalizado los dividendos de **{lista_rep}** usando la tasa anual indicada "
+                "(por cambio de calendario o pagos omitidos en el histórico de Yahoo Finance)."
+            )
+
         st.markdown("#### Ritmo histórico de crecimiento del dividendo (DGR)")
         acc_1y, sub_1y = color_dgr(dgr_1y)
         acc_3y, sub_3y = color_dgr(dgr_3y)
@@ -1290,12 +1384,20 @@ with tab_datos:
     with col_t2:
         st.markdown("#### 📅 Historial de Dividendos Anuales")
         div_mostrar = div_por_anio.tail(years + 1)
+        etiquetas_anio = []
+        for a in div_mostrar.index:
+            if int(a) == anio_actual:
+                etiquetas_anio.append(f"{a} (YTD)")
+            elif int(a) in anios_reparados:
+                etiquetas_anio.append(f"{a}*")
+            else:
+                etiquetas_anio.append(str(a))
+
         tabla_div = pd.DataFrame({
-            "Año": div_mostrar.index.astype(str),
+            "Año": etiquetas_anio,
             f"Dividendo{sufijo_moneda}": div_mostrar.values
         })
         tabla_div["YoY (%)"] = tabla_div[f"Dividendo{sufijo_moneda}"].pct_change() * 100.0
-        tabla_div.loc[tabla_div["Año"] == str(anio_actual), "Año"] = f"{anio_actual} (YTD)"
 
         def color_yoy(val):
             if pd.isna(val):
@@ -1314,6 +1416,8 @@ with tab_datos:
             use_container_width=True,
             hide_index=True
         )
+        if anios_reparados:
+            st.caption("*Año normalizado por cambio de calendario o pagos omitidos en Yahoo Finance.")
 
     csv_export = df[
         ["Close", "Dividends", "Div_Anual", "Yield", "YoC", "Banda_Infra", "Banda_Media", "Banda_Sobre"]
