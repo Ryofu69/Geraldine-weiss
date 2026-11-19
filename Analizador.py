@@ -232,8 +232,8 @@ def consolidar_eventos_dividendo(div_series: pd.Series, ventana_dias: int = 7) -
 def detectar_frecuencia_dinamica(div_events: pd.Series) -> pd.Series:
     """
     Detecta la frecuencia anual (1, 2, 3, 4, 6 o 12 pagos/año) en cada momento histórico.
-    Maneja cambios reales de calendario (ej. ACN pasando de 2 a 4 pagos/año en oct 2019)
-    sin confundirse con dividendos extraordinarios aislados ni pagos asimétricos europeos.
+    Usa días reales (independiente de la unidad interna ns/us/s de pandas) para manejar
+    cambios de calendario como ACN (de 2 a 4 pagos/año en oct 2019).
     """
     if div_events.empty:
         return pd.Series(dtype=int)
@@ -243,19 +243,20 @@ def detectar_frecuencia_dinamica(div_events: pd.Series) -> pd.Series:
     if n == 1:
         return pd.Series([1], index=fechas, dtype=int)
 
-    fechas_ns = fechas.asi8
-    ventana_ns = int(348 * 86400 * 1e9)
-    ultima_ns = fechas_ns[-1]
-    primera_ns = fechas_ns[0]
+    # Días transcurridos desde el primer dividendo (totalmente inmune a datetime64[us]/[ns]/[s])
+    dias = (fechas - fechas[0]).total_seconds().to_numpy(dtype=np.float64) / 86400.0
+    ventana_dias = 348.0
+    ultimo_dia = float(dias[-1])
+    primer_dia = float(dias[0])
 
     raw_freq = np.zeros(n, dtype=int)
     for i in range(n):
-        t = fechas_ns[i]
-        if t + ventana_ns <= ultima_ns:
-            j = int(np.searchsorted(fechas_ns, t + ventana_ns, side="right"))
+        d = float(dias[i])
+        if d + ventana_dias <= ultimo_dia:
+            j = int(np.searchsorted(dias, d + ventana_dias, side="right"))
             cnt = j - i
-        elif t - ventana_ns >= primera_ns:
-            j = int(np.searchsorted(fechas_ns, t - ventana_ns, side="left"))
+        elif d - ventana_dias >= primer_dia:
+            j = int(np.searchsorted(dias, d - ventana_dias, side="left"))
             cnt = i - j + 1
         else:
             cnt = n
