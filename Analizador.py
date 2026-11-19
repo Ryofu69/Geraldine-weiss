@@ -1579,32 +1579,84 @@ with tab_chowder:
             },
         ])
 
-        div_hist_bar = anios_completos.tail(min(len(anios_completos), 12))
+        yoy_completos = anios_completos.pct_change() * 100.0
+        n_barras = min(len(anios_completos), 12)
+        div_hist_bar = anios_completos.tail(n_barras)
+        yoy_hist_bar = yoy_completos.tail(n_barras)
+
         if not div_hist_bar.empty:
-            st.markdown("#### Evolución del dividendo anual (años completos)")
+            st.markdown("#### Evolución del dividendo anual y aumento YoY")
+            etiquetas_eje = [
+                f"{int(a)}*" if int(a) in anios_reparados else str(int(a))
+                for a in div_hist_bar.index
+            ]
+            colores_barras = []
+            textos_barras = []
+            hover_yoy = []
+
+            for val, yoy in zip(div_hist_bar.values, yoy_hist_bar.values):
+                val_txt = f"{val:.2f}" if val >= 1.0 else f"{val:.3f}"
+                if pd.isna(yoy):
+                    colores_barras.append("#38BDF8")
+                    textos_barras.append(f"<b>{val_txt}</b>")
+                    hover_yoy.append("Base")
+                elif yoy > 0.05:
+                    colores_barras.append("#10B981")
+                    textos_barras.append(
+                        f"<b>{val_txt}</b> <span style='color:#10B981;'>({yoy:+.1f}%)</span>"
+                    )
+                    hover_yoy.append(f"{yoy:+.2f}%")
+                elif yoy < -0.05:
+                    colores_barras.append("#EF4444")
+                    textos_barras.append(
+                        f"<b>{val_txt}</b> <span style='color:#EF4444;'>({yoy:+.1f}%)</span>"
+                    )
+                    hover_yoy.append(f"{yoy:+.2f}%")
+                else:
+                    colores_barras.append("#F59E0B")
+                    textos_barras.append(
+                        f"<b>{val_txt}</b> <span style='color:#F59E0B;'>(0.0%)</span>"
+                    )
+                    hover_yoy.append("0.00%")
+
+            altura_barras = max(260, n_barras * 32 + 56)
+            max_div_bar = float(div_hist_bar.max())
+
             fig_div = go.Figure(data=[
                 go.Bar(
-                    x=div_hist_bar.index.astype(str),
-                    y=div_hist_bar.values,
-                    marker_color="#10B981",
+                    x=div_hist_bar.values,
+                    y=etiquetas_eje,
+                    orientation="h",
+                    marker_color=colores_barras,
                     marker_line_width=0,
-                    text=[f"{v:.2f}" for v in div_hist_bar.values],
+                    text=textos_barras,
                     textposition="outside",
-                    hovertemplate="Año %{x}: %{y:.4f}" + sufijo_moneda + "<extra></extra>"
+                    textfont=dict(size=11),
+                    constraintext="none",
+                    cliponaxis=False,
+                    customdata=hover_yoy,
+                    hovertemplate=(
+                        "Año %{y}: %{x:.4f}" + sufijo_moneda + " (YoY: %{customdata})<extra></extra>"
+                    )
                 )
             ])
             fig_div.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
-                yaxis_title=f"Dividendo ({moneda})" if moneda else "Dividendo",
-                xaxis=dict(showgrid=False, type="category"),
-                yaxis=dict(
-                    range=[0, float(div_hist_bar.max()) * 1.18],
+                xaxis_title=f"Dividendo anual ({moneda})" if moneda else "Dividendo anual",
+                xaxis=dict(
+                    range=[0, max_div_bar * 1.62],
                     gridcolor="rgba(148, 163, 184, 0.14)",
+                    zeroline=False,
                     automargin=True
                 ),
-                height=310,
-                margin=dict(l=8, r=10, t=14, b=35),
+                yaxis=dict(
+                    type="category",
+                    showgrid=False,
+                    automargin=True
+                ),
+                height=altura_barras,
+                margin=dict(l=8, r=14, t=10, b=36),
                 showlegend=False
             )
             st.plotly_chart(fig_div, use_container_width=True, config=plotly_config)
