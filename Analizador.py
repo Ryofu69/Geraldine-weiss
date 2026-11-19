@@ -361,7 +361,7 @@ def cargar_datos_yahoo(ticker: str, years: int):
     """Descarga precios de cierre SIN ajustar por dividendos (auto_adjust=False)."""
     try:
         hoy = datetime.today()
-        anios_necesarios = max(years, 11) + 2
+        anios_necesarios = max(years, 12) + 2
         start_date = datetime(hoy.year - anios_necesarios, 1, 1)
 
         stock = yf.Ticker(ticker)
@@ -419,7 +419,7 @@ with st.container(border=True):
         )
 
     with col_per:
-        years = st.selectbox("Periodo", options=[5, 7, 10, 15, 20], index=2, format_func=lambda x: f"{x} años")
+        years = st.selectbox("Periodo", options=[5, 7, 10, 12, 15, 20], index=3, format_func=lambda x: f"{x} años")
 
     with st.expander("⚙️ Ajustes de cálculo (método Weiss, franjas y dividendo)", expanded=False):
         a1, a2, a3 = st.columns(3)
@@ -461,6 +461,14 @@ with st.container(border=True):
                 "Mensual (12/año)": 12,
             }
             freq_override = freq_opciones[st.selectbox("Frecuencia de pagos", list(freq_opciones.keys()), index=0)]
+            precio_compra_yoc = st.number_input(
+                "Precio compra para YoC (0 = inicio periodo)",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                format="%.2f",
+                help="Déjalo en 0 para ver el YoC comprando al inicio del periodo, o introduce tu precio medio real."
+            )
             escala_log = st.checkbox("Escala logarítmica en precio", value=False)
             forzar_defensiva = st.checkbox("Umbral Chowder defensivo (≥ 8%)", value=False)
 
@@ -538,6 +546,19 @@ else:
     etiqueta_div = "Indicado" if "Escalón" in etiqueta_modo else f"TTM ({freq_usada}p)"
 
 yield_actual = (div_actual / precio_actual) * 100.0
+
+# Yield on Cost (YoC) histórico y actual
+fecha_inicio_yoc = df.index[0].strftime("%d/%m/%Y")
+moneda_sp = f" {moneda}" if moneda else ""
+if precio_compra_yoc > 0:
+    precio_base_yoc = float(precio_compra_yoc)
+    etiqueta_base_yoc = f"tu precio medio ({precio_base_yoc:.2f}{moneda_sp})"
+else:
+    precio_base_yoc = float(df["Close"].iloc[0])
+    etiqueta_base_yoc = f"inicio del periodo ({precio_base_yoc:.2f}{moneda_sp} el {fecha_inicio_yoc})"
+
+df["YoC"] = (df["Div_Anual"] / precio_base_yoc) * 100.0
+yoc_actual = (div_actual / precio_base_yoc) * 100.0
 
 precio_infra = div_actual / (yield_infra / 100.0)
 precio_medio = div_actual / (yield_medio / 100.0)
@@ -770,8 +791,13 @@ with tab_weiss:
 
     st.plotly_chart(fig_precio, use_container_width=True, config=plotly_config)
 
-    # GRÁFICO 2: HISTÓRICO DE DIVIDEND YIELD
-    st.markdown(f"#### Histórico de Dividend Yield (%)")
+    # GRÁFICO 2: HISTÓRICO DE DIVIDEND YIELD Y YOC
+    st.markdown("#### Histórico de Dividend Yield y YoC (%)")
+    st.markdown(
+        f'<div class="section-caption">YoC actual: <b>{yoc_actual:.2f}%</b> · '
+        f'Base: {etiqueta_base_yoc} (editable en ⚙️ Ajustes).</div>',
+        unsafe_allow_html=True
+    )
 
     fig_yield = go.Figure()
     x_ext = [df.index[0], df.index[-1]]
@@ -780,10 +806,18 @@ with tab_weiss:
         x=df.index,
         y=df["Yield"],
         mode="lines",
-        name="Dividend Yield (%)",
+        name=f"Dividend Yield ({yield_actual:.2f}%)",
         line=dict(color="#38BDF8", width=2.1),
         fill="tozeroy",
         fillcolor="rgba(56, 189, 248, 0.08)",
+        hovertemplate="%{y:.2f}%"
+    ))
+    fig_yield.add_trace(go.Scatter(
+        x=df.index,
+        y=df["YoC"],
+        mode="lines",
+        name=f"YoC ({yoc_actual:.2f}%)",
+        line=dict(color="#A855F7", width=2.2, shape="hv"),
         hovertemplate="%{y:.2f}%"
     ))
     fig_yield.add_trace(go.Scatter(
@@ -805,13 +839,15 @@ with tab_weiss:
         hovertemplate="%{y:.2f}%"
     ))
 
-    y_min = max(0.0, float(df["Yield"].min()) * 0.85)
-    y_max = float(df["Yield"].max()) * 1.10
+    y_min_val = min(float(df["Yield"].min()), float(df["YoC"].min()), yield_sobre)
+    y_max_val = max(float(df["Yield"].max()), float(df["YoC"].max()), yield_infra)
+    y_min = max(0.0, y_min_val * 0.85)
+    y_max = y_max_val * 1.12
 
     fig_yield.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        yaxis_title="Yield (%)",
+        yaxis_title="Yield / YoC (%)",
         xaxis=dict(showgrid=False, zeroline=False),
         yaxis=dict(
             range=[y_min, y_max],
@@ -820,12 +856,12 @@ with tab_weiss:
             automargin=True
         ),
         hovermode="x unified",
-        height=330,
-        margin=dict(l=8, r=10, t=12, b=78),
+        height=360,
+        margin=dict(l=8, r=10, t=12, b=92),
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.22,
+            y=-0.20,
             xanchor="center",
             x=0.5,
             font=dict(size=11)
@@ -1005,7 +1041,7 @@ with tab_datos:
         )
 
     csv_export = df[
-        ["Close", "Dividends", "Div_Anual", "Yield", "Banda_Infra", "Banda_Media", "Banda_Sobre"]
+        ["Close", "Dividends", "Div_Anual", "Yield", "YoC", "Banda_Infra", "Banda_Media", "Banda_Sobre"]
     ].to_csv()
     st.download_button(
         label="📥 Descargar serie histórica en CSV",
